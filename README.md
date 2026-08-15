@@ -25,13 +25,14 @@ display scale and never needs a temporary image.
 
 ## MVP features
 
-- Automatic discovery with a two-second default refresh
+- Silent background discovery with a two-second default refresh
 - Project and framework detection
 - Localhost and LAN URLs
 - Bind-address-aware LAN availability
 - Full-screen, phone-ready QR overlay
 - Open, copy, terminal, editor, restart, and stop actions
-- Live server count and list transitions
+- A bar widget that appears only while servers exist
+- Keyed list updates, so only new and removed servers animate
 - Omarchy theme, spacing, typography, and popup primitives
 - No daemon, database, account, or network service
 
@@ -44,7 +45,13 @@ omarchy plugin add https://github.com/EmilsValdmanis/omarchy-localhost.git --ena
 ```
 
 It lands in the right side of the bar by default. Move it anywhere with the
-normal Omarchy bar controls.
+normal Omarchy bar controls; its popup stays anchored to the widget:
+
+```bash
+omarchy bar move emils.localhost --section left
+omarchy bar move emils.localhost --section center
+omarchy bar move emils.localhost --section right
+```
 
 Localhost uses `python3`, `ss`, `ip`, `wl-copy`, and `qrencode`. These are
 present in the intended Omarchy environment; `qrencode` is the same tool used

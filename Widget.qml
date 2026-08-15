@@ -11,11 +11,14 @@ BarWidget {
   property string notice: ""
   property bool noticeUrgent: false
 
-  readonly property int serverCount: radar.servers.length
+  readonly property int serverCount: radar.serverCount
   readonly property bool showCountBadge: setting("showCountBadge", true)
 
+  visible: serverCount > 0
   implicitWidth: button.implicitWidth
   implicitHeight: button.implicitHeight
+
+  onServerCountChanged: if (serverCount === 0) card.open = false
 
   function showNotice(message, urgent) {
     notice = String(message || "")
@@ -54,15 +57,15 @@ BarWidget {
   }
 
   function openPanel() {
+    if (serverCount === 0) return
     card.open = true
-    radar.scan()
   }
 
   function closePanel() { card.open = false }
 
   function togglePanel() {
+    if (serverCount === 0) return
     card.open = !card.open
-    if (card.open) radar.scan()
   }
 
   RadarService {
@@ -89,6 +92,14 @@ BarWidget {
     function close(): string { root.closePanel(); return "ok" }
     function toggle(): string { root.togglePanel(); return "ok" }
     function refresh(): string { radar.scan(); return "ok" }
+    function status(): string {
+      return JSON.stringify({
+        serverCount: root.serverCount,
+        scanning: radar.scanning,
+        scanError: radar.scanError,
+        lanIp: radar.lanIp
+      })
+    }
   }
 
   BarIconButton {
@@ -96,11 +107,8 @@ BarWidget {
     anchors.centerIn: parent
     bar: root.bar
     text: "\uf0ac"
-    foreground: root.serverCount > 0 ? Color.accent
-      : (root.bar ? root.bar.barForeground : Color.foreground)
-    tooltipText: root.serverCount > 0
-      ? "Localhost · " + root.serverCount + " server" + (root.serverCount === 1 ? "" : "s")
-      : "Localhost · watching for dev servers"
+    foreground: Color.accent
+    tooltipText: "Localhost · " + root.serverCount + " server" + (root.serverCount === 1 ? "" : "s")
     onPressed: function(mouseButton) {
       root.togglePanel()
     }
@@ -135,7 +143,6 @@ BarWidget {
     anchorItem: button
     bar: root.bar
     owner: root
-    centerOnBar: true
     contentWidth: fittedContentWidth(panel.implicitWidth, Style.space(560))
     contentHeight: fittedContentHeight(panel.implicitHeight, Style.space(620))
 
@@ -144,12 +151,9 @@ BarWidget {
       anchors.fill: parent
       servers: radar.servers
       lanIp: radar.lanIp
-      loading: radar.loading
-      error: radar.error
       notice: root.notice
       noticeUrgent: root.noticeUrgent
 
-      onRefreshRequested: radar.scan()
       onOpenRequested: function(server) { root.openServer(server) }
       onCopyRequested: function(server) { root.copyServer(server) }
       onQrRequested: function(server) { root.openQr(server) }
