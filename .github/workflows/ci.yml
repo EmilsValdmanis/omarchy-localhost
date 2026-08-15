@@ -1,0 +1,23 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  scanner:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Compile scanner
+        run: python3 -m py_compile scripts/radar.py
+      - name: Run tests
+        run: python3 -m unittest discover -s tests -v
+      - name: Check manifest JSON
+        run: python3 -m json.tool manifest.json >/dev/null

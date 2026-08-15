@@ -1,0 +1,50 @@
+{
+  "schemaVersion": 1,
+  "id": "emils.localhost",
+  "name": "Localhost",
+  "version": "0.1.0",
+  "author": "Emil Valdmanis",
+  "license": "MIT",
+  "description": "Discover local development servers, open them instantly, and send LAN-ready projects to your phone with a QR code.",
+  "kinds": [
+    "bar-widget",
+    "panel"
+  ],
+  "entryPoints": {
+    "barWidget": "Widget.qml",
+    "panel": "QrOverlay.qml"
+  },
+  "barWidget": {
+    "displayName": "Localhost",
+    "description": "Live development servers, LAN reachability, QR sharing, and project controls.",
+    "category": "Development",
+    "aliases": [
+      "dev-server",
+      "localhost",
+      "ports"
+    ],
+    "allowMultiple": false,
+    "defaultSection": "right",
+    "defaults": {
+      "refreshIntervalSec": 2,
+      "showCountBadge": true
+    },
+    "schema": [
+      {
+        "key": "refreshIntervalSec",
+        "type": "integer",
+        "label": "Refresh interval (seconds)",
+        "min": 1,
+        "max": 30,
+        "step": 1,
+        "defaultValue": 2
+      },
+      {
+        "key": "showCountBadge",
+        "type": "boolean",
+        "label": "Show server count",
+        "defaultValue": true
+      }
+    ]
+  }
+}
