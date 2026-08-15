@@ -7,14 +7,11 @@ import qs.Ui
 Item {
   id: root
 
-  property var servers: []
+  property var servers: null
   property string lanIp: ""
-  property bool loading: false
-  property string error: ""
   property string notice: ""
   property bool noticeUrgent: false
 
-  signal refreshRequested()
   signal openRequested(var server)
   signal copyRequested(var server)
   signal qrRequested(var server)
@@ -26,13 +23,12 @@ Item {
   readonly property color foreground: Color.popups.text
   readonly property color dim: Qt.darker(foreground, 1.45)
   readonly property int panelWidth: Style.space(500)
-  readonly property int listHeight: servers.length === 0
-    ? Style.space(150)
-    : Math.min(serverList.contentHeight, Style.space(450))
+  readonly property int serverCount: servers ? servers.count : 0
+  readonly property int listHeight: Math.min(serverList.contentHeight, Style.space(450))
 
   implicitWidth: panelWidth
   implicitHeight: header.implicitHeight + Style.space(18) + listHeight
-    + ((notice !== "" || error !== "") ? Style.space(34) : 0)
+    + (notice !== "" ? Style.space(34) : 0)
 
   ColumnLayout {
     anchors.fill: parent
@@ -58,11 +54,8 @@ Item {
 
         Text {
           Layout.fillWidth: true
-          text: {
-            if (root.servers.length === 0) return "Watching for development servers"
-            var count = root.servers.length + " server" + (root.servers.length === 1 ? "" : "s")
-            return root.lanIp ? count + "  ·  " + root.lanIp : count
-          }
+          text: root.serverCount + " server" + (root.serverCount === 1 ? "" : "s")
+            + (root.lanIp ? "  ·  " + root.lanIp : "")
           color: root.dim
           font.family: Style.font.family
           font.pixelSize: Style.font.caption
@@ -70,22 +63,6 @@ Item {
         }
       }
 
-      PanelActionButton {
-        iconText: "\uf2f1"
-        tooltipText: root.loading ? "Scanning…" : "Scan now"
-        foreground: root.foreground
-        fontFamily: Style.font.family
-        enabled: !root.loading
-        onClicked: root.refreshRequested()
-
-        RotationAnimation on rotation {
-          from: 0
-          to: 360
-          duration: 700
-          loops: Animation.Infinite
-          running: root.loading
-        }
-      }
     }
 
     Rectangle {
@@ -94,98 +71,47 @@ Item {
       color: Qt.rgba(root.foreground.r, root.foreground.g, root.foreground.b, 0.14)
     }
 
-    Item {
+    ListView {
+      id: serverList
       Layout.fillWidth: true
       Layout.preferredHeight: root.listHeight
+      clip: true
+      spacing: Style.space(8)
+      model: root.servers
+      boundsBehavior: Flickable.StopAtBounds
 
-      ColumnLayout {
-        visible: root.servers.length === 0
-        anchors.centerIn: parent
-        width: parent.width - Style.space(48)
-        spacing: Style.space(8)
+      ScrollBar.vertical: ScrollBar {
+        policy: serverList.contentHeight > serverList.height ? ScrollBar.AsNeeded : ScrollBar.AlwaysOff
+      }
 
-        Text {
-          Layout.alignment: Qt.AlignHCenter
-          text: "\uf0ac"
-          color: root.dim
-          font.family: Style.font.family
-          font.pixelSize: Style.space(28)
-          opacity: root.loading ? 0.45 : 0.8
-
-          SequentialAnimation on opacity {
-            running: root.loading
-            loops: Animation.Infinite
-            NumberAnimation { to: 0.35; duration: 450; easing.type: Easing.InOutSine }
-            NumberAnimation { to: 0.8; duration: 450; easing.type: Easing.InOutSine }
-          }
-        }
-
-        Text {
-          Layout.fillWidth: true
-          text: root.loading ? "Scanning listening ports…" : "No development servers yet"
-          color: root.foreground
-          font.family: Style.font.family
-          font.pixelSize: Style.font.body
-          horizontalAlignment: Text.AlignHCenter
-        }
-
-        Text {
-          Layout.fillWidth: true
-          text: "Start Vite, Next, Astro, Rails, or another local server. It will appear here automatically."
-          color: root.dim
-          font.family: Style.font.family
-          font.pixelSize: Style.font.caption
-          wrapMode: Text.Wrap
-          horizontalAlignment: Text.AlignHCenter
+      add: Transition {
+        ParallelAnimation {
+          NumberAnimation { property: "opacity"; from: 0; to: 1; duration: 180; easing.type: Easing.OutCubic }
+          NumberAnimation { property: "scale"; from: 0.97; to: 1; duration: 180; easing.type: Easing.OutCubic }
         }
       }
 
-      ListView {
-        id: serverList
-        visible: root.servers.length > 0
-        anchors.fill: parent
-        clip: true
-        spacing: Style.space(8)
-        model: root.servers
-        boundsBehavior: Flickable.StopAtBounds
-
-        ScrollBar.vertical: ScrollBar {
-          policy: serverList.contentHeight > serverList.height ? ScrollBar.AsNeeded : ScrollBar.AlwaysOff
+      remove: Transition {
+        ParallelAnimation {
+          NumberAnimation { property: "opacity"; to: 0; duration: 100; easing.type: Easing.OutCubic }
+          NumberAnimation { property: "scale"; to: 0.98; duration: 100; easing.type: Easing.OutCubic }
         }
+      }
 
-        add: Transition {
-          ParallelAnimation {
-            NumberAnimation { property: "opacity"; from: 0; to: 1; duration: 180; easing.type: Easing.OutCubic }
-            NumberAnimation { property: "scale"; from: 0.97; to: 1; duration: 180; easing.type: Easing.OutCubic }
-          }
-        }
+      displaced: Transition {
+        NumberAnimation { properties: "x,y"; duration: 180; easing.type: Easing.OutCubic }
+      }
 
-        remove: Transition {
-          ParallelAnimation {
-            NumberAnimation { property: "opacity"; to: 0; duration: 100; easing.type: Easing.OutCubic }
-            NumberAnimation { property: "scale"; to: 0.98; duration: 100; easing.type: Easing.OutCubic }
-          }
-        }
-
-        displaced: Transition {
-          NumberAnimation { properties: "x,y"; duration: 180; easing.type: Easing.OutCubic }
-        }
-
-        delegate: ServerRow {
-          required property var modelData
-          required property int index
-          width: serverList.width - (serverList.contentHeight > serverList.height ? Style.space(8) : 0)
-          server: modelData
-          rowIndex: index
-        }
+      delegate: ServerRow {
+        width: serverList.width - (serverList.contentHeight > serverList.height ? Style.space(8) : 0)
       }
     }
 
     Text {
-      visible: root.notice !== "" || root.error !== ""
+      visible: root.notice !== ""
       Layout.fillWidth: true
-      text: root.error !== "" ? root.error : root.notice
-      color: root.error !== "" || root.noticeUrgent ? Color.urgent : root.dim
+      text: root.notice
+      color: root.noticeUrgent ? Color.urgent : root.dim
       font.family: Style.font.family
       font.pixelSize: Style.font.caption
       wrapMode: Text.Wrap
@@ -195,18 +121,42 @@ Item {
 
   component ServerRow: CursorSurface {
     id: row
-    required property var server
-    property int rowIndex: 0
+    required property int index
+    required property string serverId
+    required property string name
+    required property string framework
+    required property string frameworkId
+    required property int pid
+    required property int port
+    required property string cwd
+    required property string localUrl
+    required property string lanUrl
+    required property bool lanAvailable
+    required property string hint
 
-    readonly property string effectiveUrl: server.lanAvailable ? server.lanUrl : server.localUrl
-    readonly property color statusColor: server.lanAvailable ? Color.accent : Color.urgent
+    readonly property var server: ({
+      id: serverId,
+      name: name,
+      framework: framework,
+      frameworkId: frameworkId,
+      pid: pid,
+      port: port,
+      cwd: cwd,
+      localUrl: localUrl,
+      lanUrl: lanUrl,
+      lanAvailable: lanAvailable,
+      hint: hint
+    })
+
+    readonly property string effectiveUrl: lanAvailable ? lanUrl : localUrl
+    readonly property color statusColor: lanAvailable ? Color.accent : Color.urgent
     readonly property string frameworkMark: {
       var marks = {
         next: "N", vite: "V", svelte: "S", astro: "A", nuxt: "N",
         angular: "A", react: "R", storybook: "S", python: "Py", rails: "Rb",
         laravel: "L", phoenix: "Ph", rust: "Rs", go: "Go", node: "JS"
       }
-      return marks[server.frameworkId] || "<>"
+      return marks[frameworkId] || "<>"
     }
 
     bordered: true
@@ -248,7 +198,7 @@ Item {
 
           Text {
             Layout.fillWidth: true
-            text: row.server.name
+            text: row.name
             color: root.foreground
             font.family: Style.font.family
             font.pixelSize: Style.font.body
@@ -258,7 +208,7 @@ Item {
 
           Text {
             Layout.fillWidth: true
-            text: row.server.framework + "  ·  :" + row.server.port
+            text: row.framework + "  ·  :" + row.port
             color: root.dim
             font.family: Style.font.family
             font.pixelSize: Style.font.caption
@@ -286,7 +236,7 @@ Item {
 
             Text {
               id: statusLabel
-              text: row.server.lanAvailable ? "LAN READY" : "LOCAL ONLY"
+              text: row.lanAvailable ? "LAN READY" : "LOCAL ONLY"
               color: row.statusColor
               font.family: Style.font.family
               font.pixelSize: Style.font.caption
@@ -299,16 +249,16 @@ Item {
       Text {
         Layout.fillWidth: true
         text: row.effectiveUrl
-        color: row.server.lanAvailable ? root.foreground : root.dim
+        color: row.lanAvailable ? root.foreground : root.dim
         font.family: Style.font.family
         font.pixelSize: Style.font.bodySmall
         elide: Text.ElideMiddle
       }
 
       Text {
-        visible: !row.server.lanAvailable
+        visible: !row.lanAvailable
         Layout.fillWidth: true
-        text: row.server.hint
+        text: row.hint
         color: root.dim
         font.family: Style.font.family
         font.pixelSize: Style.font.caption
@@ -336,12 +286,12 @@ Item {
 
         Button {
           text: "QR"
-          foreground: row.server.lanAvailable ? root.foreground : root.dim
+          foreground: row.lanAvailable ? root.foreground : root.dim
           accent: Color.accent
-          active: row.server.lanAvailable
-          enabled: row.server.lanAvailable
+          active: row.lanAvailable
+          enabled: row.lanAvailable
           focusable: true
-          tooltipText: row.server.lanAvailable ? "Open phone-ready QR code" : "Bind the server to 0.0.0.0 first"
+          tooltipText: row.lanAvailable ? "Open phone-ready QR code" : "Bind the server to 0.0.0.0 first"
           onClicked: root.qrRequested(row.server)
         }
 
