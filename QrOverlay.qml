@@ -37,8 +37,8 @@ Item {
     framework = String(payload.framework || "Development server")
     url = String(payload.url || "")
     error = ""
-    qrRows = []
     qrSize = 0
+    qrRows = []
     opened = true
     if (url === "") {
       error = "No LAN URL was provided"
@@ -57,8 +57,8 @@ Item {
       qrProcess.running = false
     }
     loading = false
-    qrRows = []
     qrSize = 0
+    qrRows = []
     error = ""
     url = ""
   }
@@ -90,8 +90,8 @@ Item {
       qrSize = size
       error = ""
     } catch (exception) {
-      qrRows = []
       qrSize = 0
+      qrRows = []
       error = "Could not read the QR code"
     }
   }
