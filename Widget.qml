@@ -52,6 +52,18 @@ BarWidget {
     })
   }
 
+  function openPanel() {
+    card.open = true
+    radar.scan()
+  }
+
+  function closePanel() { card.open = false }
+
+  function togglePanel() {
+    card.open = !card.open
+    if (card.open) radar.scan()
+  }
+
   RadarService {
     id: radar
     refreshIntervalSec: Math.max(1, Number(root.setting("refreshIntervalSec", 2)))
@@ -70,6 +82,14 @@ BarWidget {
     }
   }
 
+  IpcHandler {
+    target: root.moduleName
+    function open(): string { root.openPanel(); return "ok" }
+    function close(): string { root.closePanel(); return "ok" }
+    function toggle(): string { root.togglePanel(); return "ok" }
+    function refresh(): string { radar.scan(); return "ok" }
+  }
+
   BarIconButton {
     id: button
     anchors.centerIn: parent
@@ -81,8 +101,7 @@ BarWidget {
       ? "Localhost · " + root.serverCount + " server" + (root.serverCount === 1 ? "" : "s")
       : "Localhost · watching for dev servers"
     onPressed: function(mouseButton) {
-      card.open = !card.open
-      if (card.open) radar.scan()
+      root.togglePanel()
     }
 
     Rectangle {
