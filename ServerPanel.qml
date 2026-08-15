@@ -76,7 +76,6 @@ Item {
         foreground: root.foreground
         fontFamily: Style.font.family
         enabled: !root.loading
-        iconRotation: 0
         onClicked: root.refreshRequested()
 
         RotationAnimation on rotation {
