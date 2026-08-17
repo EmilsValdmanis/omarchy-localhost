@@ -79,6 +79,32 @@ Item {
       spacing: Style.space(8)
       model: root.servers
       boundsBehavior: Flickable.StopAtBounds
+      interactive: contentHeight > height
+
+      function scrollByWheel(delta) {
+        var minimum = originY
+        var maximum = Math.max(minimum, originY + contentHeight - height)
+        contentY = Math.max(minimum, Math.min(maximum, contentY + delta))
+      }
+
+      WheelHandler {
+        target: null
+        acceptedDevices: PointerDevice.Mouse | PointerDevice.TouchPad
+        enabled: serverList.interactive
+
+        onWheel: function(event) {
+          var pixelDelta = Number(event.pixelDelta.y || 0)
+          var delta = pixelDelta !== 0
+            ? pixelDelta
+            : Number(event.angleDelta.y || 0) / 120 * Style.space(96)
+          if (delta === 0) {
+            event.accepted = false
+            return
+          }
+          serverList.scrollByWheel(-delta)
+          event.accepted = true
+        }
+      }
 
       ScrollBar.vertical: ScrollBar {
         policy: serverList.contentHeight > serverList.height ? ScrollBar.AsNeeded : ScrollBar.AlwaysOff
