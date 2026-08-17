@@ -179,19 +179,21 @@ Item {
 
       RowLayout {
         Layout.fillWidth: true
-        spacing: Style.space(10)
+        spacing: Style.space(8)
 
-        Item {
-          Layout.preferredWidth: Style.space(34)
-          Layout.preferredHeight: Style.space(34)
+        BorderSurface {
+          Layout.preferredWidth: Style.space(28)
+          Layout.preferredHeight: Style.space(28)
           Layout.alignment: Qt.AlignTop
+          color: Style.selectedFillFor(root.foreground, Color.accent)
+          radius: Style.cornerRadius
 
           Text {
             anchors.centerIn: parent
             text: row.frameworkIcon
             color: Color.accent
             font.family: Style.font.family
-            font.pixelSize: Style.font.title
+            font.pixelSize: Style.font.body
           }
         }
 
@@ -200,14 +202,67 @@ Item {
           Layout.alignment: Qt.AlignTop
           spacing: 0
 
-          Text {
+          RowLayout {
+            id: titleRow
             Layout.fillWidth: true
-            text: row.name
-            color: root.foreground
-            font.family: Style.font.family
-            font.pixelSize: Style.font.body
-            font.bold: true
-            elide: Text.ElideRight
+            spacing: Style.space(6)
+
+            Text {
+              Layout.preferredWidth: Math.min(implicitWidth,
+                titleRow.width - status.implicitWidth - titleRow.spacing)
+              text: row.name
+              color: root.foreground
+              font.family: Style.font.family
+              font.pixelSize: Style.font.body
+              font.bold: true
+              elide: Text.ElideRight
+            }
+
+            Item {
+              id: status
+              implicitWidth: statusContent.implicitWidth
+              implicitHeight: statusContent.implicitHeight
+              Layout.alignment: Qt.AlignVCenter
+
+              Row {
+                id: statusContent
+                spacing: Style.space(4)
+
+                Rectangle {
+                  anchors.verticalCenter: parent.verticalCenter
+                  width: Style.space(5)
+                  height: width
+                  radius: width / 2
+                  color: row.statusDotColor
+                }
+
+                Text {
+                  id: statusLabel
+                  text: row.lanAvailable ? "LAN ready" : "Local only"
+                  color: row.statusTextColor
+                  font.family: Style.font.family
+                  font.pixelSize: Style.font.caption
+                  font.weight: Font.Medium
+                }
+              }
+
+              MouseArea {
+                id: statusHover
+                anchors.fill: parent
+                hoverEnabled: true
+                acceptedButtons: Qt.NoButton
+              }
+
+              PanelToolTip {
+                visible: statusHover.containsMouse
+                text: row.statusTooltip
+                fontFamily: Style.font.family
+              }
+            }
+
+            Item {
+              Layout.fillWidth: true
+            }
           }
 
           Text {
@@ -217,51 +272,6 @@ Item {
             font.family: Style.font.family
             font.pixelSize: Style.font.caption
             elide: Text.ElideRight
-          }
-        }
-
-        Item {
-          id: status
-          Layout.preferredWidth: statusContent.implicitWidth
-          Layout.preferredHeight: Math.max(statusContent.implicitHeight, Style.space(20))
-          Layout.alignment: Qt.AlignTop | Qt.AlignRight
-
-          Row {
-            id: statusContent
-            anchors.top: parent.top
-            anchors.right: parent.right
-            anchors.topMargin: Style.space(1)
-            spacing: Style.space(5)
-
-            Rectangle {
-              anchors.verticalCenter: parent.verticalCenter
-              width: Style.space(5)
-              height: width
-              radius: width / 2
-              color: row.statusDotColor
-            }
-
-            Text {
-              id: statusLabel
-              text: row.lanAvailable ? "LAN ready" : "Local only"
-              color: row.statusTextColor
-              font.family: Style.font.family
-              font.pixelSize: Style.font.caption
-              font.weight: Font.Medium
-            }
-          }
-
-          MouseArea {
-            id: statusHover
-            anchors.fill: parent
-            hoverEnabled: true
-            acceptedButtons: Qt.NoButton
-          }
-
-          PanelToolTip {
-            visible: statusHover.containsMouse
-            text: row.statusTooltip
-            fontFamily: Style.font.family
           }
         }
       }
