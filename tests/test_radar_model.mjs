@@ -53,6 +53,31 @@ test("prefers a conventional port without an explicit flag", () => {
   assert.deepEqual(plain(radar.primaryListeners(listeners, "vite")), [listeners[1]])
 })
 
+test("detects common localhost frameworks", () => {
+  const cases = [
+    ["node node_modules/.bin/next dev", "next"],
+    ["node node_modules/.bin/vue-cli-service serve", "vue"],
+    ["bun run dev", "bun"],
+    ["python -m uvicorn app:app", "fastapi"],
+    ["python manage.py runserver 8000", "django"],
+    ["php artisan serve", "laravel"],
+    ["mix phx.server", "phoenix"],
+    ["./gradlew bootRun", "spring"],
+    ["dotnet watch run", "dotnet"],
+    ["wrangler dev", "cloudflare"],
+  ]
+
+  for (const [command, id] of cases)
+    assert.equal(radar.frameworkFor(command).id, id, command)
+})
+
+test("keeps unknown servers on the letter fallback path", () => {
+  assert.deepEqual(plain(radar.frameworkFor("custom-local-server --port 4567")), {
+    name: "Dev server",
+    id: "server",
+  })
+})
+
 test("classifies browser responses", () => {
   assert.equal(radar.browserResponse(200, "text/html; charset=utf-8"), true)
   assert.equal(radar.browserResponse(307, ""), true)

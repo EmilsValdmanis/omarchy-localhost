@@ -155,14 +155,24 @@ Item {
     readonly property string statusTooltip: lanAvailable
       ? row.hint
       : "Bound to localhost only.\nStart with --host / 0.0.0.0 to use it from another device."
-    readonly property string frameworkIcon: {
-      var icons = {
-        next: "", vite: "", svelte: "", astro: "", nuxt: "󱄆",
-        angular: "", react: "", storybook: "󰂺", python: "", rails: "",
-        laravel: "", phoenix: "󰈸", rust: "", go: "", node: ""
-      }
-      return icons[frameworkId] || ""
-    }
+    readonly property var frameworkIcons: ({
+      next: "", vite: "", svelte: "", astro: "", nuxt: "",
+      angular: "", react: "", vue: "", solid: "", qwik: "",
+      remix: "", gatsby: "", ember: "", eleventy: "", expo: "",
+      electron: "", tauri: "", webpack: "", storybook: "",
+      cloudflare: "", azure: "", firebase: "", supabase: "",
+      graphql: "", prisma: "", bun: "", deno: "", node: "",
+      express: "", nestjs: "", adonis: "", python: "",
+      django: "", fastapi: "", flask: "", streamlit: "",
+      jupyter: "", ruby: "", rails: "", php: "", laravel: "",
+      symfony: "", wordpress: "", elixir: "", phoenix: "",
+      rust: "", go: "", java: "", spring: "", quarkus: "",
+      dotnet: "", grafana: "", prometheus: ""
+    })
+    readonly property bool hasFrameworkIcon: !!frameworkIcons[frameworkId]
+    readonly property string frameworkIcon: hasFrameworkIcon
+      ? frameworkIcons[frameworkId]
+      : (framework.length ? framework.charAt(0).toUpperCase() : "?")
 
     bordered: true
     foreground: root.foreground
@@ -182,8 +192,8 @@ Item {
         spacing: Style.space(8)
 
         BorderSurface {
-          Layout.preferredWidth: Style.space(28)
-          Layout.preferredHeight: Style.space(28)
+          Layout.preferredWidth: Style.space(36)
+          Layout.preferredHeight: Style.space(36)
           Layout.alignment: Qt.AlignTop
           color: Style.selectedFillFor(root.foreground, Color.accent)
           radius: Style.cornerRadius
@@ -193,7 +203,8 @@ Item {
             text: row.frameworkIcon
             color: Color.accent
             font.family: Style.font.family
-            font.pixelSize: Style.font.body
+            font.pixelSize: row.hasFrameworkIcon ? Style.font.title : Style.font.body
+            font.bold: !row.hasFrameworkIcon
           }
         }
 
