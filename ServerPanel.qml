@@ -208,8 +208,7 @@ Item {
             spacing: Style.space(6)
 
             Text {
-              Layout.preferredWidth: Math.min(implicitWidth,
-                titleRow.width - status.implicitWidth - titleRow.spacing)
+              Layout.fillWidth: true
               text: row.name
               color: root.foreground
               font.family: Style.font.family
@@ -258,10 +257,6 @@ Item {
                 text: row.statusTooltip
                 fontFamily: Style.font.family
               }
-            }
-
-            Item {
-              Layout.fillWidth: true
             }
           }
 
