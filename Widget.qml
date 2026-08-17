@@ -106,34 +106,46 @@ BarWidget {
     id: button
     anchors.centerIn: parent
     bar: root.bar
-    text: "\uf0ac"
-    foreground: Color.accent
     tooltipText: "Localhost · " + root.serverCount + " server" + (root.serverCount === 1 ? "" : "s")
     onPressed: function(mouseButton) {
       root.togglePanel()
     }
 
-    Rectangle {
-      visible: root.showCountBadge && root.serverCount > 0
-      anchors.right: parent.right
-      anchors.top: parent.top
-      anchors.rightMargin: Style.space(1)
-      anchors.topMargin: Style.space(1)
-      width: Math.max(Style.space(12), badgeText.implicitWidth + Style.space(5))
-      height: Style.space(12)
-      radius: height / 2
-      color: Color.accent
-      border.width: Math.max(1, Style.spacing.hairline)
-      border.color: root.bar ? root.bar.background : Color.background
+    iconComponent: Component {
+      Item {
+        OpticalGlyph {
+          width: parent.width
+          height: parent.height
+          y: Style.spaceReal(1)
+          text: "\uf0ac"
+          fontFamily: button.fontFamily
+          fontSize: button.fontSize
+          color: Color.accent
+        }
 
-      Text {
-        id: badgeText
-        anchors.centerIn: parent
-        text: root.serverCount > 9 ? "9+" : String(root.serverCount)
-        color: Color.background
-        font.family: Style.font.family
-        font.pixelSize: Style.space(8)
-        font.bold: true
+        Rectangle {
+          visible: root.showCountBadge && root.serverCount > 0
+          anchors.right: parent.right
+          anchors.top: parent.top
+          anchors.rightMargin: -Style.space(2)
+          anchors.topMargin: -Style.space(1)
+          width: Math.max(Style.space(11), badgeText.implicitWidth + Style.space(4))
+          height: Style.space(11)
+          radius: height / 2
+          color: Color.accent
+          border.width: Math.max(1, Style.spacing.hairline)
+          border.color: root.bar ? root.bar.background : Color.background
+
+          Text {
+            id: badgeText
+            anchors.centerIn: parent
+            text: root.serverCount > 9 ? "9+" : String(root.serverCount)
+            color: Color.background
+            font.family: Style.font.family
+            font.pixelSize: Style.space(7)
+            font.bold: true
+          }
+        }
       }
     }
   }

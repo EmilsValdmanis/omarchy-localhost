@@ -8,16 +8,14 @@ permissions:
   contents: read
 
 jobs:
-  scanner:
+  quality:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
         with:
-          python-version: "3.13"
-      - name: Compile scanner
-        run: python3 -m py_compile scripts/radar.py
-      - name: Run tests
-        run: python3 -m unittest discover -s tests -v
+          node-version: "24"
+      - name: Run model tests
+        run: node --test tests/test_radar_model.mjs
       - name: Check manifest JSON
-        run: python3 -m json.tool manifest.json >/dev/null
+        run: node -e "JSON.parse(require('node:fs').readFileSync('manifest.json', 'utf8'))"
