@@ -4,6 +4,7 @@ import Quickshell
 import Quickshell.Io
 import Quickshell.Wayland
 import qs.Commons
+import "RadarModel.js" as RadarModel
 
 Item {
   id: root
@@ -26,10 +27,6 @@ Item {
   readonly property color onScrimDim: Qt.rgba(1, 1, 1, 0.58)
   readonly property color onScrimUrgent: "#ff7070"
   readonly property bool showingQr: qrSize > 0 && !loading && error === ""
-  readonly property string backendPath: manifest && manifest.__sourceDir
-    ? String(manifest.__sourceDir) + "/scripts/radar.py"
-    : decodeURIComponent(String(Qt.resolvedUrl("scripts/radar.py")).replace(/^file:\/\//, ""))
-
   function open(payloadJson) {
     var payload = {}
     try { payload = JSON.parse(payloadJson || "{}") || {} } catch (exception) {}
@@ -76,24 +73,21 @@ Item {
     }
     expectedStop = false
     loading = true
-    qrProcess.command = ["python3", backendPath, "qr", url]
+    qrProcess.command = ["qrencode", "--type", "ASCII", "--margin", "4", "--output", "-", url]
     qrProcess.running = true
   }
 
   function applyQr(raw) {
-    try {
-      var payload = JSON.parse(String(raw || "{}"))
-      var rows = Array.isArray(payload.rows) ? payload.rows : []
-      var size = Number(payload.size || 0)
-      if (size <= 0 || rows.length !== size) throw new Error("invalid matrix")
-      qrRows = rows
-      qrSize = size
-      error = ""
-    } catch (exception) {
+    var payload = RadarModel.parseQrAscii(raw)
+    if (payload.size <= 0 || payload.rows.length !== payload.size) {
       qrSize = 0
       qrRows = []
       error = "Could not read the QR code"
+      return
     }
+    qrRows = payload.rows
+    qrSize = payload.size
+    error = ""
   }
 
   Process {

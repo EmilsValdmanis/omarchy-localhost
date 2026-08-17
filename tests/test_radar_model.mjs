@@ -1,0 +1,77 @@
+import assert from "node:assert/strict"
+import { readFileSync } from "node:fs"
+import test from "node:test"
+import vm from "node:vm"
+
+const source = readFileSync(new URL("../RadarModel.js", import.meta.url), "utf8")
+const radar = vm.createContext({ console })
+vm.runInContext(source, radar, { filename: "RadarModel.js" })
+
+function plain(value) {
+  return JSON.parse(JSON.stringify(value))
+}
+
+function listener(port) {
+  return { pid: 410, port, process: "node", addresses: ["127.0.0.1"] }
+}
+
+test("groups IPv4 and IPv6 bindings", () => {
+  const raw = [
+    'LISTEN 0 511 127.0.0.1:5173 0.0.0.0:* users:(("node",pid=410,fd=22))',
+    'LISTEN 0 511 [::]:5173 [::]:* users:(("node",pid=410,fd=23))',
+  ].join("\n")
+  assert.deepEqual(plain(radar.parseSs(raw)), [{
+    pid: 410,
+    port: 5173,
+    process: "node",
+    addresses: ["127.0.0.1", "::"],
+  }])
+})
+
+test("ignores listeners without a visible PID", () => {
+  assert.deepEqual(plain(radar.parseSs("LISTEN 0 4096 127.0.0.53%lo:53 0.0.0.0:*")), [])
+})
+
+test("extracts declared ports", () => {
+  assert.deepEqual(plain(radar.declaredPorts("vite --port 3000 --listen-port=4000 -p5000")), [3000, 4000, 5000])
+})
+
+test("keeps an explicit server port and drops helper listeners", () => {
+  const listeners = [listener(3000), listener(33945), listener(41125)]
+  assert.deepEqual(plain(radar.primaryListeners(listeners, "vite --port 3000")), [listeners[0]])
+})
+
+test("drops a worker listener whose port flag names its parent", () => {
+  assert.deepEqual(
+    plain(radar.primaryListeners([listener(41523)], "nodejsWorker.js --host 127.0.0.1 --port 35729")),
+    [],
+  )
+})
+
+test("prefers a conventional port without an explicit flag", () => {
+  const listeners = [listener(46869), listener(5173)]
+  assert.deepEqual(plain(radar.primaryListeners(listeners, "vite")), [listeners[1]])
+})
+
+test("classifies browser responses", () => {
+  assert.equal(radar.browserResponse(200, "text/html; charset=utf-8"), true)
+  assert.equal(radar.browserResponse(307, ""), true)
+  assert.equal(radar.browserResponse(401, "application/json"), true)
+  assert.equal(radar.browserResponse(404, "text/html"), true)
+  assert.equal(radar.browserResponse(400, "text/plain"), false)
+  assert.equal(radar.browserResponse(404, ""), false)
+  assert.equal(radar.browserResponse(404, "text/plain; charset=UTF-8"), false)
+})
+
+test("detects LAN reachability", () => {
+  assert.equal(radar.lanHostFor(["0.0.0.0"], "192.168.1.42"), "192.168.1.42")
+  assert.equal(radar.lanHostFor(["127.0.0.1", "::1"], "192.168.1.42"), "")
+  assert.equal(radar.lanHostFor(["10.0.0.8"], "192.168.1.42"), "10.0.0.8")
+})
+
+test("parses qrencode ASCII output", () => {
+  assert.deepEqual(plain(radar.parseQrAscii("######\n##  ##\n######\n")), {
+    size: 3,
+    rows: ["111", "101", "111"],
+  })
+})

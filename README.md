@@ -53,9 +53,9 @@ omarchy bar move emils.localhost --section center
 omarchy bar move emils.localhost --section right
 ```
 
-Localhost uses `python3`, `ss`, `ip`, `wl-copy`, and `qrencode`. These are
-present in the intended Omarchy environment; `qrencode` is the same tool used
-by Omarchy's built-in Wi-Fi QR panel.
+Localhost uses QML/JavaScript plus `ss`, `ps`, `pwdx`, `ip`, `curl`, `wl-copy`,
+and `qrencode`. These are present in the intended Omarchy environment;
+`qrencode` is the same tool used by Omarchy's built-in Wi-Fi QR panel.
 
 ## Use it from a phone
 
@@ -80,24 +80,26 @@ must be on the same Wi-Fi/LAN, and the machine firewall must allow the port.
 
 ## How discovery works
 
-The bundled scanner reads `ss -ltnp`, keeps only processes owned by the current
-user, resolves their working directories through `/proc`, and looks for common
-project markers and development-server commands. It recognizes popular Node,
-Python, Ruby, PHP, Elixir, Rust, and Go workflows without inspecting source
-files beyond small project manifests.
+The QML service reads `ss -ltnp`, keeps only processes owned by the current
+user, batches process metadata through `ps` and `pwdx`, and looks for common
+development-server commands. It then selects the primary port declared by each
+server process and briefly checks that opening `/` yields a useful browser
+response. Auxiliary Vite sockets, worker/control channels, and plain TCP
+services are therefore left out. Process metadata and probe results stay cached
+inside the long-running shell, so a steady-state refresh only launches `ss`.
 
 Nothing is transmitted anywhere. The LAN address comes from the source address
 of the machine's default route; determining it does not contact `1.1.1.1`.
 
 Restart recovers the listening process's command, working directory, and
-environment before sending `SIGTERM`, then launches it in a new session. Output
-from a restarted process goes to `~/.local/state/omarchy/localhost/`.
+environment from `/proc` before sending `SIGTERM`, then launches it in a new
+session. Output from a restarted process goes to
+`~/.local/state/omarchy/localhost/`.
 
 ## Develop locally
 
 ```bash
-python3 -m unittest discover -s tests -v
-python3 -m py_compile scripts/radar.py
+node --test tests/test_radar_model.mjs
 omarchy plugin validate .
 qmllint -I /usr/share/omarchy/shell \
   RadarService.qml ServerPanel.qml Widget.qml QrOverlay.qml
