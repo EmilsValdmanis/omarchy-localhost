@@ -155,13 +155,13 @@ Item {
     readonly property string statusTooltip: lanAvailable
       ? row.hint
       : "Bound to localhost only.\nStart with --host / 0.0.0.0 to use it from another device."
-    readonly property string frameworkMark: {
-      var marks = {
-        next: "N", vite: "V", svelte: "S", astro: "A", nuxt: "N",
-        angular: "A", react: "R", storybook: "S", python: "Py", rails: "Rb",
-        laravel: "L", phoenix: "Ph", rust: "Rs", go: "Go", node: "JS"
+    readonly property string frameworkIcon: {
+      var icons = {
+        next: "", vite: "", svelte: "", astro: "", nuxt: "󱄆",
+        angular: "", react: "", storybook: "󰂺", python: "", rails: "",
+        laravel: "", phoenix: "󰈸", rust: "", go: "", node: ""
       }
-      return marks[frameworkId] || "<>"
+      return icons[frameworkId] || ""
     }
 
     bordered: true
@@ -181,24 +181,23 @@ Item {
         Layout.fillWidth: true
         spacing: Style.space(10)
 
-        Rectangle {
+        Item {
           Layout.preferredWidth: Style.space(34)
           Layout.preferredHeight: Style.space(34)
-          radius: Style.cornerRadius
-          color: Style.selectedFillFor(root.foreground, Color.accent)
+          Layout.alignment: Qt.AlignTop
 
           Text {
             anchors.centerIn: parent
-            text: row.frameworkMark
-            color: root.foreground
+            text: row.frameworkIcon
+            color: Color.accent
             font.family: Style.font.family
-            font.pixelSize: row.frameworkMark.length > 1 ? Style.font.caption : Style.font.body
-            font.bold: true
+            font.pixelSize: Style.font.title
           }
         }
 
         ColumnLayout {
           Layout.fillWidth: true
+          Layout.alignment: Qt.AlignTop
           spacing: 0
 
           Text {
@@ -225,10 +224,13 @@ Item {
           id: status
           Layout.preferredWidth: statusContent.implicitWidth
           Layout.preferredHeight: Math.max(statusContent.implicitHeight, Style.space(20))
+          Layout.alignment: Qt.AlignTop | Qt.AlignRight
 
           Row {
             id: statusContent
-            anchors.centerIn: parent
+            anchors.top: parent.top
+            anchors.right: parent.right
+            anchors.topMargin: Style.space(1)
             spacing: Style.space(5)
 
             Rectangle {
