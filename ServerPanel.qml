@@ -198,15 +198,23 @@ Item {
           color: Style.selectedFillFor(root.foreground, Color.accent)
           radius: Style.cornerRadius
 
+          OpticalGlyph {
+            visible: row.hasFrameworkIcon
+            anchors.fill: parent
+            text: row.frameworkIcon
+            color: Color.accent
+            fontFamily: Style.font.family
+            fontSize: Math.round(Style.font.heading * 1.25)
+          }
+
           Text {
+            visible: !row.hasFrameworkIcon
             anchors.centerIn: parent
             text: row.frameworkIcon
             color: Color.accent
             font.family: Style.font.family
-            font.pixelSize: row.hasFrameworkIcon
-              ? Math.round(Style.font.heading * 1.5)
-              : Math.round(Style.font.heading * 1.125)
-            font.bold: !row.hasFrameworkIcon
+            font.pixelSize: Style.font.heading
+            font.bold: true
           }
         }
 
