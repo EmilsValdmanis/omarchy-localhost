@@ -156,7 +156,7 @@ Item {
       ? row.hint
       : "Bound to localhost only.\nStart with --host / 0.0.0.0 to use it from another device."
     readonly property var frameworkIcons: ({
-      next: "", vite: "", svelte: "", astro: "", nuxt: "",
+      next: "", vite: "", svelte: "", astro: "", nuxt: "",
       angular: "", react: "", vue: "", solid: "", qwik: "",
       remix: "", gatsby: "", ember: "", eleventy: "", expo: "",
       electron: "", tauri: "", webpack: "", storybook: "",
@@ -203,7 +203,9 @@ Item {
             text: row.frameworkIcon
             color: Color.accent
             font.family: Style.font.family
-            font.pixelSize: row.hasFrameworkIcon ? Style.font.title : Style.font.body
+            font.pixelSize: row.hasFrameworkIcon
+              ? Math.round(Style.font.heading * 1.5)
+              : Math.round(Style.font.heading * 1.125)
             font.bold: !row.hasFrameworkIcon
           }
         }
