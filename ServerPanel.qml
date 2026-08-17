@@ -81,31 +81,6 @@ Item {
       boundsBehavior: Flickable.StopAtBounds
       interactive: contentHeight > height
 
-      function scrollByWheel(delta) {
-        var minimum = originY
-        var maximum = Math.max(minimum, originY + contentHeight - height)
-        contentY = Math.max(minimum, Math.min(maximum, contentY + delta))
-      }
-
-      WheelHandler {
-        target: null
-        acceptedDevices: PointerDevice.Mouse | PointerDevice.TouchPad
-        enabled: serverList.interactive
-
-        onWheel: function(event) {
-          var pixelDelta = Number(event.pixelDelta.y || 0)
-          var delta = pixelDelta !== 0
-            ? pixelDelta
-            : Number(event.angleDelta.y || 0) / 120 * Style.space(96)
-          if (delta === 0) {
-            event.accepted = false
-            return
-          }
-          serverList.scrollByWheel(-delta)
-          event.accepted = true
-        }
-      }
-
       ScrollBar.vertical: ScrollBar {
         policy: serverList.contentHeight > serverList.height ? ScrollBar.AsNeeded : ScrollBar.AlwaysOff
       }
@@ -175,7 +150,11 @@ Item {
     })
 
     readonly property string effectiveUrl: lanAvailable ? lanUrl : localUrl
-    readonly property color statusColor: lanAvailable ? Color.accent : Color.urgent
+    readonly property color statusDotColor: lanAvailable ? Color.accent : Color.urgent
+    readonly property color statusTextColor: lanAvailable ? Color.accent : root.dim
+    readonly property string statusTooltip: lanAvailable
+      ? row.hint
+      : "Bound to localhost only.\nStart with --host / 0.0.0.0 to use it from another device."
     readonly property string frameworkMark: {
       var marks = {
         next: "N", vite: "V", svelte: "S", astro: "A", nuxt: "N",
@@ -242,32 +221,45 @@ Item {
           }
         }
 
-        Rectangle {
-          Layout.preferredWidth: statusLabel.implicitWidth + Style.space(16)
-          Layout.preferredHeight: statusLabel.implicitHeight + Style.space(8)
-          radius: height / 2
-          color: Qt.rgba(row.statusColor.r, row.statusColor.g, row.statusColor.b, 0.12)
+        Item {
+          id: status
+          Layout.preferredWidth: statusContent.implicitWidth
+          Layout.preferredHeight: Math.max(statusContent.implicitHeight, Style.space(20))
 
           Row {
+            id: statusContent
             anchors.centerIn: parent
             spacing: Style.space(5)
 
             Rectangle {
               anchors.verticalCenter: parent.verticalCenter
-              width: Style.space(6)
+              width: Style.space(5)
               height: width
               radius: width / 2
-              color: row.statusColor
+              color: row.statusDotColor
             }
 
             Text {
               id: statusLabel
-              text: row.lanAvailable ? "LAN READY" : "LOCAL ONLY"
-              color: row.statusColor
+              text: row.lanAvailable ? "LAN ready" : "Local only"
+              color: row.statusTextColor
               font.family: Style.font.family
               font.pixelSize: Style.font.caption
-              font.bold: true
+              font.weight: Font.Medium
             }
+          }
+
+          MouseArea {
+            id: statusHover
+            anchors.fill: parent
+            hoverEnabled: true
+            acceptedButtons: Qt.NoButton
+          }
+
+          PanelToolTip {
+            visible: statusHover.containsMouse
+            text: row.statusTooltip
+            fontFamily: Style.font.family
           }
         }
       }
@@ -279,16 +271,6 @@ Item {
         font.family: Style.font.family
         font.pixelSize: Style.font.bodySmall
         elide: Text.ElideMiddle
-      }
-
-      Text {
-        visible: !row.lanAvailable
-        Layout.fillWidth: true
-        text: row.hint
-        color: root.dim
-        font.family: Style.font.family
-        font.pixelSize: Style.font.caption
-        wrapMode: Text.Wrap
       }
 
       RowLayout {
