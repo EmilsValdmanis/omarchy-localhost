@@ -10,6 +10,8 @@ Item {
   property alias servers: serverModel
   readonly property int serverCount: serverModel.count
   property string lanIp: ""
+  property string lanInterface: ""
+  property string lanSubnet: ""
   property bool scanning: false
   property string scanError: ""
   property bool scanQueued: false
@@ -359,13 +361,17 @@ Item {
 
   Process {
     id: ipProcess
-    command: ["ip", "-j", "route", "get", "1.1.1.1"]
+    command: ["ip", "-j", "-4", "route", "show"]
     stdout: StdioCollector {
       waitForEnd: true
       onStreamFinished: root.ipOutput = String(text || "")
     }
     onExited: function(exitCode) {
-      if (exitCode === 0) root.lanIp = RadarModel.parseLanIp(root.ipOutput)
+      if (exitCode !== 0) return
+      var route = RadarModel.parseLanRoute(root.ipOutput)
+      root.lanIp = route.ip
+      root.lanInterface = route.interfaceName
+      root.lanSubnet = route.subnet
     }
   }
 

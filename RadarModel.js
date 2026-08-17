@@ -109,15 +109,121 @@ function parsePwdx(raw) {
   return directories
 }
 
-function parseLanIp(raw) {
+function parseLanRoute(raw) {
+  var empty = { ip: "", interfaceName: "", subnet: "" }
   try {
     var routes = JSON.parse(String(raw || "[]"))
+    var preferred = null
     for (var index = 0; index < routes.length; index++) {
-      var candidate = String(routes[index].prefsrc || "")
-      if (candidate && candidate.indexOf("127.") !== 0) return candidate
+      var route = routes[index]
+      var candidate = String(route.prefsrc || route.src || "")
+      var interfaceName = String(route.dev || "")
+      if (!candidate || candidate.indexOf("127.") === 0 || interfaceName === "lo") continue
+      if (String(route.dst || "") === "default") {
+        preferred = route
+        break
+      }
+      if (!preferred) preferred = route
     }
+    if (!preferred) return empty
+
+    var ip = String(preferred.prefsrc || preferred.src || "")
+    var device = String(preferred.dev || "")
+    var subnet = ""
+    for (var routeIndex = 0; routeIndex < routes.length; routeIndex++) {
+      var connected = routes[routeIndex]
+      var destination = String(connected.dst || "")
+      if (String(connected.dev || "") !== device || destination.indexOf("/") === -1) continue
+      if (cidrContainsAddress(destination, ip)) {
+        subnet = destination
+        break
+      }
+    }
+    return { ip: ip, interfaceName: device, subnet: subnet }
   } catch (exception) {}
-  return ""
+  return empty
+}
+
+function parseLanIp(raw) {
+  return parseLanRoute(raw).ip
+}
+
+function ipv4Number(address) {
+  var parts = String(address || "").split(".")
+  if (parts.length !== 4) return -1
+  var value = 0
+  for (var index = 0; index < parts.length; index++) {
+    var part = Number(parts[index])
+    if (!Number.isInteger(part) || part < 0 || part > 255) return -1
+    value = value * 256 + part
+  }
+  return value
+}
+
+function cidrBounds(cidr) {
+  var parts = String(cidr || "").split("/")
+  var address = ipv4Number(parts[0])
+  var prefix = parts.length === 1 ? 32 : Number(parts[1])
+  if (address < 0 || !Number.isInteger(prefix) || prefix < 0 || prefix > 32) return null
+  var size = Math.pow(2, 32 - prefix)
+  var first = Math.floor(address / size) * size
+  return { first: first, last: first + size - 1 }
+}
+
+function cidrContainsAddress(cidr, address) {
+  var bounds = cidrBounds(cidr)
+  var value = ipv4Number(address)
+  return !!bounds && value >= bounds.first && value <= bounds.last
+}
+
+function cidrContainsSubnet(outer, inner) {
+  var outerBounds = cidrBounds(outer)
+  var innerBounds = cidrBounds(inner)
+  return !!outerBounds && !!innerBounds
+    && innerBounds.first >= outerBounds.first
+    && innerBounds.last <= outerBounds.last
+}
+
+function portSpecAllows(spec, port) {
+  var target = Number(port)
+  var sections = String(spec || "").split(",")
+  for (var index = 0; index < sections.length; index++) {
+    var range = sections[index].split(/[:-]/)
+    var first = Number(range[0])
+    var last = range.length > 1 ? Number(range[1]) : first
+    if (Number.isInteger(first) && Number.isInteger(last) && target >= first && target <= last)
+      return true
+  }
+  return false
+}
+
+function ufwAllowsPort(raw, interfaceName, subnet, port) {
+  var lines = String(raw || "").split(/\r?\n/)
+  for (var lineIndex = 0; lineIndex < lines.length; lineIndex++) {
+    var line = lines[lineIndex].trim()
+    if (line.indexOf("-A ufw-user-input ") !== 0) continue
+    var fields = line.split(/\s+/)
+    var options = {}
+    for (var fieldIndex = 2; fieldIndex < fields.length; fieldIndex++) {
+      var field = fields[fieldIndex]
+      if (field.charAt(0) !== "-") continue
+      var next = fields[fieldIndex + 1]
+      if (next && next.charAt(0) !== "-") {
+        options[field] = next
+        fieldIndex++
+      } else {
+        options[field] = true
+      }
+    }
+
+    if (options["-j"] !== "ACCEPT") continue
+    if (options["-p"] && options["-p"] !== "tcp") continue
+    if (options["-i"] && options["-i"] !== interfaceName) continue
+    if (options["-s"] && !cidrContainsSubnet(options["-s"], subnet)) continue
+    if (!portSpecAllows(options["--dport"] || options["--dports"], port)) continue
+    return true
+  }
+  return false
 }
 
 function declaredPorts(command) {

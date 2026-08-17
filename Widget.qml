@@ -3,6 +3,7 @@ import Quickshell
 import Quickshell.Io
 import qs.Commons
 import qs.Ui
+import "RadarModel.js" as RadarModel
 
 BarWidget {
   id: root
@@ -10,6 +11,9 @@ BarWidget {
 
   property string notice: ""
   property bool noticeUrgent: false
+  property var pendingQrServer: null
+  property string firewallCheckOutput: ""
+  property string firewallError: ""
 
   readonly property int serverCount: radar.serverCount
   readonly property bool showCountBadge: setting("showCountBadge", true)
@@ -42,8 +46,7 @@ BarWidget {
     showNotice("Copied " + url, false)
   }
 
-  function openQr(server) {
-    if (!server || !server.lanAvailable) return
+  function showQr(server) {
     card.open = false
     var payload = JSON.stringify({
       name: server.name,
@@ -54,6 +57,41 @@ BarWidget {
     Qt.callLater(function() {
       Quickshell.execDetached(["omarchy-shell", "shell", "summon", root.moduleName, payload])
     })
+  }
+
+  function openQr(server) {
+    if (!server || !server.lanAvailable) return
+    if (firewallCheckProcess.running || firewallAllowProcess.running) {
+      showNotice("LAN access setup is already running", false)
+      return
+    }
+
+    pendingQrServer = server
+    if (!setting("authorizeFirewallForQr", true)
+        || radar.lanInterface === "" || radar.lanSubnet === "") {
+      var directServer = pendingQrServer
+      pendingQrServer = null
+      showQr(directServer)
+      return
+    }
+
+    firewallCheckOutput = ""
+    firewallError = ""
+    showNotice("Checking LAN access…", false)
+    firewallCheckProcess.running = true
+  }
+
+  function authorizeQrPort() {
+    var server = pendingQrServer
+    if (!server) return
+    firewallError = ""
+    showNotice("Authorize LAN access for :" + server.port, false)
+    firewallAllowProcess.command = [
+      "pkexec", "/usr/bin/ufw", "allow", "in", "on", radar.lanInterface,
+      "from", radar.lanSubnet, "to", "any", "port", String(server.port),
+      "proto", "tcp", "comment", "omarchy-localhost"
+    ]
+    firewallAllowProcess.running = true
   }
 
   function openPanel() {
@@ -97,8 +135,57 @@ BarWidget {
         serverCount: root.serverCount,
         scanning: radar.scanning,
         scanError: radar.scanError,
-        lanIp: radar.lanIp
+        lanIp: radar.lanIp,
+        lanInterface: radar.lanInterface,
+        lanSubnet: radar.lanSubnet
       })
+    }
+  }
+
+  Process {
+    id: firewallCheckProcess
+    command: [
+      "bash", "-c",
+      "if ! command -v ufw >/dev/null || ! systemctl is-active --quiet ufw; then echo inactive; exit 0; fi; echo active; cat /etc/ufw/user.rules"
+    ]
+    stdout: StdioCollector {
+      waitForEnd: true
+      onStreamFinished: root.firewallCheckOutput = String(text || "")
+    }
+    stderr: StdioCollector {
+      waitForEnd: true
+      onStreamFinished: root.firewallError = String(text || "").trim()
+    }
+    onExited: function(exitCode) {
+      var server = root.pendingQrServer
+      if (!server) return
+      var active = root.firewallCheckOutput.indexOf("active\n") === 0
+      var rules = active ? root.firewallCheckOutput.slice(7) : ""
+      if (!active || (exitCode === 0 && RadarModel.ufwAllowsPort(
+          rules, radar.lanInterface, radar.lanSubnet, server.port))) {
+        root.pendingQrServer = null
+        root.showQr(server)
+        return
+      }
+      root.authorizeQrPort()
+    }
+  }
+
+  Process {
+    id: firewallAllowProcess
+    stderr: StdioCollector {
+      waitForEnd: true
+      onStreamFinished: root.firewallError = String(text || "").trim()
+    }
+    onExited: function(exitCode) {
+      var server = root.pendingQrServer
+      root.pendingQrServer = null
+      if (exitCode === 0 && server) {
+        root.showNotice("LAN access allowed for :" + server.port, false)
+        root.showQr(server)
+      } else {
+        root.showNotice(root.firewallError || "LAN access was not authorized", true)
+      }
     }
   }
 

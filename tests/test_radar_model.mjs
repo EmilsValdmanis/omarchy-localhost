@@ -94,6 +94,29 @@ test("detects LAN reachability", () => {
   assert.equal(radar.lanHostFor(["10.0.0.8"], "192.168.1.42"), "10.0.0.8")
 })
 
+test("finds the active interface and connected LAN subnet", () => {
+  const routes = JSON.stringify([
+    { dst: "default", dev: "enp5s0", prefsrc: "192.168.0.119" },
+    { dst: "172.18.0.0/16", dev: "docker0", scope: "link", prefsrc: "172.18.0.1" },
+    { dst: "192.168.0.0/24", dev: "enp5s0", scope: "link", prefsrc: "192.168.0.119" },
+  ])
+  assert.deepEqual(plain(radar.parseLanRoute(routes)), {
+    ip: "192.168.0.119",
+    interfaceName: "enp5s0",
+    subnet: "192.168.0.0/24",
+  })
+})
+
+test("recognizes exact and broader UFW LAN rules", () => {
+  const rules = [
+    "-A ufw-user-input -i enp5s0 -p tcp -s 192.168.0.0/24 --dport 3000 -j ACCEPT",
+    "-A ufw-user-input -p tcp -s 10.0.0.0/8 -m multiport --dports 3001:3003 -j ACCEPT",
+  ].join("\n")
+  assert.equal(radar.ufwAllowsPort(rules, "enp5s0", "192.168.0.0/24", 3000), true)
+  assert.equal(radar.ufwAllowsPort(rules, "wlan0", "10.12.0.0/24", 3002), true)
+  assert.equal(radar.ufwAllowsPort(rules, "enp5s0", "192.168.0.0/24", 4000), false)
+})
+
 test("parses qrencode ASCII output", () => {
   assert.deepEqual(plain(radar.parseQrAscii("######\n##  ##\n######\n")), {
     size: 3,

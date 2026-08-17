@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "id": "emils.localhost",
   "name": "Localhost",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "author": "Emil Valdmanis",
   "license": "MIT",
   "description": "Discover local development servers, open them instantly, and send LAN-ready projects to your phone with a QR code.",
@@ -27,7 +27,8 @@
     "defaultSection": "right",
     "defaults": {
       "refreshIntervalSec": 2,
-      "showCountBadge": true
+      "showCountBadge": true,
+      "authorizeFirewallForQr": true
     },
     "schema": [
       {
@@ -43,6 +44,12 @@
         "key": "showCountBadge",
         "type": "boolean",
         "label": "Show server count",
+        "defaultValue": true
+      },
+      {
+        "key": "authorizeFirewallForQr",
+        "type": "boolean",
+        "label": "Authorize LAN access for QR sharing",
         "defaultValue": true
       }
     ]

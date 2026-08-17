@@ -30,6 +30,7 @@ display scale and never needs a temporary image.
 - Localhost and LAN URLs
 - Bind-address-aware LAN availability
 - Full-screen, phone-ready QR overlay
+- One-time, subnet-scoped UFW authorization for QR ports
 - Open, copy, terminal, editor, restart, and stop actions
 - A bar widget that appears only while servers exist
 - Keyed list updates, so only new and removed servers animate
@@ -54,7 +55,7 @@ omarchy bar move emils.localhost --section right
 ```
 
 Localhost uses QML/JavaScript plus `ss`, `ps`, `pwdx`, `ip`, `curl`, `wl-copy`,
-and `qrencode`. These are present in the intended Omarchy environment;
+`qrencode`, and—when UFW is active—`pkexec`. These are present in the intended Omarchy environment;
 `qrencode` is the same tool used by Omarchy's built-in Wi-Fi QR panel.
 
 ## Use it from a phone
@@ -76,7 +77,11 @@ python -m http.server 8000 --bind 0.0.0.0
 ```
 
 Open Localhost from the bar, choose the server, and click **QR**. Your phone
-must be on the same Wi-Fi/LAN, and the machine firewall must allow the port.
+must be on the same Wi-Fi/LAN. When UFW is active and the selected port is not
+already allowed, Localhost asks for one Polkit authorization and adds an inbound
+TCP rule limited to the active interface, current LAN subnet, and selected port.
+That rule persists, so later QR scans for the same port need no authorization.
+This behavior can be disabled in the widget settings.
 
 ## How discovery works
 
