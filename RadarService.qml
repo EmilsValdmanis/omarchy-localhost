@@ -25,6 +25,7 @@ Item {
   property var pendingProcesses: ({})
   property var pendingProcessIds: []
   property var pendingContexts: []
+  property var pendingDockerContexts: []
   property var pendingSchemes: ({})
   property var probeTransferMap: []
   property var probedIds: []
@@ -33,6 +34,7 @@ Item {
   property string pwdxOutput: ""
   property string probeOutput: ""
   property string ipOutput: ""
+  property string dockerOutput: ""
 
   signal actionFinished(string action, bool successful, string detail)
 
@@ -86,6 +88,8 @@ Item {
       framework: String(server.framework || "Dev server"),
       frameworkId: String(server.frameworkId || "server"),
       pid: Number(server.pid || 0),
+      source: String(server.source || "process"),
+      containerId: String(server.containerId || ""),
       port: Number(server.port || 0),
       cwd: String(server.cwd || ""),
       localUrl: String(server.localUrl || ""),
@@ -136,12 +140,22 @@ Item {
     scanning = true
     scanError = ""
     ssOutput = ""
+    dockerOutput = ""
     ssProcess.command = ["ss", "-H", "-ltnp"]
     ssProcess.running = true
   }
 
+  function scanDocker() {
+    dockerProcess.command = [
+      "docker", "ps", "--format",
+      "[{{json .ID}},{{json .Names}},{{json .Image}},{{json .Ports}},{{json (.Label \"com.docker.compose.project.working_dir\")}},{{json (.Label \"com.docker.compose.service\")}},{{json (.Label \"com.docker.compose.project\")}}]"
+    ]
+    dockerProcess.running = true
+  }
+
   function resolveMetadata() {
     pendingListeners = RadarModel.parseSs(ssOutput)
+    pendingDockerContexts = RadarModel.dockerPublishedContexts(dockerOutput)
     pruneCaches(pendingListeners)
 
     var unknown = []
@@ -207,6 +221,8 @@ Item {
       activePids[String(listeners[index].pid)] = true
       activeIds[listeners[index].pid + ":" + listeners[index].port] = true
     }
+    for (var dockerIndex = 0; dockerIndex < pendingDockerContexts.length; dockerIndex++)
+      activeIds[RadarModel.contextId(pendingDockerContexts[dockerIndex])] = true
     var nextProcesses = {}
     for (var pid in processCache)
       if (activePids[pid]) nextProcesses[pid] = processCache[pid]
@@ -220,12 +236,13 @@ Item {
 
   function selectCandidates() {
     pendingContexts = RadarModel.candidateContexts(pendingListeners, processCache)
+      .concat(pendingDockerContexts)
     pendingSchemes = ({})
     var toProbe = []
     var now = Date.now()
     for (var index = 0; index < pendingContexts.length; index++) {
       var context = pendingContexts[index]
-      var id = context.listener.pid + ":" + context.listener.port
+      var id = RadarModel.contextId(context)
       var cached = probeCache[id]
       if (cached && cached.scheme) pendingSchemes[id] = cached.scheme
       else if (!cached || Number(cached.expiresAt || 0) <= now) toProbe.push(context)
@@ -249,7 +266,7 @@ Item {
     var ids = []
     for (var index = 0; index < contexts.length; index++) {
       var context = contexts[index]
-      var id = context.listener.pid + ":" + context.listener.port
+      var id = RadarModel.contextId(context)
       var preferred = RadarModel.schemeFor(context.process.command)
       ids.push(id)
       transfers.push({ id: id, scheme: preferred, preference: 0 })
@@ -289,7 +306,7 @@ Item {
     var servers = []
     for (var index = 0; index < pendingContexts.length; index++) {
       var context = pendingContexts[index]
-      var id = context.listener.pid + ":" + context.listener.port
+      var id = RadarModel.contextId(context)
       var scheme = pendingSchemes[id] || ""
       if (scheme) servers.push(RadarModel.serverFromContext(context, scheme, lanIp))
     }
@@ -312,6 +329,11 @@ Item {
     if (!server || actionProcess.running) return
     actionName = action
     actionError = ""
+    if (server.source === "docker" && server.containerId) {
+      actionProcess.command = ["docker", action, String(server.containerId)]
+      actionProcess.running = true
+      return
+    }
     var script = action === "restart" ? restartScript : stopScript
     actionProcess.command = ["bash", "-c", script, "localhost-" + action, String(server.pid)]
     actionProcess.running = true
@@ -389,11 +411,25 @@ Item {
       }
     }
     onExited: function(exitCode) {
-      if (exitCode === 0) root.resolveMetadata()
+      if (exitCode === 0) root.scanDocker()
       else {
         if (!root.scanError) root.scanError = "Could not scan local ports"
         root.finishScan()
       }
+    }
+  }
+
+  Process {
+    id: dockerProcess
+    stdout: StdioCollector {
+      waitForEnd: true
+      onStreamFinished: root.dockerOutput = String(text || "")
+    }
+    stderr: StdioCollector {}
+    onExited: function(exitCode) {
+      // Docker is optional. Native discovery still works without its CLI or daemon.
+      if (exitCode !== 0) root.dockerOutput = ""
+      root.resolveMetadata()
     }
   }
 

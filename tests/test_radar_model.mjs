@@ -83,9 +83,35 @@ test("classifies browser responses", () => {
   assert.equal(radar.browserResponse(307, ""), true)
   assert.equal(radar.browserResponse(401, "application/json"), true)
   assert.equal(radar.browserResponse(404, "text/html"), true)
-  assert.equal(radar.browserResponse(400, "text/plain"), false)
-  assert.equal(radar.browserResponse(404, ""), false)
-  assert.equal(radar.browserResponse(404, "text/plain; charset=UTF-8"), false)
+  assert.equal(radar.browserResponse(400, "text/plain"), true)
+  assert.equal(radar.browserResponse(404, ""), true)
+  assert.equal(radar.browserResponse(0, ""), false)
+})
+
+test("discovers published Docker Compose HTTP ports", () => {
+  const raw = [
+    '["ed3fec6359f3","api-app-1","node-backend","0.0.0.0:8000->8080/tcp, [::]:8000->8080/tcp","/work/betterat/apps/api","app","api"]',
+    '["f7caa08d69cb","api-db-1","postgres:18","5432/tcp","/work/betterat/apps/api","db","api"]',
+  ].join("\n")
+  assert.deepEqual(plain(radar.dockerPublishedContexts(raw)), [{
+    id: "docker:ed3fec6359f3:8000",
+    source: "docker",
+    containerId: "ed3fec6359f3",
+    displayName: "api / app",
+    listener: {
+      pid: 0,
+      port: 8000,
+      process: "api-app-1",
+      addresses: ["0.0.0.0", "::"],
+    },
+    process: {
+      pid: 0,
+      uid: -1,
+      command: "node-backend api app api-app-1",
+      cwd: "/work/betterat/apps/api",
+    },
+    framework: { name: "Docker", id: "docker" },
+  }])
 })
 
 test("detects LAN reachability", () => {

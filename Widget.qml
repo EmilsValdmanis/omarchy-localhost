@@ -131,8 +131,21 @@ BarWidget {
     function toggle(): string { root.togglePanel(); return "ok" }
     function refresh(): string { radar.scan(); return "ok" }
     function status(): string {
+      var detectedServers = []
+      for (var index = 0; index < radar.servers.count; index++) {
+        var server = radar.servers.get(index)
+        detectedServers.push({
+          id: server.serverId,
+          name: server.name,
+          framework: server.framework,
+          port: server.port,
+          localUrl: server.localUrl,
+          source: server.source
+        })
+      }
       return JSON.stringify({
         serverCount: root.serverCount,
+        servers: detectedServers,
         scanning: radar.scanning,
         scanError: radar.scanError,
         lanIp: radar.lanIp,
