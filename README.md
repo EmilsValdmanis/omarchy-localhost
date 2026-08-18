@@ -1,5 +1,8 @@
 # Localhost for Omarchy
 
+[![CI](https://github.com/EmilsValdmanis/omarchy-localhost/actions/workflows/ci.yml/badge.svg)](https://github.com/EmilsValdmanis/omarchy-localhost/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+
 Your local development servers, one click away.
 
 Start Vite, Next.js, Astro, Rails, or another development server and Localhost
@@ -123,3 +126,7 @@ Plugin changes hot-reload from `~/.config/omarchy/plugins/emils.localhost/`.
 ## License
 
 MIT
+
+Contributions are welcome. See [CONTRIBUTING.md](CONTRIBUTING.md) for the
+development workflow and [SECURITY.md](SECURITY.md) for responsible security
+reporting.
