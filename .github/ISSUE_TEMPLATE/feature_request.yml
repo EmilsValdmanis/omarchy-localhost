@@ -1,0 +1,28 @@
+name: Feature request
+description: Suggest an improvement to Localhost.
+title: "[Feature]: "
+labels:
+  - enhancement
+body:
+  - type: checkboxes
+    attributes:
+      label: Before submitting
+      options:
+        - label: I searched existing issues for this request.
+          required: true
+  - type: textarea
+    attributes:
+      label: Problem
+      description: What problem or limitation would this solve?
+    validations:
+      required: true
+  - type: textarea
+    attributes:
+      label: Proposed solution
+      description: Describe the behavior you would like.
+    validations:
+      required: true
+  - type: textarea
+    attributes:
+      label: Alternatives considered
+      description: Describe any workarounds or alternative designs you considered.

@@ -1,0 +1,49 @@
+name: Bug report
+description: Report a reproducible problem with Localhost.
+title: "[Bug]: "
+labels:
+  - bug
+body:
+  - type: markdown
+    attributes:
+      value: Thanks for taking the time to report a problem.
+  - type: checkboxes
+    attributes:
+      label: Before submitting
+      options:
+        - label: I searched existing issues for this problem.
+          required: true
+        - label: This report does not contain a security vulnerability.
+          required: true
+  - type: input
+    attributes:
+      label: Omarchy version
+      placeholder: Output of `omarchy-version`
+    validations:
+      required: true
+  - type: input
+    attributes:
+      label: Localhost version or commit
+      placeholder: 0.3.0 or a commit SHA
+    validations:
+      required: true
+  - type: textarea
+    attributes:
+      label: What happened?
+      description: Describe the actual behavior and what you expected instead.
+    validations:
+      required: true
+  - type: textarea
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Start ...
+        2. Open ...
+        3. Click ...
+    validations:
+      required: true
+  - type: textarea
+    attributes:
+      label: Relevant logs or screenshots
+      description: Remove tokens, private addresses, and other sensitive data.
+      render: shell
