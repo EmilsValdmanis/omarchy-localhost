@@ -397,6 +397,75 @@ function candidateContexts(listeners, processCache) {
   return contexts
 }
 
+function dockerPublishedContexts(raw) {
+  var contexts = []
+  var lines = String(raw || "").split(/\r?\n/)
+  for (var lineIndex = 0; lineIndex < lines.length; lineIndex++) {
+    var line = lines[lineIndex].trim()
+    if (!line) continue
+
+    var record
+    try {
+      record = JSON.parse(line)
+    } catch (exception) {
+      continue
+    }
+    if (!Array.isArray(record) || record.length < 7) continue
+
+    var containerId = String(record[0] || "")
+    var containerName = String(record[1] || "")
+    var image = String(record[2] || "")
+    var publishedPorts = String(record[3] || "")
+    var cwd = String(record[4] || "")
+    var service = String(record[5] || "")
+    var project = String(record[6] || "")
+    if (!containerId || !publishedPorts) continue
+
+    var grouped = {}
+    var mappings = publishedPorts.split(/,\s*/)
+    for (var mappingIndex = 0; mappingIndex < mappings.length; mappingIndex++) {
+      var match = mappings[mappingIndex].match(/^(?:(\[[^\]]+\]|[^:]+):)?(\d+)->\d+(?:\/tcp)?$/)
+      if (!match) continue
+      var address = String(match[1] || "0.0.0.0").replace(/^\[|\]$/g, "")
+      var port = Number(match[2])
+      if (!Number.isInteger(port) || port < 1 || port > 65535) continue
+      if (!grouped[port]) grouped[port] = []
+      if (grouped[port].indexOf(address) === -1) grouped[port].push(address)
+    }
+
+    for (var rawPort in grouped) {
+      var hostPort = Number(rawPort)
+      var name = project && service ? project + " / " + service
+        : (service || project || containerName || basename(cwd) || image || "Docker service")
+      contexts.push({
+        id: "docker:" + containerId + ":" + hostPort,
+        source: "docker",
+        containerId: containerId,
+        displayName: name,
+        listener: {
+          pid: 0,
+          port: hostPort,
+          process: containerName || image || "docker",
+          addresses: grouped[rawPort]
+        },
+        process: {
+          pid: 0,
+          uid: -1,
+          command: [image, project, service, containerName].join(" "),
+          cwd: cwd
+        },
+        framework: { name: "Docker", id: "docker" }
+      })
+    }
+  }
+  contexts.sort(function(a, b) { return a.listener.port - b.listener.port })
+  return contexts
+}
+
+function contextId(context) {
+  return String(context.id || (context.listener.pid + ":" + context.listener.port))
+}
+
 function schemeFor(command) {
   var lower = String(command || "").toLowerCase()
   var tokens = ["--https", "https://", "ssl-keyfile", "--ssl", "https=true"]
@@ -424,12 +493,10 @@ function probeUrl(context, scheme) {
 }
 
 function browserResponse(status, contentType) {
-  var mediaType = String(contentType || "").split(";", 1)[0].trim().toLowerCase()
-  return (status >= 200 && status < 400)
-    || status === 401
-    || status === 403
-    || mediaType === "text/html"
-    || mediaType === "application/xhtml+xml"
+  // Any HTTP status proves there is an HTTP service on the port. APIs commonly
+  // return a JSON 404 or 405 at `/`, so requiring a successful HTML page hides
+  // healthy backend services.
+  return status >= 100 && status <= 599
 }
 
 function isLoopback(address) {
@@ -475,11 +542,13 @@ function serverFromContext(context, scheme, lanIp) {
   var wildcardBound = listener.addresses.some(isUnspecified)
   var localHost = loopbackBound || wildcardBound ? "localhost" : (lanHost || "localhost")
   return {
-    id: listener.pid + ":" + listener.port,
-    name: basename(process.cwd) || listener.process || "Development server",
+    id: contextId(context),
+    name: context.displayName || basename(process.cwd) || listener.process || "Development server",
     framework: context.framework.name,
     frameworkId: context.framework.id,
-    pid: listener.pid,
+    pid: Number(listener.pid || 0),
+    source: String(context.source || "process"),
+    containerId: String(context.containerId || ""),
     port: listener.port,
     cwd: process.cwd,
     command: String(process.command || "").slice(0, 240),

@@ -27,10 +27,10 @@ Item {
   readonly property int listHeight: Math.min(serverList.contentHeight, Style.space(450))
 
   implicitWidth: panelWidth
-  implicitHeight: header.implicitHeight + Style.space(18) + listHeight
-    + (notice !== "" ? Style.space(34) : 0)
+  implicitHeight: panelLayout.implicitHeight
 
   ColumnLayout {
+    id: panelLayout
     anchors.fill: parent
     spacing: Style.space(12)
 
@@ -71,40 +71,82 @@ Item {
       color: Qt.rgba(root.foreground.r, root.foreground.g, root.foreground.b, 0.14)
     }
 
-    ListView {
-      id: serverList
+    Item {
       Layout.fillWidth: true
       Layout.preferredHeight: root.listHeight
-      clip: true
-      spacing: Style.space(8)
-      model: root.servers
-      boundsBehavior: Flickable.StopAtBounds
-      interactive: contentHeight > height
 
-      ScrollBar.vertical: ScrollBar {
-        policy: serverList.contentHeight > serverList.height ? ScrollBar.AsNeeded : ScrollBar.AlwaysOff
-      }
+      ListView {
+        id: serverList
+        anchors.fill: parent
+        clip: true
+        spacing: Style.space(8)
+        model: root.servers
+        boundsBehavior: Flickable.StopAtBounds
+        flickableDirection: Flickable.VerticalFlick
+        interactive: contentHeight > height
 
-      add: Transition {
-        ParallelAnimation {
-          NumberAnimation { property: "opacity"; from: 0; to: 1; duration: 180; easing.type: Easing.OutCubic }
-          NumberAnimation { property: "scale"; from: 0.97; to: 1; duration: 180; easing.type: Easing.OutCubic }
+        ScrollBar.vertical: ScrollBar {
+          id: serverScrollBar
+          policy: serverList.contentHeight > serverList.height ? ScrollBar.AlwaysOn : ScrollBar.AlwaysOff
+          width: Style.space(14)
+          padding: Style.space(3)
+          minimumSize: 0.12
+          interactive: true
+
+          contentItem: Rectangle {
+            implicitWidth: Style.space(8)
+            implicitHeight: Style.space(36)
+            radius: width / 2
+            color: root.foreground
+            opacity: serverScrollBar.pressed ? 0.9 : (serverScrollBar.hovered ? 0.7 : 0.42)
+
+            Behavior on opacity { NumberAnimation { duration: 80 } }
+          }
+
+          background: Rectangle {
+            implicitWidth: Style.space(14)
+            color: Qt.rgba(root.foreground.r, root.foreground.g, root.foreground.b, 0.07)
+            radius: width / 2
+          }
+        }
+
+        add: Transition {
+          ParallelAnimation {
+            NumberAnimation { property: "opacity"; from: 0; to: 1; duration: 180; easing.type: Easing.OutCubic }
+            NumberAnimation { property: "scale"; from: 0.97; to: 1; duration: 180; easing.type: Easing.OutCubic }
+          }
+        }
+
+        remove: Transition {
+          ParallelAnimation {
+            NumberAnimation { property: "opacity"; to: 0; duration: 100; easing.type: Easing.OutCubic }
+            NumberAnimation { property: "scale"; to: 0.98; duration: 100; easing.type: Easing.OutCubic }
+          }
+        }
+
+        displaced: Transition {
+          NumberAnimation { properties: "x,y"; duration: 180; easing.type: Easing.OutCubic }
+        }
+
+        delegate: ServerRow {
+          width: serverList.width - (serverScrollBar.visible ? Style.space(16) : 0)
         }
       }
 
-      remove: Transition {
-        ParallelAnimation {
-          NumberAnimation { property: "opacity"; to: 0; duration: 100; easing.type: Easing.OutCubic }
-          NumberAnimation { property: "scale"; to: 0.98; duration: 100; easing.type: Easing.OutCubic }
+      MouseArea {
+        anchors.fill: parent
+        z: 100
+        acceptedButtons: Qt.NoButton
+        hoverEnabled: false
+        onWheel: function(wheel) {
+          if (!serverList.interactive) return
+          var pixelDelta = wheel.pixelDelta.y
+          var distance = pixelDelta !== 0 ? -pixelDelta * 1.5 : -wheel.angleDelta.y * 1.25
+          var maximum = Math.max(0, serverList.contentHeight - serverList.height)
+          serverList.cancelFlick()
+          serverList.contentY = Math.max(0, Math.min(maximum, serverList.contentY + distance))
+          wheel.accepted = true
         }
-      }
-
-      displaced: Transition {
-        NumberAnimation { properties: "x,y"; duration: 180; easing.type: Easing.OutCubic }
-      }
-
-      delegate: ServerRow {
-        width: serverList.width - (serverList.contentHeight > serverList.height ? Style.space(8) : 0)
       }
     }
 
@@ -128,6 +170,8 @@ Item {
     required property string framework
     required property string frameworkId
     required property int pid
+    required property string source
+    required property string containerId
     required property int port
     required property string cwd
     required property string localUrl
@@ -141,6 +185,8 @@ Item {
       framework: framework,
       frameworkId: frameworkId,
       pid: pid,
+      source: source,
+      containerId: containerId,
       port: port,
       cwd: cwd,
       localUrl: localUrl,
@@ -161,7 +207,7 @@ Item {
       remix: "", gatsby: "", ember: "", eleventy: "", expo: "",
       electron: "", tauri: "", webpack: "", storybook: "",
       cloudflare: "", azure: "", firebase: "", supabase: "",
-      graphql: "", prisma: "", bun: "", deno: "", node: "",
+      graphql: "", prisma: "", bun: "", deno: "", node: "", docker: "",
       express: "", nestjs: "", adonis: "", python: "",
       django: "", fastapi: "", flask: "", streamlit: "",
       jupyter: "", ruby: "", rails: "", php: "", laravel: "",

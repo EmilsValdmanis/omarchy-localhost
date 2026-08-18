@@ -87,11 +87,13 @@ This behavior can be disabled in the widget settings.
 
 The QML service reads `ss -ltnp`, keeps only processes owned by the current
 user, batches process metadata through `ps` and `pwdx`, and looks for common
-development-server commands. It then selects the primary port declared by each
-server process and briefly checks that opening `/` yields a useful browser
-response. Auxiliary Vite sockets, worker/control channels, and plain TCP
+development-server commands. It also reads published TCP ports from running
+Docker and Compose containers, which do not expose an owning host PID. It then
+briefly checks each candidate for a real HTTP response; API-style JSON 404/405
+responses count because they still prove an HTTP service is listening.
+Auxiliary Vite sockets, worker/control channels, databases, and other plain TCP
 services are therefore left out. Process metadata and probe results stay cached
-inside the long-running shell, so a steady-state refresh only launches `ss`.
+inside the long-running shell.
 
 Nothing is transmitted anywhere. The LAN address comes from the source address
 of the machine's default route; determining it does not contact `1.1.1.1`.
