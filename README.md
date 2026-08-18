@@ -11,6 +11,13 @@ address, or put it on your phone with one scan.
 
 > `pnpm dev` → Localhost appears → click **QR** → scan with your phone
 
+## See it in action
+
+| Discover and control servers | Share LAN-ready projects |
+| :---: | :---: |
+| ![Localhost panel listing development servers with their framework, port, LAN status, URL, and project controls](docs/images/localhost-server-panel.png) | ![Localhost QR overlay showing a scannable LAN URL for a Vite development server](docs/images/localhost-qr-sharing.png) |
+| See every detected project, distinguish LAN-ready servers from local-only ones, and open or manage them in place. | Turn a reachable server into a full-screen QR code that is easy to scan from a phone. |
+
 ## The good bit
 
 Localhost understands the difference between a server that is merely running
