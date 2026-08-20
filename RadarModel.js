@@ -8,6 +8,7 @@ var EXCLUDED_PROCESSES = {
   "cloudflared": true,
   "containerd": true,
   "cupsd": true,
+  "discord": true,
   "dnsmasq": true,
   "docker-proxy": true,
   "opendeck": true,
@@ -16,7 +17,8 @@ var EXCLUDED_PROCESSES = {
   "systemd-resolved": true
 }
 
-var DEV_COMMAND_PATTERN = /(?:^|[ /._-])(?:astro|bun|cargo|deno|django|docusaurus|expo|fastapi|flask|func|gatsby|go|http\.server|mix|next|node|nuxt|parcel|php|pnpm|rails|react-email|remix|storybook|svelte|uvicorn|vite|webpack|yarn)(?:$|[ /._-])/i
+var DEV_COMMAND_PATTERN = /(?:^|[ /])(?:astro|bun|cargo|deno|django|docusaurus|expo|fastapi|flask|func|gatsby|go|http\.server|mix|next|node|nuxt|parcel|php|pnpm|rails|react-email|remix|storybook|svelte|uvicorn|vite|webpack|yarn)(?:$|[ /])/i
+var RUNTIME_HELPER_PATTERN = /(?:^|\s)--type=(?:gpu-process|renderer|utility|zygote)(?:\s|$)/i
 
 function splitEndpoint(endpoint) {
   var value = String(endpoint || "").trim()
@@ -341,6 +343,7 @@ function isCandidate(listener, process, framework) {
   if (listener.port < 1024) return false
   var processName = String(listener.process || "").toLowerCase()
   if (EXCLUDED_PROCESSES[processName]) return false
+  if (RUNTIME_HELPER_PATTERN.test(String(process.command || ""))) return false
   if (framework.id !== "server") return true
   if (DEV_COMMAND_PATTERN.test(process.command)) return true
   return !!COMMON_DEV_PORTS[listener.port]

@@ -78,6 +78,43 @@ test("keeps unknown servers on the letter fallback path", () => {
   })
 })
 
+test("does not classify Discord's local RPC endpoint as a dev server", () => {
+  const command = [
+    "/home/user/.config/discord/app-1.0.153/Discord",
+    "--type=renderer",
+    "--enable-node-leakage-in-renderers",
+  ].join(" ")
+  const discordListener = {
+    pid: 36559,
+    port: 6463,
+    process: "Discord",
+    addresses: ["127.0.0.1"],
+  }
+  const discordProcess = {
+    pid: 36559,
+    uid: 1000,
+    command,
+    cwd: "/home/user/.config/discord/app-1.0.153",
+  }
+
+  assert.deepEqual(
+    plain(radar.candidateContexts([discordListener], { "36559": discordProcess })),
+    [],
+  )
+})
+
+test("ignores packaged runtime helpers without hiding real Node commands", () => {
+  const genericListener = listener(6463)
+  const framework = { name: "Dev server", id: "server" }
+
+  assert.equal(radar.isCandidate(genericListener, {
+    command: "desktop-app --type=renderer --enable-node-leakage-in-renderers",
+  }, framework), false)
+  assert.equal(radar.isCandidate(genericListener, {
+    command: "/usr/bin/node custom-server.js",
+  }, framework), true)
+})
+
 test("classifies browser responses", () => {
   assert.equal(radar.browserResponse(200, "text/html; charset=utf-8"), true)
   assert.equal(radar.browserResponse(307, ""), true)

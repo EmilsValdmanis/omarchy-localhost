@@ -65,8 +65,11 @@ omarchy bar move emils.localhost --section right
 ```
 
 Localhost uses QML/JavaScript plus `ss`, `ps`, `pwdx`, `ip`, `curl`, `wl-copy`,
-`qrencode`, and—when UFW is active—`pkexec`. These are present in the intended Omarchy environment;
-`qrencode` is the same tool used by Omarchy's built-in Wi-Fi QR panel.
+and `qrencode`. These are present in the intended Omarchy environment;
+`qrencode` is the same tool used by Omarchy's built-in Wi-Fi QR panel. Docker
+discovery is optional and activates only when the `docker` CLI and daemon are
+available. When UFW is active and automatic QR authorization is enabled, the
+plugin also uses `systemctl`, `pkexec`, and `/usr/bin/ufw` as described below.
 
 ## Use it from a phone
 
@@ -93,6 +96,18 @@ TCP rule limited to the active interface, current LAN subnet, and selected port.
 That rule persists, so later QR scans for the same port need no authorization.
 This behavior can be disabled in the widget settings.
 
+## Remove
+
+```bash
+omarchy plugin remove emils.localhost
+```
+
+Removal deletes the plugin checkout and its Omarchy configuration. It does not
+delete UFW rules you explicitly authorized because those rules are system
+firewall configuration. If you used automatic QR authorization, inspect
+`sudo ufw status numbered` for rules whose comment is `omarchy-localhost` and
+remove the matching rule numbers with `sudo ufw delete NUMBER`.
+
 ## How discovery works
 
 The QML service reads `ss -ltnp`, keeps only processes owned by the current
@@ -116,7 +131,7 @@ session. Output from a restarted process goes to
 ## Develop locally
 
 ```bash
-node --test tests/test_radar_model.mjs
+node --test tests/*.mjs
 omarchy plugin validate .
 qmllint -I /usr/share/omarchy/shell \
   RadarService.qml ServerPanel.qml Widget.qml QrOverlay.qml
