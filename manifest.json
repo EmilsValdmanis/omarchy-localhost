@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "id": "emils.localhost",
   "name": "Localhost",
-  "version": "0.3.1",
+  "version": "0.3.2",
   "author": "Emil Valdmanis",
   "license": "MIT",
   "description": "Discover local development servers, open them instantly, and send LAN-ready projects to your phone with a QR code.",

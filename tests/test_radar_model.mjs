@@ -128,7 +128,7 @@ test("classifies browser responses", () => {
 test("discovers published Docker Compose HTTP ports", () => {
   const raw = [
     '["ed3fec6359f3","api-app-1","node-backend","0.0.0.0:8000->8080/tcp, [::]:8000->8080/tcp","/work/betterat/apps/api","app","api"]',
-    '["f7caa08d69cb","api-db-1","postgres:18","5432/tcp","/work/betterat/apps/api","db","api"]',
+    '["f7caa08d69cb","api-db-1","postgres:18","0.0.0.0:5432->5432/tcp, [::]:5432->5432/tcp","/work/betterat/apps/api","db","api"]',
   ].join("\n")
   assert.deepEqual(plain(radar.dockerPublishedContexts(raw)), [{
     id: "docker:ed3fec6359f3:8000",
@@ -146,6 +146,33 @@ test("discovers published Docker Compose HTTP ports", () => {
       uid: -1,
       command: "node-backend api app api-app-1",
       cwd: "/work/betterat/apps/api",
+    },
+    framework: { name: "Docker", id: "docker" },
+  }])
+})
+
+test("does not HTTP-probe remapped database ports", () => {
+  const raw = [
+    '["f7caa08d69cb","api-db-1","postgres:18","0.0.0.0:15432->5432/tcp","/work/api","db","api"]',
+    '["b49bb7bdabef","queue-1","rabbitmq:management","0.0.0.0:5672->5672/tcp, 0.0.0.0:15672->15672/tcp","/work/api","queue","api"]',
+  ].join("\n")
+
+  assert.deepEqual(plain(radar.dockerPublishedContexts(raw)), [{
+    id: "docker:b49bb7bdabef:15672",
+    source: "docker",
+    containerId: "b49bb7bdabef",
+    displayName: "api / queue",
+    listener: {
+      pid: 0,
+      port: 15672,
+      process: "queue-1",
+      addresses: ["0.0.0.0"],
+    },
+    process: {
+      pid: 0,
+      uid: -1,
+      command: "rabbitmq:management api queue queue-1",
+      cwd: "/work/api",
     },
     framework: { name: "Docker", id: "docker" },
   }])

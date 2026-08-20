@@ -4,6 +4,18 @@ var COMMON_DEV_PORTS = {
   8001: true, 8080: true, 8787: true
 }
 
+// Active HTTP probes are noisy when they hit databases and other services:
+// some of them log the HTTP request as a malformed protocol handshake. Match
+// the container-side port so a remapped service (for example 15432->5432) is
+// still excluded, while browser-facing ports from the same container remain.
+var NON_HTTP_CONTAINER_PORTS = {
+  21: true, 22: true, 25: true, 53: true, 110: true, 143: true,
+  389: true, 465: true, 587: true, 636: true, 993: true, 995: true,
+  1433: true, 1521: true, 1883: true, 3306: true, 4222: true,
+  5432: true, 5672: true, 6379: true, 9092: true, 11211: true,
+  26257: true, 27017: true
+}
+
 var EXCLUDED_PROCESSES = {
   "cloudflared": true,
   "containerd": true,
@@ -427,11 +439,13 @@ function dockerPublishedContexts(raw) {
     var grouped = {}
     var mappings = publishedPorts.split(/,\s*/)
     for (var mappingIndex = 0; mappingIndex < mappings.length; mappingIndex++) {
-      var match = mappings[mappingIndex].match(/^(?:(\[[^\]]+\]|[^:]+):)?(\d+)->\d+(?:\/tcp)?$/)
+      var match = mappings[mappingIndex].match(/^(?:(\[[^\]]+\]|[^:]+):)?(\d+)->(\d+)(?:\/tcp)?$/)
       if (!match) continue
       var address = String(match[1] || "0.0.0.0").replace(/^\[|\]$/g, "")
       var port = Number(match[2])
+      var containerPort = Number(match[3])
       if (!Number.isInteger(port) || port < 1 || port > 65535) continue
+      if (NON_HTTP_CONTAINER_PORTS[containerPort]) continue
       if (!grouped[port]) grouped[port] = []
       if (grouped[port].indexOf(address) === -1) grouped[port].push(address)
     }
