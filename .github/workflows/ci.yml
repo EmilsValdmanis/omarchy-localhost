@@ -28,8 +28,5 @@ jobs:
         with:
           node-version: "24"
 
-      - name: Run model tests
-        run: node --test tests/test_radar_model.mjs
-
-      - name: Check manifest JSON
-        run: node -e "JSON.parse(require('node:fs').readFileSync('manifest.json', 'utf8'))"
+      - name: Run tests
+        run: node --test tests/*.mjs

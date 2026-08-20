@@ -17,7 +17,7 @@ Localhost targets the Quickshell-based Omarchy 4 / Quattro plugin API. Run the
 available checks before opening a pull request:
 
 ```bash
-node --test tests/test_radar_model.mjs
+node --test tests/*.mjs
 omarchy plugin validate .
 qmllint -I /usr/share/omarchy/shell \
   RadarService.qml ServerPanel.qml Widget.qml QrOverlay.qml

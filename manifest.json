@@ -2,17 +2,17 @@
   "schemaVersion": 1,
   "id": "emils.localhost",
   "name": "Localhost",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "author": "Emil Valdmanis",
   "license": "MIT",
   "description": "Discover local development servers, open them instantly, and send LAN-ready projects to your phone with a QR code.",
   "kinds": [
     "bar-widget",
-    "panel"
+    "overlay"
   ],
   "entryPoints": {
     "barWidget": "Widget.qml",
-    "panel": "QrOverlay.qml"
+    "overlay": "QrOverlay.qml"
   },
   "barWidget": {
     "displayName": "Localhost",
