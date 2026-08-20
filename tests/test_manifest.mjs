@@ -40,6 +40,21 @@ test("manifest kinds have safe, existing entry points", () => {
   }
 })
 
+test("bar settings have matching defaults and schema entries", () => {
+  const widget = manifest.barWidget
+  assert.ok(widget && widget.defaults && Array.isArray(widget.schema))
+  const schema = Object.fromEntries(widget.schema.map((entry) => [entry.key, entry]))
+  for (const [key, value] of Object.entries(widget.defaults)) {
+    assert.ok(schema[key], `missing schema for ${key}`)
+    assert.deepEqual(schema[key].defaultValue, value, `${key} default must match`)
+  }
+  assert.equal(schema.refreshIntervalSec.min, 1)
+  assert.equal(schema.refreshIntervalSec.max, 30)
+  assert.equal(schema.authorizeFirewallForQr.type, "boolean")
+  assert.equal(schema.ignoredPorts.type, "string")
+  assert.equal(schema.alwaysIncludePorts.type, "string")
+})
+
 test("plugin folder contains no symlinks", () => {
   function inspect(directory) {
     for (const entry of readdirSync(directory, { withFileTypes: true })) {

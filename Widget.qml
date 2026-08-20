@@ -12,17 +12,21 @@ BarWidget {
   property string notice: ""
   property bool noticeUrgent: false
   property var pendingQrServer: null
+  property var pendingFirewallRule: null
+  property var managedFirewallRules: []
   property string firewallCheckOutput: ""
+  property string firewallRulesOutput: ""
   property string firewallError: ""
+  property string forceStopServerId: ""
 
   readonly property int serverCount: radar.serverCount
   readonly property bool showCountBadge: setting("showCountBadge", true)
+  readonly property bool showWhenEmpty: setting("showWhenEmpty", false)
+  readonly property bool opened: card.open
 
-  visible: serverCount > 0
+  visible: serverCount > 0 || showWhenEmpty || managedFirewallRules.length > 0 || radar.scanError !== ""
   implicitWidth: button.implicitWidth
   implicitHeight: button.implicitHeight
-
-  onServerCountChanged: if (serverCount === 0) card.open = false
 
   function showNotice(message, urgent) {
     notice = String(message || "")
@@ -61,7 +65,7 @@ BarWidget {
 
   function openQr(server) {
     if (!server || !server.lanAvailable) return
-    if (firewallCheckProcess.running || firewallAllowProcess.running) {
+    if (firewallCheckProcess.running || firewallAllowProcess.running || firewallRemoveProcess.running) {
       showNotice("LAN access setup is already running", false)
       return
     }
@@ -85,7 +89,7 @@ BarWidget {
     var server = pendingQrServer
     if (!server) return
     firewallError = ""
-    showNotice("Authorize LAN access for :" + server.port, false)
+    showNotice("Authorizing LAN access for :" + server.port + "…", false)
     firewallAllowProcess.command = [
       "pkexec", "/usr/bin/ufw", "allow", "in", "on", radar.lanInterface,
       "from", radar.lanSubnet, "to", "any", "port", String(server.port),
@@ -94,29 +98,65 @@ BarWidget {
     firewallAllowProcess.running = true
   }
 
+  function cancelFirewallAuthorization() {
+    pendingQrServer = null
+    showNotice("LAN access was not changed", false)
+  }
+
+  function refreshFirewallRules() {
+    if (firewallRulesProcess.running) return
+    firewallRulesOutput = ""
+    firewallRulesProcess.running = true
+  }
+
+  function removeFirewallRule(rule) {
+    if (!rule || firewallRemoveProcess.running || firewallAllowProcess.running) return
+    pendingFirewallRule = rule
+    firewallError = ""
+    firewallRemoveProcess.command = [
+      "pkexec", "/usr/bin/ufw", "--force", "delete", "allow", "in", "on",
+      String(rule.interfaceName), "from", String(rule.subnet), "to", "any",
+      "port", String(rule.port), "proto", "tcp", "comment", "omarchy-localhost"
+    ]
+    firewallRemoveProcess.running = true
+    showNotice("Removing LAN access for :" + rule.port + "…", false)
+  }
+
   function openPanel() {
-    if (serverCount === 0) return
     card.open = true
+    radar.scan()
+    refreshFirewallRules()
   }
 
   function closePanel() { card.open = false }
-
   function togglePanel() {
-    if (serverCount === 0) return
-    card.open = !card.open
+    if (card.open) closePanel()
+    else openPanel()
   }
+
+  // Shape contract used by `omarchy-shell shell toggle emils.localhost`.
+  function open() { openPanel() }
+  function close() { closePanel() }
+  function toggle() { togglePanel() }
 
   RadarService {
     id: radar
     refreshIntervalSec: Math.max(1, Number(root.setting("refreshIntervalSec", 2)))
-    onActionFinished: function(action, successful, detail) {
+    includeDocker: root.setting("includeDocker", true)
+    ignoredPorts: String(root.setting("ignoredPorts", "") || "")
+    alwaysIncludePorts: String(root.setting("alwaysIncludePorts", "") || "")
+    onActionFinished: function(action, successful, detail, serverId) {
+      if (action === "stop" && !successful && detail.indexOf("did not stop cleanly") !== -1)
+        root.forceStopServerId = serverId
+      else if (successful && root.forceStopServerId === serverId)
+        root.forceStopServerId = ""
       root.showNotice(detail, !successful)
     }
   }
 
   Timer {
     id: noticeTimer
-    interval: 2400
+    interval: 2800
     repeat: false
     onTriggered: {
       root.notice = ""
@@ -124,12 +164,14 @@ BarWidget {
     }
   }
 
+  Component.onCompleted: refreshFirewallRules()
+
   IpcHandler {
     target: root.moduleName
     function open(): string { root.openPanel(); return "ok" }
     function close(): string { root.closePanel(); return "ok" }
     function toggle(): string { root.togglePanel(); return "ok" }
-    function refresh(): string { radar.scan(); return "ok" }
+    function refresh(): string { radar.scan(); root.refreshFirewallRules(); return "ok" }
     function status(): string {
       var detectedServers = []
       for (var index = 0; index < radar.servers.count; index++) {
@@ -148,9 +190,13 @@ BarWidget {
         servers: detectedServers,
         scanning: radar.scanning,
         scanError: radar.scanError,
+        warnings: radar.warnings,
+        diagnostics: radar.diagnostics,
+        scanSummary: radar.scanSummary,
         lanIp: radar.lanIp,
         lanInterface: radar.lanInterface,
-        lanSubnet: radar.lanSubnet
+        lanSubnet: radar.lanSubnet,
+        managedFirewallRules: root.managedFirewallRules
       })
     }
   }
@@ -180,7 +226,25 @@ BarWidget {
         root.showQr(server)
         return
       }
-      root.authorizeQrPort()
+      panel.requestFirewallAuthorization(server)
+    }
+  }
+
+  Process {
+    id: firewallRulesProcess
+    command: [
+      "bash", "-c",
+      "if ! command -v ufw >/dev/null || ! systemctl is-active --quiet ufw; then echo inactive; exit 0; fi; echo active; cat /etc/ufw/user.rules"
+    ]
+    stdout: StdioCollector {
+      waitForEnd: true
+      onStreamFinished: root.firewallRulesOutput = String(text || "")
+    }
+    onExited: function(exitCode) {
+      var active = exitCode === 0 && root.firewallRulesOutput.indexOf("active\n") === 0
+      root.managedFirewallRules = active
+        ? RadarModel.parseManagedUfwRules(root.firewallRulesOutput.slice(7), "omarchy-localhost")
+        : []
     }
   }
 
@@ -193,6 +257,7 @@ BarWidget {
     onExited: function(exitCode) {
       var server = root.pendingQrServer
       root.pendingQrServer = null
+      root.refreshFirewallRules()
       if (exitCode === 0 && server) {
         root.showNotice("LAN access allowed for :" + server.port, false)
         root.showQr(server)
@@ -202,13 +267,35 @@ BarWidget {
     }
   }
 
+  Process {
+    id: firewallRemoveProcess
+    stderr: StdioCollector {
+      waitForEnd: true
+      onStreamFinished: root.firewallError = String(text || "").trim()
+    }
+    onExited: function(exitCode) {
+      var rule = root.pendingFirewallRule
+      root.pendingFirewallRule = null
+      root.refreshFirewallRules()
+      if (exitCode === 0 && rule)
+        root.showNotice("Removed LAN access for :" + rule.port, false)
+      else
+        root.showNotice(root.firewallError || "Could not remove the LAN access rule", true)
+    }
+  }
+
   BarIconButton {
     id: button
     anchors.centerIn: parent
     bar: root.bar
-    tooltipText: "Localhost · " + root.serverCount + " server" + (root.serverCount === 1 ? "" : "s")
+    tooltipText: root.serverCount > 0
+      ? "Localhost · " + root.serverCount + " server" + (root.serverCount === 1 ? "" : "s")
+      : "Localhost · no servers"
     onPressed: function(mouseButton) {
-      root.togglePanel()
+      if (mouseButton === Qt.RightButton) {
+        radar.scan()
+        root.refreshFirewallRules()
+      } else root.togglePanel()
     }
 
     iconComponent: Component {
@@ -250,22 +337,37 @@ BarWidget {
     }
   }
 
-  PopupCard {
+  KeyboardPanel {
     id: card
     anchorItem: button
     bar: root.bar
     owner: root
+    focusTarget: panel.keyboardFocusTarget
     contentWidth: fittedContentWidth(panel.implicitWidth, Style.space(560))
-    contentHeight: fittedContentHeight(panel.implicitHeight, Style.space(620))
+    contentHeight: fittedContentHeight(panel.implicitHeight, Style.space(680))
 
     ServerPanel {
       id: panel
       anchors.fill: parent
       servers: radar.servers
+      revision: radar.revision
       lanIp: radar.lanIp
       notice: root.notice
       noticeUrgent: root.noticeUrgent
+      scanError: radar.scanError
+      warnings: radar.warnings
+      diagnostics: radar.diagnostics
+      scanSummary: radar.scanSummary
+      scanning: radar.scanning
+      firewallRules: root.managedFirewallRules
+      firewallBusy: firewallAllowProcess.running || firewallRemoveProcess.running
+      forceStopServerId: root.forceStopServerId
 
+      onCloseRequested: root.closePanel()
+      onRefreshRequested: {
+        radar.scan()
+        root.refreshFirewallRules()
+      }
       onOpenRequested: function(server) { root.openServer(server) }
       onCopyRequested: function(server) { root.copyServer(server) }
       onQrRequested: function(server) { root.openQr(server) }
@@ -277,6 +379,13 @@ BarWidget {
       }
       onRestartRequested: function(server) { radar.restart(server) }
       onStopRequested: function(server) { radar.stop(server) }
+      onForceStopRequested: function(server) { radar.forceStop(server) }
+      onFirewallAuthorizationConfirmed: function(server) {
+        root.pendingQrServer = server
+        root.authorizeQrPort()
+      }
+      onFirewallAuthorizationCanceled: root.cancelFirewallAuthorization()
+      onFirewallRemovalConfirmed: function(rule) { root.removeFirewallRule(rule) }
     }
   }
 }

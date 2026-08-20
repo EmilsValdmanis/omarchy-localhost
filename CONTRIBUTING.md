@@ -18,12 +18,13 @@ available checks before opening a pull request:
 
 ```bash
 node --test tests/*.mjs
+python3 -m unittest discover -s tests -p 'test_*.py' -v
 omarchy plugin validate .
 qmllint -I /usr/share/omarchy/shell \
   RadarService.qml ServerPanel.qml Widget.qml QrOverlay.qml
 ```
 
-The first check is also run by CI. The Omarchy-specific checks require an
+The first two checks are also run by CI. The Omarchy-specific checks require an
 Omarchy development environment.
 
 ## Pull requests

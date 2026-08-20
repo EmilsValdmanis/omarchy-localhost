@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "id": "emils.localhost",
   "name": "Localhost",
-  "version": "0.3.2",
+  "version": "0.4.0",
   "author": "Emil Valdmanis",
   "license": "MIT",
   "description": "Discover local development servers, open them instantly, and send LAN-ready projects to your phone with a QR code.",
@@ -28,6 +28,10 @@
     "defaults": {
       "refreshIntervalSec": 2,
       "showCountBadge": true,
+      "showWhenEmpty": false,
+      "includeDocker": true,
+      "ignoredPorts": "",
+      "alwaysIncludePorts": "",
       "authorizeFirewallForQr": true
     },
     "schema": [
@@ -47,9 +51,38 @@
         "defaultValue": true
       },
       {
+        "key": "showWhenEmpty",
+        "type": "boolean",
+        "label": "Show when no servers are running",
+        "description": "Keep the bar button visible for keyboard access and diagnostics.",
+        "defaultValue": false
+      },
+      {
+        "key": "includeDocker",
+        "type": "boolean",
+        "label": "Include Docker",
+        "description": "Discover browser-ready ports published by running Docker and Compose services.",
+        "defaultValue": true
+      },
+      {
+        "key": "ignoredPorts",
+        "type": "string",
+        "label": "Ignored ports",
+        "description": "Comma-separated ports or ranges, for example 3001,8000-8010.",
+        "defaultValue": ""
+      },
+      {
+        "key": "alwaysIncludePorts",
+        "type": "string",
+        "label": "Always include ports",
+        "description": "Probe these ports even when the process is not recognized as a development server.",
+        "defaultValue": ""
+      },
+      {
         "key": "authorizeFirewallForQr",
         "type": "boolean",
         "label": "Authorize LAN access for QR sharing",
+        "description": "Ask before creating a persistent UFW rule limited to the active interface, subnet, and port.",
         "defaultValue": true
       }
     ]

@@ -30,3 +30,6 @@ jobs:
 
       - name: Run tests
         run: node --test tests/*.mjs
+
+      - name: Run helper tests
+        run: python3 -m unittest discover -s tests -p 'test_*.py' -v
