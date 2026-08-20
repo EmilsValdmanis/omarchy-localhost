@@ -98,29 +98,64 @@ function parseSs(raw) {
   return listeners
 }
 
-function parsePs(raw, currentUid) {
-  var processes = {}
-  var lines = String(raw || "").split(/\r?\n/)
-  for (var index = 0; index < lines.length; index++) {
-    var match = lines[index].match(/^\s*(\d+)\s+(\d+)\s+(.+)$/)
-    if (!match || Number(match[2]) !== Number(currentUid)) continue
-    processes[match[1]] = {
-      pid: Number(match[1]),
-      uid: Number(match[2]),
-      command: match[3]
+function parseProcessPayload(raw, currentUid) {
+  try {
+    var payload = JSON.parse(String(raw || ""))
+    if (!payload || payload.ok !== true || !Array.isArray(payload.processes))
+      return { ok: false, error: String((payload && payload.error) || "Could not read process metadata"), processes: {} }
+
+    var processes = {}
+    for (var index = 0; index < payload.processes.length; index++) {
+      var row = payload.processes[index] || {}
+      var pid = Number(row.pid)
+      var uid = Number(row.uid)
+      var startTime = Number(row.startTime)
+      if (!Number.isInteger(pid) || pid <= 1 || uid !== Number(currentUid)
+          || !Number.isInteger(startTime) || startTime <= 0) continue
+      var command = String(row.command || "")
+      var cwd = String(row.cwd || "")
+      if (!command || !cwd) continue
+      processes[String(pid)] = {
+        pid: pid,
+        uid: uid,
+        command: command,
+        cwd: cwd,
+        executable: String(row.executable || ""),
+        startTime: startTime
+      }
     }
+    return { ok: true, error: "", processes: processes }
+  } catch (exception) {
+    return { ok: false, error: "Could not parse process metadata", processes: {} }
   }
-  return processes
 }
 
-function parsePwdx(raw) {
-  var directories = {}
-  var lines = String(raw || "").split(/\r?\n/)
-  for (var index = 0; index < lines.length; index++) {
-    var match = lines[index].match(/^\s*(\d+):\s*(.+)$/)
-    if (match) directories[match[1]] = match[2]
+function parseActionPayload(raw, fallback) {
+  try {
+    var payload = JSON.parse(String(raw || ""))
+    if (payload && payload.ok === true)
+      return { ok: true, message: String(payload.message || fallback || "Action completed") }
+    return { ok: false, message: String((payload && payload.error) || fallback || "Action failed") }
+  } catch (exception) {
+    return { ok: false, message: String(fallback || "Action failed") }
   }
-  return directories
+}
+
+function parsePortSet(specification) {
+  var ports = {}
+  var sections = String(specification || "").split(",")
+  for (var index = 0; index < sections.length; index++) {
+    var token = sections[index].trim()
+    if (!token) continue
+    var match = token.match(/^(\d+)(?:\s*[-:]\s*(\d+))?$/)
+    if (!match) continue
+    var first = Number(match[1])
+    var last = match[2] ? Number(match[2]) : first
+    if (first > last) { var swap = first; first = last; last = swap }
+    if (first < 1 || last > 65535 || last - first > 4096) continue
+    for (var port = first; port <= last; port++) ports[port] = true
+  }
+  return ports
 }
 
 function parseLanRoute(raw) {
@@ -240,6 +275,50 @@ function ufwAllowsPort(raw, interfaceName, subnet, port) {
   return false
 }
 
+function decodeHex(value) {
+  var result = ""
+  var input = String(value || "")
+  if (!/^(?:[0-9a-fA-F]{2})+$/.test(input)) return ""
+  for (var index = 0; index < input.length; index += 2)
+    result += String.fromCharCode(parseInt(input.slice(index, index + 2), 16))
+  return result
+}
+
+function parseManagedUfwRules(raw, managedComment) {
+  var expected = String(managedComment || "omarchy-localhost")
+  var rules = []
+  var seen = {}
+  var lines = String(raw || "").split(/\r?\n/)
+  for (var lineIndex = 0; lineIndex < lines.length; lineIndex++) {
+    var line = lines[lineIndex].trim()
+    if (line.indexOf("### tuple ### ") !== 0) continue
+    var fields = line.slice(14).trim().split(/\s+/)
+    if (fields.length < 7 || fields[0] !== "allow" || fields[1] !== "tcp") continue
+
+    var comment = ""
+    for (var fieldIndex = 0; fieldIndex < fields.length; fieldIndex++) {
+      if (fields[fieldIndex].indexOf("comment=") === 0)
+        comment = decodeHex(fields[fieldIndex].slice(8))
+    }
+    if (comment !== expected) continue
+
+    var port = Number(fields[2])
+    if (!Number.isInteger(port) || port < 1 || port > 65535) continue
+    var subnet = String(fields[5] || "")
+    var interfaceName = ""
+    for (var tokenIndex = 0; tokenIndex < fields.length; tokenIndex++) {
+      if (fields[tokenIndex].indexOf("in_") === 0)
+        interfaceName = fields[tokenIndex].slice(3)
+    }
+    var id = interfaceName + ":" + subnet + ":" + port
+    if (seen[id]) continue
+    seen[id] = true
+    rules.push({ id: id, port: port, interfaceName: interfaceName, subnet: subnet })
+  }
+  rules.sort(function(a, b) { return a.port - b.port || a.id.localeCompare(b.id) })
+  return rules
+}
+
 function declaredPorts(command) {
   var ports = []
   var value = String(command || "")
@@ -351,14 +430,25 @@ function frameworkFor(command) {
   return { name: "Dev server", id: "server" }
 }
 
-function isCandidate(listener, process, framework) {
-  if (listener.port < 1024) return false
+function candidateRejectionReason(listener, process, framework, ignoredPorts, alwaysIncludePorts) {
+  var ignored = ignoredPorts || {}
+  var alwaysInclude = alwaysIncludePorts || {}
+  if (!process || !process.command) return "process metadata unavailable"
+  if (ignored[listener.port]) return "ignored by settings"
+  if (alwaysInclude[listener.port]) return ""
+  if (listener.port < 1024) return "privileged/system port"
   var processName = String(listener.process || "").toLowerCase()
-  if (EXCLUDED_PROCESSES[processName]) return false
-  if (RUNTIME_HELPER_PATTERN.test(String(process.command || ""))) return false
-  if (framework.id !== "server") return true
-  if (DEV_COMMAND_PATTERN.test(process.command)) return true
-  return !!COMMON_DEV_PORTS[listener.port]
+  if (EXCLUDED_PROCESSES[processName]) return "excluded desktop or system process"
+  if (RUNTIME_HELPER_PATTERN.test(String(process.command || ""))) return "runtime helper process"
+  if (framework.id !== "server") return ""
+  if (DEV_COMMAND_PATTERN.test(process.command)) return ""
+  if (COMMON_DEV_PORTS[listener.port]) return ""
+  return "command and port are not recognized as a development server"
+}
+
+function isCandidate(listener, process, framework, ignoredPorts, alwaysIncludePorts) {
+  return candidateRejectionReason(
+    listener, process, framework, ignoredPorts, alwaysIncludePorts) === ""
 }
 
 function primaryListeners(listeners, command) {
@@ -381,14 +471,14 @@ function primaryListeners(listeners, command) {
   return [primary]
 }
 
-function candidateContexts(listeners, processCache) {
+function candidateContexts(listeners, processCache, ignoredPorts, alwaysIncludePorts) {
   var grouped = {}
   for (var index = 0; index < listeners.length; index++) {
     var listener = listeners[index]
     var process = processCache[String(listener.pid)]
     if (!process || !process.cwd) continue
     var framework = frameworkFor(process.command)
-    if (!isCandidate(listener, process, framework)) continue
+    if (!isCandidate(listener, process, framework, ignoredPorts, alwaysIncludePorts)) continue
     var key = String(listener.pid)
     if (!grouped[key]) grouped[key] = []
     grouped[key].push({ listener: listener, process: process, framework: framework })
@@ -412,8 +502,40 @@ function candidateContexts(listeners, processCache) {
   return contexts
 }
 
-function dockerPublishedContexts(raw) {
+function candidateDiagnostics(listeners, processCache, selectedContexts, ignoredPorts, alwaysIncludePorts) {
+  var selected = {}
+  var contexts = selectedContexts || []
+  for (var selectedIndex = 0; selectedIndex < contexts.length; selectedIndex++) {
+    var selectedListener = contexts[selectedIndex].listener
+    selected[selectedListener.pid + ":" + selectedListener.port] = true
+  }
+
+  var diagnostics = []
+  for (var index = 0; index < listeners.length; index++) {
+    var listener = listeners[index]
+    var process = processCache[String(listener.pid)]
+    var framework = process ? frameworkFor(process.command) : { name: "Dev server", id: "server" }
+    var reason = !process || !process.cwd
+      ? "process metadata unavailable"
+      : candidateRejectionReason(
+        listener, process, framework, ignoredPorts, alwaysIncludePorts)
+    if (!reason && !selected[listener.pid + ":" + listener.port])
+      reason = "auxiliary listener for the same process"
+    if (!reason) continue
+    diagnostics.push({
+      port: listener.port,
+      process: String(listener.process || (process && process.command) || "unknown"),
+      reason: reason
+    })
+  }
+  diagnostics.sort(function(a, b) { return a.port - b.port || a.process.localeCompare(b.process) })
+  return diagnostics
+}
+
+function dockerPublishedContexts(raw, ignoredPorts, alwaysIncludePorts) {
   var contexts = []
+  var ignored = ignoredPorts || {}
+  var alwaysInclude = alwaysIncludePorts || {}
   var lines = String(raw || "").split(/\r?\n/)
   for (var lineIndex = 0; lineIndex < lines.length; lineIndex++) {
     var line = lines[lineIndex].trim()
@@ -445,7 +567,8 @@ function dockerPublishedContexts(raw) {
       var port = Number(match[2])
       var containerPort = Number(match[3])
       if (!Number.isInteger(port) || port < 1 || port > 65535) continue
-      if (NON_HTTP_CONTAINER_PORTS[containerPort]) continue
+      if (ignored[port]) continue
+      if (NON_HTTP_CONTAINER_PORTS[containerPort] && !alwaysInclude[port]) continue
       if (!grouped[port]) grouped[port] = []
       if (grouped[port].indexOf(address) === -1) grouped[port].push(address)
     }
@@ -480,7 +603,8 @@ function dockerPublishedContexts(raw) {
 }
 
 function contextId(context) {
-  return String(context.id || (context.listener.pid + ":" + context.listener.port))
+  return String(context.id || (context.listener.pid + ":" + Number(context.process.startTime || 0)
+    + ":" + context.listener.port))
 }
 
 function schemeFor(command) {
@@ -564,6 +688,7 @@ function serverFromContext(context, scheme, lanIp) {
     framework: context.framework.name,
     frameworkId: context.framework.id,
     pid: Number(listener.pid || 0),
+    startTime: Number(process.startTime || 0),
     source: String(context.source || "process"),
     containerId: String(context.containerId || ""),
     port: listener.port,

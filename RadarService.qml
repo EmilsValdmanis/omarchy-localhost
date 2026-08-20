@@ -7,8 +7,12 @@ Item {
   visible: false
 
   property int refreshIntervalSec: 2
+  property bool includeDocker: true
+  property string ignoredPorts: ""
+  property string alwaysIncludePorts: ""
   property alias servers: serverModel
   readonly property int serverCount: serverModel.count
+  property int revision: 0
   property string lanIp: ""
   property string lanInterface: ""
   property string lanSubnet: ""
@@ -17,67 +21,38 @@ Item {
   property bool scanQueued: false
   property string actionName: ""
   property string actionError: ""
+  property string actionOutput: ""
+  property string actionServerId: ""
+  property var warnings: []
+  property var pendingWarnings: []
+  property var dependencyWarnings: []
+  property var diagnostics: []
+  property var pendingDiagnostics: []
+  property string scanSummary: ""
 
   property int currentUid: -1
   property var processCache: ({})
   property var probeCache: ({})
   property var pendingListeners: []
-  property var pendingProcesses: ({})
-  property var pendingProcessIds: []
   property var pendingContexts: []
   property var pendingDockerContexts: []
   property var pendingSchemes: ({})
   property var probeTransferMap: []
   property var probedIds: []
   property string ssOutput: ""
-  property string psOutput: ""
-  property string pwdxOutput: ""
+  property string ssError: ""
+  property string metadataOutput: ""
+  property string metadataError: ""
   property string probeOutput: ""
   property string ipOutput: ""
   property string dockerOutput: ""
+  property string dockerError: ""
+  property string routeWarning: ""
 
-  signal actionFinished(string action, bool successful, string detail)
+  readonly property string helperPath: decodeURIComponent(
+    String(Qt.resolvedUrl("localhost_helper.py")).replace(/^file:\/\//, ""))
 
-  readonly property string stopScript: [
-    "pid=$1",
-    "[[ $pid =~ ^[0-9]+$ && $pid -gt 0 ]] || { echo 'Invalid process ID' >&2; exit 1; }",
-    "owner=$(stat -c %u /proc/$pid 2>/dev/null) || { echo 'Process is no longer running' >&2; exit 1; }",
-    "[[ $owner == $(id -u) ]] || { echo 'Process is not owned by the current user' >&2; exit 1; }",
-    "kill -TERM -- $pid"
-  ].join("\n")
-
-  readonly property string restartScript: [
-    "pid=$1",
-    "[[ $pid =~ ^[0-9]+$ && $pid -gt 0 ]] || { echo 'Invalid process ID' >&2; exit 1; }",
-    "proc=/proc/$pid",
-    "owner=$(stat -c %u $proc 2>/dev/null) || { echo 'Process is no longer running' >&2; exit 1; }",
-    "[[ $owner == $(id -u) ]] || { echo 'Process is not owned by the current user' >&2; exit 1; }",
-    "cwd=$(readlink -e $proc/cwd) || { echo 'Could not recover the server directory' >&2; exit 1; }",
-    "exe=$(readlink -e $proc/exe) || true",
-    "argv=()",
-    "while IFS= read -r -d '' value; do argv+=(\"$value\"); done < $proc/cmdline",
-    "[[ ${#argv[@]} -gt 0 ]] || { echo 'Could not recover the server command' >&2; exit 1; }",
-    "environment=()",
-    "while IFS= read -r -d '' value; do environment+=(\"$value\"); done < $proc/environ",
-    "if [[ ${argv[0]} != /* && -x $exe ]]; then argv[0]=$exe; fi",
-    "kill -TERM -- $pid",
-    "for ((attempt=0; attempt<30; attempt++)); do",
-    "  [[ ! -d $proc ]] && break",
-    "  state=$(awk '{print $3}' $proc/stat 2>/dev/null || true)",
-    "  [[ $state == Z ]] && break",
-    "  sleep 0.05",
-    "done",
-    "if [[ -d $proc ]]; then",
-    "  state=$(awk '{print $3}' $proc/stat 2>/dev/null || true)",
-    "  [[ $state == Z ]] || { echo 'The server did not stop cleanly; restart was cancelled' >&2; exit 1; }",
-    "fi",
-    "state_root=${XDG_STATE_HOME:-$HOME/.local/state}/omarchy/localhost",
-    "mkdir -p -- \"$state_root\"",
-    "log=$state_root/restart-$(date +%s).log",
-    "cd -- \"$cwd\"",
-    "nohup env -i \"${environment[@]}\" setsid -- \"${argv[@]}\" >>\"$log\" 2>&1 </dev/null &",
-    "echo $!"
-  ].join("\n")
+  signal actionFinished(string action, bool successful, string detail, string serverId)
 
   ListModel { id: serverModel }
 
@@ -88,6 +63,7 @@ Item {
       framework: String(server.framework || "Dev server"),
       frameworkId: String(server.frameworkId || "server"),
       pid: Number(server.pid || 0),
+      startTime: Number(server.startTime || 0),
       source: String(server.source || "process"),
       containerId: String(server.containerId || ""),
       port: Number(server.port || 0),
@@ -106,9 +82,27 @@ Item {
     return -1
   }
 
+  function serversEqual(left, right) {
+    return left.serverId === right.serverId
+      && left.name === right.name
+      && left.framework === right.framework
+      && left.frameworkId === right.frameworkId
+      && Number(left.pid) === Number(right.pid)
+      && Number(left.startTime) === Number(right.startTime)
+      && left.source === right.source
+      && left.containerId === right.containerId
+      && Number(left.port) === Number(right.port)
+      && left.cwd === right.cwd
+      && left.localUrl === right.localUrl
+      && left.lanUrl === right.lanUrl
+      && left.lanAvailable === right.lanAvailable
+      && left.hint === right.hint
+  }
+
   function syncServers(nextServers) {
     var incoming = {}
     var normalized = []
+    var changed = false
     for (var i = 0; i < nextServers.length; i++) {
       var server = normalizedServer(nextServers[i])
       if (server.serverId === "") continue
@@ -117,7 +111,10 @@ Item {
     }
 
     for (var oldIndex = serverModel.count - 1; oldIndex >= 0; oldIndex--) {
-      if (!incoming[serverModel.get(oldIndex).serverId]) serverModel.remove(oldIndex)
+      if (!incoming[serverModel.get(oldIndex).serverId]) {
+        serverModel.remove(oldIndex)
+        changed = true
+      }
     }
 
     for (var targetIndex = 0; targetIndex < normalized.length; targetIndex++) {
@@ -125,11 +122,35 @@ Item {
       var currentIndex = modelIndex(next.serverId)
       if (currentIndex === -1) {
         serverModel.insert(targetIndex, next)
+        changed = true
       } else {
-        if (currentIndex !== targetIndex) serverModel.move(currentIndex, targetIndex, 1)
-        serverModel.set(targetIndex, next)
+        if (currentIndex !== targetIndex) {
+          serverModel.move(currentIndex, targetIndex, 1)
+          changed = true
+        }
+        if (!serversEqual(serverModel.get(targetIndex), next)) {
+          serverModel.set(targetIndex, next)
+          changed = true
+        }
       }
     }
+    if (changed) revision++
+  }
+
+  function addWarning(message) {
+    var detail = String(message || "").trim()
+    if (!detail || pendingWarnings.indexOf(detail) !== -1) return
+    pendingWarnings = pendingWarnings.concat([detail])
+  }
+
+  function diagnosticDetail(raw, fallback) {
+    var lines = String(raw || "").trim().split(/\r?\n/)
+    var detail = lines.length ? lines[lines.length - 1].trim() : ""
+    return String(detail || fallback || "").slice(0, 220)
+  }
+
+  function arraysEqual(left, right) {
+    return JSON.stringify(left || []) === JSON.stringify(right || [])
   }
 
   function scan() {
@@ -138,95 +159,73 @@ Item {
       return
     }
     scanning = true
-    scanError = ""
+    pendingWarnings = []
+    for (var warningIndex = 0; warningIndex < dependencyWarnings.length; warningIndex++)
+      addWarning(dependencyWarnings[warningIndex])
+    if (routeWarning) addWarning(routeWarning)
     ssOutput = ""
+    ssError = ""
     dockerOutput = ""
+    dockerError = ""
     ssProcess.command = ["ss", "-H", "-ltnp"]
     ssProcess.running = true
   }
 
   function scanDocker() {
+    if (!includeDocker) {
+      dockerOutput = ""
+      resolveMetadata()
+      return
+    }
     dockerProcess.command = [
-      "docker", "ps", "--format",
+      "bash", "-c", "command -v docker >/dev/null 2>&1 || exit 127; exec docker \"$@\"",
+      "localhost-docker", "ps", "--format",
       "[{{json .ID}},{{json .Names}},{{json .Image}},{{json .Ports}},{{json (.Label \"com.docker.compose.project.working_dir\")}},{{json (.Label \"com.docker.compose.service\")}},{{json (.Label \"com.docker.compose.project\")}}]"
     ]
     dockerProcess.running = true
   }
 
   function resolveMetadata() {
+    var ignored = RadarModel.parsePortSet(ignoredPorts)
+    var alwaysInclude = RadarModel.parsePortSet(alwaysIncludePorts)
     pendingListeners = RadarModel.parseSs(ssOutput)
-    pendingDockerContexts = RadarModel.dockerPublishedContexts(dockerOutput)
-    pruneCaches(pendingListeners)
+    pendingDockerContexts = RadarModel.dockerPublishedContexts(dockerOutput, ignored, alwaysInclude)
 
-    var unknown = []
+    var processIds = []
     var seen = {}
     for (var index = 0; index < pendingListeners.length; index++) {
       var pid = String(pendingListeners[index].pid)
-      if (!processCache[pid] && !seen[pid]) {
+      if (!seen[pid]) {
         seen[pid] = true
-        unknown.push(pid)
+        processIds.push(pid)
       }
     }
-    if (!unknown.length) {
+    if (!processIds.length) {
+      processCache = ({})
       selectCandidates()
       return
     }
 
-    pendingProcessIds = unknown
-    psOutput = ""
-    psProcess.command = ["ps", "-ww", "-o", "pid=,uid=,args=", "-p", unknown.join(",")]
-    psProcess.running = true
-  }
-
-  function resolveDirectories() {
-    pendingProcesses = RadarModel.parsePs(psOutput, currentUid)
-    var owned = []
-    for (var index = 0; index < pendingProcessIds.length; index++) {
-      var pid = pendingProcessIds[index]
-      if (pendingProcesses[pid]) owned.push(pid)
-    }
-    if (!owned.length) {
-      selectCandidates()
-      return
-    }
-
-    pendingProcessIds = owned
-    pwdxOutput = ""
-    pwdxProcess.command = ["pwdx"].concat(owned)
-    pwdxProcess.running = true
+    metadataOutput = ""
+    metadataError = ""
+    metadataProcess.command = [
+      "python3", helperPath, "inspect", "--pids", processIds.join(","),
+      "--uid", String(currentUid)
+    ]
+    metadataProcess.running = true
   }
 
   function cacheMetadata() {
-    var directories = RadarModel.parsePwdx(pwdxOutput)
-    var nextCache = Object.assign({}, processCache)
-    for (var index = 0; index < pendingProcessIds.length; index++) {
-      var pid = pendingProcessIds[index]
-      var process = pendingProcesses[pid]
-      if (!process || !directories[pid]) continue
-      nextCache[pid] = {
-        pid: process.pid,
-        uid: process.uid,
-        command: process.command,
-        cwd: directories[pid]
-      }
-    }
-    processCache = nextCache
+    var parsed = RadarModel.parseProcessPayload(metadataOutput, currentUid)
+    processCache = parsed.processes
+    if (!parsed.ok) addWarning(parsed.error || metadataError)
     selectCandidates()
   }
 
-  function pruneCaches(listeners) {
-    var activePids = {}
+  function pruneProbeCache(contexts) {
     var activeIds = {}
-    for (var index = 0; index < listeners.length; index++) {
-      activePids[String(listeners[index].pid)] = true
-      activeIds[listeners[index].pid + ":" + listeners[index].port] = true
-    }
-    for (var dockerIndex = 0; dockerIndex < pendingDockerContexts.length; dockerIndex++)
-      activeIds[RadarModel.contextId(pendingDockerContexts[dockerIndex])] = true
-    var nextProcesses = {}
-    for (var pid in processCache)
-      if (activePids[pid]) nextProcesses[pid] = processCache[pid]
-    processCache = nextProcesses
+    for (var index = 0; index < contexts.length; index++)
+      activeIds[RadarModel.contextId(contexts[index])] = true
 
     var nextProbes = {}
     for (var id in probeCache)
@@ -235,8 +234,14 @@ Item {
   }
 
   function selectCandidates() {
-    pendingContexts = RadarModel.candidateContexts(pendingListeners, processCache)
-      .concat(pendingDockerContexts)
+    var ignored = RadarModel.parsePortSet(ignoredPorts)
+    var alwaysInclude = RadarModel.parsePortSet(alwaysIncludePorts)
+    var nativeContexts = RadarModel.candidateContexts(
+      pendingListeners, processCache, ignored, alwaysInclude)
+    pendingDiagnostics = RadarModel.candidateDiagnostics(
+      pendingListeners, processCache, nativeContexts, ignored, alwaysInclude).slice(0, 30)
+    pendingContexts = nativeContexts.concat(pendingDockerContexts)
+    pruneProbeCache(pendingContexts)
     pendingSchemes = ({})
     var toProbe = []
     var now = Date.now()
@@ -268,9 +273,12 @@ Item {
       var context = contexts[index]
       var id = RadarModel.contextId(context)
       var preferred = RadarModel.schemeFor(context.process.command)
+      var alternate = preferred === "https" ? "http" : "https"
       ids.push(id)
       transfers.push({ id: id, scheme: preferred, preference: 0 })
       args.push(RadarModel.probeUrl(context, preferred))
+      transfers.push({ id: id, scheme: alternate, preference: 1 })
+      args.push(RadarModel.probeUrl(context, alternate))
     }
     probeTransferMap = transfers
     probedIds = ids
@@ -304,20 +312,33 @@ Item {
 
   function applyCandidates() {
     var servers = []
+    var details = pendingDiagnostics.slice()
     for (var index = 0; index < pendingContexts.length; index++) {
       var context = pendingContexts[index]
       var id = RadarModel.contextId(context)
       var scheme = pendingSchemes[id] || ""
       if (scheme) servers.push(RadarModel.serverFromContext(context, scheme, lanIp))
+      else details.push({
+        port: context.listener.port,
+        process: String(context.listener.process || context.displayName || "unknown"),
+        reason: "no HTTP or HTTPS response"
+      })
     }
     servers.sort(function(a, b) {
       return a.port - b.port || a.name.toLowerCase().localeCompare(b.name.toLowerCase())
     })
+    var nextDiagnostics = details.slice(0, 30)
+    if (!arraysEqual(diagnostics, nextDiagnostics)) diagnostics = nextDiagnostics
+    scanSummary = pendingListeners.length + " owned listener"
+      + (pendingListeners.length === 1 ? "" : "s") + " · "
+      + pendingContexts.length + " candidate" + (pendingContexts.length === 1 ? "" : "s")
+      + " · " + servers.length + " browser-ready"
     syncServers(servers)
     finishScan()
   }
 
   function finishScan() {
+    if (!arraysEqual(warnings, pendingWarnings)) warnings = pendingWarnings
     scanning = false
     if (scanQueued) {
       scanQueued = false
@@ -329,20 +350,30 @@ Item {
     if (!server || actionProcess.running) return
     actionName = action
     actionError = ""
+    actionOutput = ""
+    actionServerId = String(server.serverId || server.id || "")
     if (server.source === "docker" && server.containerId) {
-      actionProcess.command = ["docker", action, String(server.containerId)]
+      if (action === "force-stop") action = "stop"
+      actionProcess.command = [
+        "python3", helperPath, "docker-action", "--action", action,
+        "--id", String(server.containerId)
+      ]
       actionProcess.running = true
       return
     }
-    var script = action === "restart" ? restartScript : stopScript
-    actionProcess.command = ["bash", "-c", script, "localhost-" + action, String(server.pid)]
+    actionProcess.command = [
+      "python3", helperPath, "process-action", "--action", action,
+      "--pid", String(server.pid), "--start-time", String(server.startTime)
+    ]
     actionProcess.running = true
   }
 
   function stop(server) { runAction("stop", server) }
+  function forceStop(server) { runAction("force-stop", server) }
   function restart(server) { runAction("restart", server) }
 
   Component.onCompleted: {
+    dependencyProcess.running = true
     uidProcess.running = true
     ipProcess.running = true
   }
@@ -369,6 +400,24 @@ Item {
   }
 
   Process {
+    id: dependencyProcess
+    command: [
+      "bash", "-c",
+      "for command in ss ip curl python3 wl-copy qrencode; do command -v \"$command\" >/dev/null 2>&1 || echo \"$command\"; done"
+    ]
+    stdout: StdioCollector {
+      waitForEnd: true
+      onStreamFinished: {
+        var missing = String(text || "").trim().split(/\r?\n/).filter(function(value) { return value !== "" })
+        var nextWarnings = []
+        for (var index = 0; index < missing.length; index++)
+          nextWarnings.push("Missing required command: " + missing[index])
+        root.dependencyWarnings = nextWarnings
+      }
+    }
+  }
+
+  Process {
     id: uidProcess
     command: ["id", "-u"]
     stdout: StdioCollector {
@@ -389,11 +438,15 @@ Item {
       onStreamFinished: root.ipOutput = String(text || "")
     }
     onExited: function(exitCode) {
-      if (exitCode !== 0) return
+      if (exitCode !== 0) {
+        root.routeWarning = "LAN route information is unavailable"
+        return
+      }
       var route = RadarModel.parseLanRoute(root.ipOutput)
       root.lanIp = route.ip
       root.lanInterface = route.interfaceName
       root.lanSubnet = route.subnet
+      root.routeWarning = route.ip ? "" : "No active IPv4 LAN route was found"
     }
   }
 
@@ -405,15 +458,18 @@ Item {
     }
     stderr: StdioCollector {
       waitForEnd: true
-      onStreamFinished: {
-        var detail = String(text || "").trim()
-        if (detail) root.scanError = detail
-      }
+      onStreamFinished: root.ssError = String(text || "").trim()
     }
     onExited: function(exitCode) {
-      if (exitCode === 0) root.scanDocker()
+      if (exitCode === 0) {
+        root.scanError = ""
+        root.scanDocker()
+      }
       else {
-        if (!root.scanError) root.scanError = "Could not scan local ports"
+        root.scanError = root.ssError || "Could not scan local ports"
+        root.diagnostics = []
+        root.scanSummary = ""
+        root.syncServers([])
         root.finishScan()
       }
     }
@@ -425,32 +481,34 @@ Item {
       waitForEnd: true
       onStreamFinished: root.dockerOutput = String(text || "")
     }
-    stderr: StdioCollector {}
+    stderr: StdioCollector {
+      waitForEnd: true
+      onStreamFinished: root.dockerError = String(text || "").trim()
+    }
     onExited: function(exitCode) {
       // Docker is optional. Native discovery still works without its CLI or daemon.
-      if (exitCode !== 0) root.dockerOutput = ""
+      if (exitCode !== 0) {
+        root.dockerOutput = ""
+        if (exitCode !== 127)
+          root.addWarning(root.diagnosticDetail(root.dockerError, "Docker discovery is unavailable"))
+      }
       root.resolveMetadata()
     }
   }
 
   Process {
-    id: psProcess
+    id: metadataProcess
     stdout: StdioCollector {
       waitForEnd: true
-      onStreamFinished: root.psOutput = String(text || "")
+      onStreamFinished: root.metadataOutput = String(text || "")
     }
-    onExited: function(exitCode) {
-      root.resolveDirectories()
-    }
-  }
-
-  Process {
-    id: pwdxProcess
-    stdout: StdioCollector {
+    stderr: StdioCollector {
       waitForEnd: true
-      onStreamFinished: root.pwdxOutput = String(text || "")
+      onStreamFinished: root.metadataError = String(text || "").trim()
     }
     onExited: function(exitCode) {
+      if (exitCode !== 0 && !root.metadataOutput)
+        root.addWarning(root.metadataError || "Process metadata is unavailable")
       root.cacheMetadata()
     }
   }
@@ -467,18 +525,23 @@ Item {
 
   Process {
     id: actionProcess
+    stdout: StdioCollector {
+      waitForEnd: true
+      onStreamFinished: root.actionOutput = String(text || "")
+    }
     stderr: StdioCollector {
       waitForEnd: true
       onStreamFinished: root.actionError = String(text || "").trim()
     }
     onExited: function(exitCode) {
       var action = root.actionName
-      var successful = exitCode === 0
-      var detail = successful
-        ? (action === "restart" ? "Server restarted" : "Server stopped")
-        : (root.actionError || "Server action failed")
-      root.actionFinished(action, successful, detail)
+      var parsed = RadarModel.parseActionPayload(
+        root.actionOutput,
+        root.actionError || (exitCode === 0 ? "Action completed" : "Server action failed"))
+      var successful = exitCode === 0 && parsed.ok
+      root.actionFinished(action, successful, parsed.message, root.actionServerId)
       root.actionName = ""
+      root.actionServerId = ""
       postActionScan.restart()
     }
   }

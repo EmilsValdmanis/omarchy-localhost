@@ -1,0 +1,87 @@
+import assert from "node:assert/strict"
+import { readFileSync } from "node:fs"
+import test from "node:test"
+
+const service = readFileSync(new URL("../RadarService.qml", import.meta.url), "utf8")
+const widget = readFileSync(new URL("../Widget.qml", import.meta.url), "utf8")
+const panel = readFileSync(new URL("../ServerPanel.qml", import.meta.url), "utf8")
+
+test("process actions cross the verified helper boundary", () => {
+  assert.match(service, /"python3", helperPath, "process-action"/)
+  assert.match(service, /"--start-time", String\(server\.startTime\)/)
+  assert.match(service, /function forceStop\(server\)/)
+  assert.doesNotMatch(service, /kill -TERM|kill -KILL/)
+})
+
+test("discovery settings are wired from the manifest-facing widget", () => {
+  assert.match(widget, /includeDocker: root\.setting\("includeDocker", true\)/)
+  assert.match(widget, /ignoredPorts: String\(root\.setting\("ignoredPorts", ""\)/)
+  assert.match(widget, /alwaysIncludePorts: String\(root\.setting\("alwaysIncludePorts", ""\)/)
+  assert.match(service, /RadarModel\.parsePortSet\(ignoredPorts\)/)
+  assert.match(service, /RadarModel\.parsePortSet\(alwaysIncludePorts\)/)
+  assert.match(service, /exec docker \\\"\$@\\\"/)
+  assert.doesNotMatch(service, /shift; exec docker/)
+})
+
+test("the server panel supports keyboard search and safe destructive actions", () => {
+  assert.match(widget, /KeyboardPanel\s*\{/)
+  assert.match(panel, /property alias keyboardFocusTarget: keyCatcher/)
+  assert.match(panel, /readonly property bool searchMode: searchField\.activeFocus/)
+  assert.match(panel, /visible: !root\.showFirewallRules && !root\.showDiagnostics/)
+  assert.match(panel, /function beginSearch\(\)[\s\S]*?searchField\.forceActiveFocus\(\)/)
+  assert.match(panel, /function focusNavigation\(\)[\s\S]*?keyCatcher\.forceActiveFocus\(\)/)
+  assert.match(panel, /else if \(searchMode\) \{\s*focusNavigation\(\)\s*\} else if \(query\) \{\s*clearSearch\(\)/)
+  assert.match(panel, /onPressed: root\.beginSearch\(\)/)
+  assert.match(panel, /Qt\.Key_Up/)
+  assert.match(panel, /Qt\.Key_Down/)
+  assert.match(panel, /Qt\.Key_Return/)
+  assert.match(panel, /Qt\.Key_C/)
+  assert.match(panel, /Qt\.Key_R/)
+  assert.match(panel, /property int selectedActionIndex: 0/)
+  assert.match(panel, /event\.key === Qt\.Key_Left \|\| event\.key === Qt\.Key_H\)[\s\S]*?selectAction\(-1\)/)
+  assert.match(panel, /plainNavigation && event\.key === Qt\.Key_J/)
+  assert.match(panel, /plainNavigation && event\.key === Qt\.Key_K/)
+  assert.match(panel, /event\.key === Qt\.Key_Right \|\| event\.key === Qt\.Key_L\)[\s\S]*?selectAction\(1\)/)
+  assert.match(panel, /plainNavigation && event\.key === Qt\.Key_Slash/)
+  assert.doesNotMatch(panel, /plainNavigation = !searchMode && query === ""/)
+  assert.doesNotMatch(panel, /alternate && event\.key === Qt\.Key_[HJKL]/)
+  assert.match(panel, /hasCursor: row\.index === root\.selectedIndex && root\.selectedActionIndex === 6/)
+  assert.match(panel, /ConfirmDialog\s*\{/)
+  assert.match(panel, /requestStop\(server, force\)/)
+})
+
+test("background scans update the open panel without rebuilding unchanged rows", () => {
+  assert.match(service, /if \(changed\) revision\+\+/)
+  assert.match(service, /property var pendingDiagnostics: \[\]/)
+  assert.match(service, /if \(!arraysEqual\(diagnostics, nextDiagnostics\)\)/)
+  assert.doesNotMatch(panel, /filteredModel\.clear\(\)/)
+  assert.doesNotMatch(panel, /enabled: !root\.scanning/)
+})
+
+test("server cards keep their borders and scroll promptly", () => {
+  assert.match(panel, /readonly property real cardInset: Style\.space\(2\)/)
+  assert.match(panel, /x: root\.cardInset/)
+  assert.match(panel, /id: cardWrapper/)
+  assert.match(panel, /width: parent\.width - root\.cardInset \* 2/)
+  assert.match(panel, /borderSpec: Border\.flat\(/)
+  assert.match(panel, /MouseArea\s*\{[\s\S]*?onWheel: function\(wheel\)/)
+  assert.match(panel, /pixelDelta !== 0 \? -pixelDelta \* 1\.5 : -wheel\.angleDelta\.y \* 1\.25/)
+  assert.match(panel, /serverList\.cancelFlick\(\)/)
+  assert.match(panel, /wheel\.accepted = true/)
+  assert.match(panel, /policy: serverList\.contentHeight > serverList\.height[\s\S]*?ScrollBar\.AlwaysOn[\s\S]*?ScrollBar\.AlwaysOff/)
+  assert.match(panel, /width: Style\.space\(8\)[\s\S]*?implicitWidth: Style\.space\(3\)/)
+  assert.match(panel, /serverScrollBar\.hovered \? 0\.64 : 0\.46/)
+  assert.doesNotMatch(panel, /minimumSize: 0\.12/)
+})
+
+test("firewall writes are explicit, scoped, and manageable", () => {
+  assert.match(panel, /persistent UFW rule limited to/)
+  assert.match(widget, /"pkexec", "\/usr\/bin\/ufw", "allow", "in", "on"/)
+  assert.match(widget, /"--force", "delete", "allow", "in", "on"/)
+  assert.match(widget, /onFirewallRemovalConfirmed/)
+  assert.match(widget, /parseManagedUfwRules/)
+  assert.match(panel, /iconText: "󰒘"/)
+  assert.doesNotMatch(panel, /iconText: "\\uf3ed"/)
+  assert.match(panel, /text: "Remove"/)
+  assert.doesNotMatch(panel, /iconText: "\\uf2ed"/)
+})
