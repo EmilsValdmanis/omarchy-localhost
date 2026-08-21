@@ -303,7 +303,10 @@ BarWidget {
     iconComponent: Component {
       Item {
         OpticalGlyph {
-          anchors.fill: parent
+          anchors.centerIn: parent
+          anchors.verticalCenterOffset: -Style.spaceReal(1)
+          width: parent.width
+          height: parent.height
           text: "\uf0ac"
           fontFamily: button.fontFamily
           fontSize: button.fontSize

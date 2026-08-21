@@ -27,7 +27,7 @@ test("the bar icon is centered and hidden when it has no servers by default", ()
   assert.match(widget, /readonly property bool showWhenEmpty: setting\("showWhenEmpty", false\)/)
   assert.match(widget, /visible: serverCount > 0 \|\| showWhenEmpty/)
   assert.doesNotMatch(widget, /visible: serverCount > 0 \|\| showWhenEmpty \|\|/)
-  assert.match(widget, /OpticalGlyph\s*\{\s*anchors\.fill: parent\s*text: "\\uf0ac"/)
+  assert.match(widget, /OpticalGlyph\s*\{\s*anchors\.centerIn: parent\s*anchors\.verticalCenterOffset: -Style\.spaceReal\(1\)/)
   assert.doesNotMatch(widget, /OpticalGlyph\s*\{[\s\S]*?y: Style\.spaceReal\(1\)[\s\S]*?text: "\\uf0ac"/)
 })
 

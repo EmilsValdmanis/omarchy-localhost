@@ -2,14 +2,11 @@
   "schemaVersion": 1,
   "id": "emils.localhost",
   "name": "Localhost",
-  "version": "0.4.1",
+  "version": "0.4.2",
   "author": "Emil Valdmanis",
   "license": "MIT",
   "description": "Discover local development servers, open them instantly, and send LAN-ready projects to your phone with a QR code.",
-  "kinds": [
-    "bar-widget",
-    "overlay"
-  ],
+  "kinds": ["bar-widget", "overlay"],
   "entryPoints": {
     "barWidget": "Widget.qml",
     "overlay": "QrOverlay.qml"
@@ -18,11 +15,7 @@
     "displayName": "Localhost",
     "description": "Live development servers, LAN reachability, QR sharing, and project controls.",
     "category": "Development",
-    "aliases": [
-      "dev-server",
-      "localhost",
-      "ports"
-    ],
+    "aliases": ["dev-server", "localhost", "ports"],
     "allowMultiple": false,
     "defaultSection": "right",
     "defaults": {
