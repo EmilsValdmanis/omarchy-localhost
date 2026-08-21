@@ -1,7 +1,7 @@
 # Localhost for Omarchy
 
-[![CI](https://github.com/EmilsValdmanis/omarchy-localhost/actions/workflows/ci.yml/badge.svg)](https://github.com/EmilsValdmanis/omarchy-localhost/actions/workflows/ci.yml)
-[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![Version](https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fraw.githubusercontent.com%2FEmilsValdmanis%2Fomarchy-localhost%2Fmain%2Fmanifest.json&query=%24.version&prefix=v&label=version&style=flat-square&labelColor=0c0b0c&color=c9a29a)](manifest.json)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg?style=flat-square&labelColor=0c0b0c&color=373637)](LICENSE)
 
 Discover, control, and share local development servers from the Omarchy bar.
 Start Vite, Next.js, Astro, Rails, or another server and Localhost adds it
@@ -9,8 +9,8 @@ automatically.
 
 > `pnpm dev` → Localhost appears → click **QR** → scan with your phone
 
-| Server panel | LAN QR sharing |
-| :---: | :---: |
+|                                                Server panel                                                 |                                      LAN QR sharing                                       |
+| :---------------------------------------------------------------------------------------------------------: | :---------------------------------------------------------------------------------------: |
 | ![Localhost panel listing development servers and project controls](docs/images/localhost-server-panel.png) | ![Localhost QR overlay showing a scannable LAN URL](docs/images/localhost-qr-sharing.png) |
 
 ## Features
@@ -48,17 +48,26 @@ optional and only runs when Docker is available.
 
 ## Keyboard
 
-| Key | Action |
-| --- | --- |
-| `/` or click search | Search by project, framework, port, path, or container |
-| `up/down`, `j/k`, `ctrl+p/ctrl+n` | Select a server card |
-| `left/right`, `h/l` | Select an action on the card |
-| `enter` | Run the selected action |
-| `ctrl+c` | Copy the selected URL |
-| `ctrl+r` | Refresh discovery |
-| `alt+r` | Restart the selected server |
-| `delete`, or `ctrl+k` with no filter | Confirm stopping the selected server |
-| `esc` | Leave search, clear the filter, then close |
+| Key                                  | Action                                                 |
+| ------------------------------------ | ------------------------------------------------------ |
+| `/` or click search                  | Search by project, framework, port, path, or container |
+| `up/down`, `j/k`, `ctrl+p/ctrl+n`    | Select a server card                                   |
+| `left/right`, `h/l`                  | Select an action on the card                           |
+| `enter`                              | Run the selected action                                |
+| `ctrl+c`                             | Copy the selected URL                                  |
+| `ctrl+r`                             | Refresh discovery                                      |
+| `alt+r`                              | Restart the selected server                            |
+| `delete`, or `ctrl+k` with no filter | Confirm stopping the selected server                   |
+| `esc`                                | Leave search, clear the filter, then close             |
+
+### Optional global shortcut
+
+`SUPER + SHIFT + L` is unassigned in the stock Omarchy 4 keybindings. To use
+it to toggle Localhost, add this to `~/.config/hypr/bindings.lua`:
+
+```lua
+o.bind("SUPER + SHIFT + L", "Localhost", "omarchy-shell shell toggle emils.localhost")
+```
 
 ## Use it from a phone
 
@@ -77,15 +86,15 @@ Localhost can be removed from the shield menu.
 
 ## Settings
 
-| Setting | Purpose |
-| --- | --- |
-| Refresh interval | Scan every 1–30 seconds |
-| Show server count | Toggle the bar badge |
-| Show when empty | Keep the widget available with no servers |
-| Include Docker | Discover browser-ready Docker and Compose ports |
-| Ignored ports | Hide ports or ranges such as `3001,8000-8010` |
-| Always include ports | Probe unusual or unrecognized servers |
-| Authorize LAN access | Offer scoped UFW access before QR sharing |
+| Setting              | Purpose                                         |
+| -------------------- | ----------------------------------------------- |
+| Refresh interval     | Scan every 1–30 seconds                         |
+| Show server count    | Toggle the bar badge                            |
+| Show when empty      | Keep the widget available with no servers       |
+| Include Docker       | Discover browser-ready Docker and Compose ports |
+| Ignored ports        | Hide ports or ranges such as `3001,8000-8010`   |
+| Always include ports | Probe unusual or unrecognized servers           |
+| Authorize LAN access | Offer scoped UFW access before QR sharing       |
 
 ## How it works
 
@@ -110,6 +119,25 @@ If the plugin is already gone, inspect `sudo ufw status numbered` for rules
 commented `omarchy-localhost` and remove the matching rule numbers.
 
 ## Development
+
+Run the development watcher from the repository root:
+
+```bash
+./dev
+```
+
+It validates the plugin, creates a guarded development install at
+`~/.config/omarchy/plugins/emils.localhost`, enables it when necessary, and
+syncs every saved change into that directory. Omarchy then hot-reloads the
+plugin automatically, so QML changes appear immediately. Press `ctrl+c` to
+stop watching. The development install remains available for the next run;
+remove it with `omarchy plugin remove emils.localhost` when it is no longer
+needed.
+
+`./dev` will not overwrite a normal Git-installed copy. Remove that copy first
+if you want to replace it with the development install.
+
+Run the checks before opening a pull request:
 
 ```bash
 node --test tests/*.mjs

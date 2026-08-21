@@ -55,6 +55,17 @@ test("bar settings have matching defaults and schema entries", () => {
   assert.equal(schema.alwaysIncludePorts.type, "string")
 })
 
+test("development watcher installs safely and triggers native hot reload", () => {
+  const path = join(root, "dev")
+  const script = readFileSync(path, "utf8")
+  assert.ok(lstatSync(path).mode & 0o111, "dev must be executable")
+  assert.match(script, /omarchy plugin validate/)
+  assert.match(script, /\.omarchy-localhost-dev/)
+  assert.match(script, /rsync -a --delete/)
+  assert.match(script, /inotifywait -r -q/)
+  assert.match(script, /omarchy-shell shell rescanPlugins/)
+})
+
 test("plugin folder contains no symlinks", () => {
   function inspect(directory) {
     for (const entry of readdirSync(directory, { withFileTypes: true })) {
