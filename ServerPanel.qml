@@ -3,6 +3,7 @@ import QtQuick.Controls
 import QtQuick.Layouts
 import qs.Commons
 import qs.Ui
+import "RadarModel.js" as RadarModel
 
 Item {
   id: root
@@ -60,26 +61,6 @@ Item {
   implicitWidth: panelWidth
   implicitHeight: panelLayout.implicitHeight
 
-  function serverObject(row) {
-    if (!row) return null
-    return {
-      serverId: String(row.serverId || ""),
-      name: String(row.name || "Development server"),
-      framework: String(row.framework || "Dev server"),
-      frameworkId: String(row.frameworkId || "server"),
-      pid: Number(row.pid || 0),
-      startTime: Number(row.startTime || 0),
-      source: String(row.source || "process"),
-      containerId: String(row.containerId || ""),
-      port: Number(row.port || 0),
-      cwd: String(row.cwd || ""),
-      localUrl: String(row.localUrl || ""),
-      lanUrl: String(row.lanUrl || ""),
-      lanAvailable: row.lanAvailable === true,
-      hint: String(row.hint || "")
-    }
-  }
-
   function matches(server, needle) {
     if (!needle) return true
     var haystack = [
@@ -88,23 +69,6 @@ Item {
       server.containerId
     ].join(" ").toLowerCase()
     return haystack.indexOf(needle) !== -1
-  }
-
-  function serversEqual(left, right) {
-    return left.serverId === right.serverId
-      && left.name === right.name
-      && left.framework === right.framework
-      && left.frameworkId === right.frameworkId
-      && Number(left.pid) === Number(right.pid)
-      && Number(left.startTime) === Number(right.startTime)
-      && left.source === right.source
-      && left.containerId === right.containerId
-      && Number(left.port) === Number(right.port)
-      && left.cwd === right.cwd
-      && left.localUrl === right.localUrl
-      && left.lanUrl === right.lanUrl
-      && left.lanAvailable === right.lanAvailable
-      && left.hint === right.hint
   }
 
   function filteredIndex(serverId) {
@@ -121,7 +85,7 @@ Item {
     var filtered = []
     if (servers) {
       for (var index = 0; index < servers.count; index++) {
-        var server = serverObject(servers.get(index))
+        var server = RadarModel.normalizeServer(servers.get(index))
         if (matches(server, needle)) {
           incoming[server.serverId] = true
           filtered.push(server)
@@ -139,7 +103,7 @@ Item {
         filteredModel.insert(targetIndex, next)
       } else {
         if (currentIndex !== targetIndex) filteredModel.move(currentIndex, targetIndex, 1)
-        if (!serversEqual(filteredModel.get(targetIndex), next))
+        if (!RadarModel.serversEqual(filteredModel.get(targetIndex), next))
           filteredModel.set(targetIndex, next)
       }
     }
@@ -159,7 +123,7 @@ Item {
 
   function selectedServer() {
     if (selectedIndex < 0 || selectedIndex >= filteredModel.count) return null
-    return serverObject(filteredModel.get(selectedIndex))
+    return RadarModel.normalizeServer(filteredModel.get(selectedIndex))
   }
 
   function ensureSelectedVisible() {
@@ -807,7 +771,7 @@ Item {
     required property bool lanAvailable
     required property string hint
 
-    readonly property var server: root.serverObject(row)
+    readonly property var server: RadarModel.normalizeServer(row)
     readonly property string effectiveUrl: lanAvailable ? lanUrl : localUrl
     readonly property color statusDotColor: lanAvailable ? Color.accent : Color.urgent
     readonly property color statusTextColor: lanAvailable ? Color.accent : root.dim

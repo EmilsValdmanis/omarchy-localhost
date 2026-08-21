@@ -31,6 +31,12 @@ test("the bar icon is centered and hidden when it has no servers by default", ()
   assert.doesNotMatch(widget, /OpticalGlyph\s*\{[\s\S]*?y: Style\.spaceReal\(1\)[\s\S]*?text: "\\uf0ac"/)
 })
 
+test("the server count badge overlays the button outside the icon canvas", () => {
+  assert.match(widget, /iconComponent: Component\s*\{[\s\S]*?OpticalGlyph[\s\S]*?\}\s*\}\s*Rectangle\s*\{\s*id: countBadge/)
+  assert.match(widget, /id: countBadge[\s\S]*?visible: root\.showCountBadge && root\.serverCount > 0/)
+  assert.match(widget, /text: root\.serverCount > 9 \? "9\+" : String\(root\.serverCount\)/)
+})
+
 test("the server panel supports keyboard search and safe destructive actions", () => {
   assert.match(widget, /KeyboardPanel\s*\{/)
   assert.match(panel, /property alias keyboardFocusTarget: keyCatcher/)

@@ -130,6 +130,43 @@ function parseProcessPayload(raw, currentUid) {
   }
 }
 
+function normalizeServer(server) {
+  var source = server || {}
+  return {
+    serverId: String(source.serverId || source.id || ""),
+    name: String(source.name || "Development server"),
+    framework: String(source.framework || "Dev server"),
+    frameworkId: String(source.frameworkId || "server"),
+    pid: Number(source.pid || 0),
+    startTime: Number(source.startTime || 0),
+    source: String(source.source || "process"),
+    containerId: String(source.containerId || ""),
+    port: Number(source.port || 0),
+    cwd: String(source.cwd || ""),
+    localUrl: String(source.localUrl || ""),
+    lanUrl: String(source.lanUrl || ""),
+    lanAvailable: source.lanAvailable === true,
+    hint: String(source.hint || "")
+  }
+}
+
+function serversEqual(left, right) {
+  return left.serverId === right.serverId
+    && left.name === right.name
+    && left.framework === right.framework
+    && left.frameworkId === right.frameworkId
+    && Number(left.pid) === Number(right.pid)
+    && Number(left.startTime) === Number(right.startTime)
+    && left.source === right.source
+    && left.containerId === right.containerId
+    && Number(left.port) === Number(right.port)
+    && left.cwd === right.cwd
+    && left.localUrl === right.localUrl
+    && left.lanUrl === right.lanUrl
+    && left.lanAvailable === right.lanAvailable
+    && left.hint === right.hint
+}
+
 function parseActionPayload(raw, fallback) {
   try {
     var payload = JSON.parse(String(raw || ""))
@@ -633,7 +670,7 @@ function probeUrl(context, scheme) {
   return scheme + "://" + urlHost(probeHost(context.listener.addresses)) + ":" + context.listener.port + "/"
 }
 
-function browserResponse(status, contentType) {
+function browserResponse(status) {
   // Any HTTP status proves there is an HTTP service on the port. APIs commonly
   // return a JSON 404 or 405 at `/`, so requiring a successful HTML page hides
   // healthy backend services.
@@ -714,8 +751,7 @@ function parseProbeOutput(raw, transferMap) {
     if (fields.length < 2) continue
     var transfer = transferMap[Number(fields[0])]
     var status = Number(fields[1])
-    var contentType = fields.length > 2 ? fields.slice(2).join("\t") : ""
-    if (!transfer || !browserResponse(status, contentType)) continue
+    if (!transfer || !browserResponse(status)) continue
     var previous = accepted[transfer.id]
     if (!previous || transfer.preference < previous.preference)
       accepted[transfer.id] = { scheme: transfer.scheme, preference: transfer.preference }

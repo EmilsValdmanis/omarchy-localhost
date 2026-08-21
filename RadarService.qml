@@ -56,25 +56,6 @@ Item {
 
   ListModel { id: serverModel }
 
-  function normalizedServer(server) {
-    return {
-      serverId: String(server.id || ""),
-      name: String(server.name || "Development server"),
-      framework: String(server.framework || "Dev server"),
-      frameworkId: String(server.frameworkId || "server"),
-      pid: Number(server.pid || 0),
-      startTime: Number(server.startTime || 0),
-      source: String(server.source || "process"),
-      containerId: String(server.containerId || ""),
-      port: Number(server.port || 0),
-      cwd: String(server.cwd || ""),
-      localUrl: String(server.localUrl || ""),
-      lanUrl: String(server.lanUrl || ""),
-      lanAvailable: server.lanAvailable === true,
-      hint: String(server.hint || "")
-    }
-  }
-
   function modelIndex(serverId) {
     for (var i = 0; i < serverModel.count; i++) {
       if (serverModel.get(i).serverId === serverId) return i
@@ -82,29 +63,12 @@ Item {
     return -1
   }
 
-  function serversEqual(left, right) {
-    return left.serverId === right.serverId
-      && left.name === right.name
-      && left.framework === right.framework
-      && left.frameworkId === right.frameworkId
-      && Number(left.pid) === Number(right.pid)
-      && Number(left.startTime) === Number(right.startTime)
-      && left.source === right.source
-      && left.containerId === right.containerId
-      && Number(left.port) === Number(right.port)
-      && left.cwd === right.cwd
-      && left.localUrl === right.localUrl
-      && left.lanUrl === right.lanUrl
-      && left.lanAvailable === right.lanAvailable
-      && left.hint === right.hint
-  }
-
   function syncServers(nextServers) {
     var incoming = {}
     var normalized = []
     var changed = false
     for (var i = 0; i < nextServers.length; i++) {
-      var server = normalizedServer(nextServers[i])
+      var server = RadarModel.normalizeServer(nextServers[i])
       if (server.serverId === "") continue
       incoming[server.serverId] = true
       normalized.push(server)
@@ -128,7 +92,7 @@ Item {
           serverModel.move(currentIndex, targetIndex, 1)
           changed = true
         }
-        if (!serversEqual(serverModel.get(targetIndex), next)) {
+        if (!RadarModel.serversEqual(serverModel.get(targetIndex), next)) {
           serverModel.set(targetIndex, next)
           changed = true
         }
@@ -265,7 +229,7 @@ Item {
       "--parallel", "--parallel-immediate", "--insecure",
       "--connect-timeout", "0.3", "--max-time", "0.7",
       "--header", "Accept: text/html,application/xhtml+xml",
-      "--write-out", "%{urlnum}\\t%{http_code}\\t%{content_type}\\n", "--"
+      "--write-out", "%{urlnum}\\t%{http_code}\\n", "--"
     ]
     var transfers = []
     var ids = []

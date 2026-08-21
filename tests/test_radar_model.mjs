@@ -194,13 +194,79 @@ test("explains rejected and auxiliary listeners", () => {
 })
 
 test("classifies browser responses", () => {
-  assert.equal(radar.browserResponse(200, "text/html; charset=utf-8"), true)
-  assert.equal(radar.browserResponse(307, ""), true)
-  assert.equal(radar.browserResponse(401, "application/json"), true)
-  assert.equal(radar.browserResponse(404, "text/html"), true)
-  assert.equal(radar.browserResponse(400, "text/plain"), true)
-  assert.equal(radar.browserResponse(404, ""), true)
-  assert.equal(radar.browserResponse(0, ""), false)
+  assert.equal(radar.browserResponse(200), true)
+  assert.equal(radar.browserResponse(307), true)
+  assert.equal(radar.browserResponse(401), true)
+  assert.equal(radar.browserResponse(404), true)
+  assert.equal(radar.browserResponse(400), true)
+  assert.equal(radar.browserResponse(599), true)
+  assert.equal(radar.browserResponse(0), false)
+  assert.equal(radar.browserResponse(600), false)
+})
+
+test("normalizes servers from discovery and model rows", () => {
+  const fromDiscovery = radar.normalizeServer({
+    id: "410:991:5173",
+    name: "app",
+    framework: "Vite",
+    frameworkId: "vite",
+    pid: 410,
+    startTime: 991,
+    port: 5173,
+    cwd: "/work/app",
+    localUrl: "http://localhost:5173",
+    lanUrl: "http://192.168.0.119:5173",
+    lanAvailable: true,
+  })
+  assert.deepEqual(plain(fromDiscovery), {
+    serverId: "410:991:5173",
+    name: "app",
+    framework: "Vite",
+    frameworkId: "vite",
+    pid: 410,
+    startTime: 991,
+    source: "process",
+    containerId: "",
+    port: 5173,
+    cwd: "/work/app",
+    localUrl: "http://localhost:5173",
+    lanUrl: "http://192.168.0.119:5173",
+    lanAvailable: true,
+    hint: "",
+  })
+
+  const fromModelRow = radar.normalizeServer({ serverId: "docker:x:8000", port: "8000" })
+  assert.equal(fromModelRow.serverId, "docker:x:8000")
+  assert.equal(fromModelRow.port, 8000)
+  assert.equal(fromModelRow.name, "Development server")
+
+  assert.deepEqual(plain(radar.normalizeServer(null)), {
+    serverId: "",
+    name: "Development server",
+    framework: "Dev server",
+    frameworkId: "server",
+    pid: 0,
+    startTime: 0,
+    source: "process",
+    containerId: "",
+    port: 0,
+    cwd: "",
+    localUrl: "",
+    lanUrl: "",
+    lanAvailable: false,
+    hint: "",
+  })
+})
+
+test("server equality ignores nothing that the UI renders", () => {
+  const base = radar.normalizeServer({ id: "a", name: "app", lanAvailable: false })
+  const same = radar.normalizeServer({ id: "a", name: "app", lanAvailable: false })
+  const renamed = Object.assign({}, base, { name: "renamed" })
+  const lanChanged = Object.assign({}, base, { lanAvailable: true })
+
+  assert.equal(radar.serversEqual(base, same), true)
+  assert.equal(radar.serversEqual(base, renamed), false)
+  assert.equal(radar.serversEqual(base, lanChanged), false)
 })
 
 test("discovers published Docker Compose HTTP ports", () => {

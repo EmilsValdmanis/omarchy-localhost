@@ -22,6 +22,7 @@ from typing import Any, Sequence
 
 
 CONTAINER_ID_RE = re.compile(r"^[0-9a-f]{12,64}$")
+MAX_RESTART_LOGS = 10
 
 
 class LocalhostError(RuntimeError):
@@ -190,6 +191,20 @@ def read_restart_context(directory: Path) -> tuple[list[str], dict[str, str], st
     return argv, environment, cwd, executable
 
 
+def prune_restart_logs(state_root: Path, keep: int = MAX_RESTART_LOGS) -> None:
+    """Keep only the newest restart logs so repeated restarts cannot fill the disk."""
+
+    try:
+        logs = sorted(state_root.glob("restart-*.log"))
+    except OSError:
+        return
+    for stale in logs[:-keep]:
+        try:
+            stale.unlink()
+        except OSError:
+            pass
+
+
 def restart_process(
     pid: int, expected_start_time: int
 ) -> tuple[subprocess.Popen[bytes], Path]:
@@ -227,6 +242,7 @@ def restart_process(
             )
     except (OSError, ValueError) as error:
         raise LocalhostError(f"Could not restart the server: {error}") from error
+    prune_restart_logs(state_root)
     return restarted, log_path
 
 

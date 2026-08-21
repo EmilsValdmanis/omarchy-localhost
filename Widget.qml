@@ -14,6 +14,7 @@ BarWidget {
   property var pendingQrServer: null
   property var pendingFirewallRule: null
   property var managedFirewallRules: []
+  property bool firewallRulesUnreadable: false
   property string firewallCheckOutput: ""
   property string firewallRulesOutput: ""
   property string firewallError: ""
@@ -66,7 +67,11 @@ BarWidget {
   }
 
   function openQr(server) {
-    if (!server || !server.lanAvailable) return
+    if (!server) return
+    if (!server.lanAvailable) {
+      showNotice("Bind the server to 0.0.0.0 to share it over the LAN", true)
+      return
+    }
     if (firewallCheckProcess.running || firewallAllowProcess.running || firewallRemoveProcess.running) {
       showNotice("LAN access setup is already running", false)
       return
@@ -198,7 +203,8 @@ BarWidget {
         lanIp: radar.lanIp,
         lanInterface: radar.lanInterface,
         lanSubnet: radar.lanSubnet,
-        managedFirewallRules: root.managedFirewallRules
+        managedFirewallRules: root.managedFirewallRules,
+        firewallRulesUnreadable: root.firewallRulesUnreadable
       })
     }
   }
@@ -207,7 +213,7 @@ BarWidget {
     id: firewallCheckProcess
     command: [
       "bash", "-c",
-      "if ! command -v ufw >/dev/null || ! systemctl is-active --quiet ufw; then echo inactive; exit 0; fi; echo active; cat /etc/ufw/user.rules"
+      "if ! command -v ufw >/dev/null || ! systemctl is-active --quiet ufw; then echo inactive; exit 0; fi; echo active; cat /etc/ufw/user.rules 2>/dev/null || echo unreadable"
     ]
     stdout: StdioCollector {
       waitForEnd: true
@@ -222,12 +228,15 @@ BarWidget {
       if (!server) return
       var active = root.firewallCheckOutput.indexOf("active\n") === 0
       var rules = active ? root.firewallCheckOutput.slice(7) : ""
-      if (!active || (exitCode === 0 && RadarModel.ufwAllowsPort(
+      var unreadable = rules.split(/\r?\n/).indexOf("unreadable") !== -1
+      if (!active || (!unreadable && exitCode === 0 && RadarModel.ufwAllowsPort(
           rules, radar.lanInterface, radar.lanSubnet, server.port))) {
         root.pendingQrServer = null
         root.showQr(server)
         return
       }
+      if (unreadable)
+        showNotice("UFW rules could not be read; confirming LAN access for :" + server.port, false)
       panel.requestFirewallAuthorization(server)
     }
   }
@@ -236,7 +245,7 @@ BarWidget {
     id: firewallRulesProcess
     command: [
       "bash", "-c",
-      "if ! command -v ufw >/dev/null || ! systemctl is-active --quiet ufw; then echo inactive; exit 0; fi; echo active; cat /etc/ufw/user.rules"
+      "if ! command -v ufw >/dev/null || ! systemctl is-active --quiet ufw; then echo inactive; exit 0; fi; echo active; cat /etc/ufw/user.rules 2>/dev/null || echo unreadable"
     ]
     stdout: StdioCollector {
       waitForEnd: true
@@ -244,8 +253,11 @@ BarWidget {
     }
     onExited: function(exitCode) {
       var active = exitCode === 0 && root.firewallRulesOutput.indexOf("active\n") === 0
-      root.managedFirewallRules = active
-        ? RadarModel.parseManagedUfwRules(root.firewallRulesOutput.slice(7), "omarchy-localhost")
+      var body = active ? root.firewallRulesOutput.slice(7) : ""
+      var unreadable = body.split(/\r?\n/).indexOf("unreadable") !== -1
+      root.firewallRulesUnreadable = active && unreadable
+      root.managedFirewallRules = active && !unreadable
+        ? RadarModel.parseManagedUfwRules(body, "omarchy-localhost")
         : []
     }
   }
@@ -312,30 +324,32 @@ BarWidget {
           fontSize: button.fontSize
           color: Color.accent
         }
+      }
+    }
 
-        Rectangle {
-          visible: root.showCountBadge && root.serverCount > 0
-          anchors.right: parent.right
-          anchors.top: parent.top
-          anchors.rightMargin: -Style.space(2)
-          anchors.topMargin: -Style.space(1)
-          width: Math.max(Style.space(11), badgeText.implicitWidth + Style.space(4))
-          height: Style.space(11)
-          radius: height / 2
-          color: Color.accent
-          border.width: Math.max(1, Style.spacing.hairline)
-          border.color: root.bar ? root.bar.background : Color.background
+    Rectangle {
+      id: countBadge
+      visible: root.showCountBadge && root.serverCount > 0
+      anchors.right: parent.right
+      anchors.top: parent.top
+      anchors.rightMargin: Style.space(1)
+      anchors.topMargin: Style.space(1)
+      width: Math.max(Style.space(12), badgeText.implicitWidth + Style.space(5))
+      height: Style.space(12)
+      radius: height / 2
+      color: Color.accent
+      border.width: Math.max(1, Style.spacing.hairline)
+      border.color: root.bar ? root.bar.background : Color.background
+      z: 1
 
-          Text {
-            id: badgeText
-            anchors.centerIn: parent
-            text: root.serverCount > 9 ? "9+" : String(root.serverCount)
-            color: Color.background
-            font.family: Style.font.family
-            font.pixelSize: Style.space(7)
-            font.bold: true
-          }
-        }
+      Text {
+        id: badgeText
+        anchors.centerIn: parent
+        text: root.serverCount > 9 ? "9+" : String(root.serverCount)
+        color: Color.background
+        font.family: Style.font.family
+        font.pixelSize: Style.space(8)
+        font.bold: true
       }
     }
   }
