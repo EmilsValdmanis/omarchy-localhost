@@ -23,6 +23,14 @@ test("discovery settings are wired from the manifest-facing widget", () => {
   assert.doesNotMatch(service, /shift; exec docker/)
 })
 
+test("the bar icon is centered and hidden when it has no servers by default", () => {
+  assert.match(widget, /readonly property bool showWhenEmpty: setting\("showWhenEmpty", false\)/)
+  assert.match(widget, /visible: serverCount > 0 \|\| showWhenEmpty/)
+  assert.doesNotMatch(widget, /visible: serverCount > 0 \|\| showWhenEmpty \|\|/)
+  assert.match(widget, /OpticalGlyph\s*\{\s*anchors\.fill: parent\s*text: "\\uf0ac"/)
+  assert.doesNotMatch(widget, /OpticalGlyph\s*\{[\s\S]*?y: Style\.spaceReal\(1\)[\s\S]*?text: "\\uf0ac"/)
+})
+
 test("the server panel supports keyboard search and safe destructive actions", () => {
   assert.match(widget, /KeyboardPanel\s*\{/)
   assert.match(panel, /property alias keyboardFocusTarget: keyCatcher/)
