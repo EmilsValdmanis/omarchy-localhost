@@ -1,7 +1,7 @@
 # Localhost for Omarchy
 
-[![CI](https://github.com/EmilsValdmanis/omarchy-localhost/actions/workflows/ci.yml/badge.svg)](https://github.com/EmilsValdmanis/omarchy-localhost/actions/workflows/ci.yml)
-[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![Version](https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fraw.githubusercontent.com%2FEmilsValdmanis%2Fomarchy-localhost%2Fmain%2Fmanifest.json&query=%24.version&prefix=v&label=version&style=flat-square&labelColor=0c0b0c&color=c9a29a)](manifest.json)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg?style=flat-square&labelColor=0c0b0c&color=373637)](LICENSE)
 
 Discover, control, and share local development servers from the Omarchy bar.
 Start Vite, Next.js, Astro, Rails, or another server and Localhost adds it

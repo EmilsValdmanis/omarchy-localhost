@@ -1,15 +1,17 @@
 ## Summary
 
-<!-- Explain what changed and why. -->
+<!-- What changed, and why. Link the issue if there is one. -->
 
 ## Testing
 
-<!-- List the checks you ran and any relevant environment details. -->
+<!-- Note anything CI will not catch, such as Omarchy-specific checks. -->
+
+- [ ] `node --test tests/*.mjs`
+- [ ] `python3 -m unittest discover -s tests -p 'test_*.py'`
+- [ ] `omarchy plugin validate .` and `qmllint`, when available
 
 ## Checklist
 
-- [ ] I kept this change focused and documented user-visible behavior.
-- [ ] I added or updated tests where practical.
-- [ ] I ran `node --test tests/test_radar_model.mjs`.
-- [ ] I ran the Omarchy validation and QML lint checks, or explained why I could not.
-- [ ] I did not include secrets, private addresses, or unrelated generated files.
+- [ ] Change stays focused, and user-visible behavior is documented.
+- [ ] Tests cover behavior changes where practical.
+- [ ] No secrets, private addresses, or unrelated generated files.
