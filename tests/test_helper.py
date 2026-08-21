@@ -70,6 +70,11 @@ class ProcessActionTests(unittest.TestCase):
         self.assertIsNotNone(self.child.returncode)
 
     def test_restarts_with_recovered_process_context(self):
+        state_root = Path(self.state_directory.name) / "omarchy" / "localhost"
+        state_root.mkdir(parents=True)
+        for stamp in range(helper.MAX_RESTART_LOGS):
+            (state_root / f"restart-{stamp:019d}.log").write_text("old log")
+
         with mock.patch.dict(os.environ, {"XDG_STATE_HOME": self.state_directory.name}):
             self.restarted, log_path = helper.restart_process(
                 self.child.pid, self.start_time
@@ -79,6 +84,8 @@ class ProcessActionTests(unittest.TestCase):
         self.assertGreater(self.restarted.pid, 1)
         self.assertTrue(Path(f"/proc/{self.restarted.pid}").exists())
         self.assertTrue(log_path.parent.is_dir())
+        self.assertEqual(len(list(state_root.glob("restart-*.log"))), helper.MAX_RESTART_LOGS)
+        self.assertFalse((state_root / f"restart-{0:019d}.log").exists())
 
     def test_offers_force_stop_only_after_graceful_stop_fails(self):
         self.child.kill()
@@ -104,6 +111,27 @@ class ProcessActionTests(unittest.TestCase):
         helper.signal_process(self.child.pid, self.start_time, force=True)
         self.child.wait(timeout=2)
         self.assertIsNotNone(self.child.returncode)
+
+
+class RestartLogTests(unittest.TestCase):
+    def test_prunes_old_restart_logs_keeping_the_newest(self):
+        with tempfile.TemporaryDirectory() as directory:
+            state_root = Path(directory)
+            for stamp in range(15):
+                (state_root / f"restart-{stamp:019d}.log").write_text("log")
+
+            helper.prune_restart_logs(state_root)
+
+            remaining = sorted(path.name for path in state_root.glob("restart-*.log"))
+            self.assertEqual(len(remaining), helper.MAX_RESTART_LOGS)
+            self.assertEqual(remaining[0], f"restart-{5:019d}.log")
+            self.assertEqual(remaining[-1], f"restart-{14:019d}.log")
+
+    def test_tolerates_a_missing_state_directory(self):
+        with tempfile.TemporaryDirectory() as directory:
+            missing = Path(directory) / "omarchy" / "localhost"
+            helper.prune_restart_logs(missing)
+            self.assertFalse(missing.exists())
 
 
 class DockerActionTests(unittest.TestCase):
