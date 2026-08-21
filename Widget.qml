@@ -24,9 +24,11 @@ BarWidget {
   readonly property bool showWhenEmpty: setting("showWhenEmpty", false)
   readonly property bool opened: card.open
 
-  visible: serverCount > 0 || showWhenEmpty || managedFirewallRules.length > 0 || radar.scanError !== ""
+  visible: serverCount > 0 || showWhenEmpty
   implicitWidth: button.implicitWidth
   implicitHeight: button.implicitHeight
+
+  onVisibleChanged: if (!visible) card.open = false
 
   function showNotice(message, urgent) {
     notice = String(message || "")
@@ -301,9 +303,7 @@ BarWidget {
     iconComponent: Component {
       Item {
         OpticalGlyph {
-          width: parent.width
-          height: parent.height
-          y: Style.spaceReal(1)
+          anchors.fill: parent
           text: "\uf0ac"
           fontFamily: button.fontFamily
           fontSize: button.fontSize
