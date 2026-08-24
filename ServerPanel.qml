@@ -23,6 +23,13 @@ Item {
   property string forceStopServerId: ""
 
   property string query: ""
+  property string portFilter: "all"
+  readonly property var portFilterOptions: [
+    { value: "all", label: "All ports" },
+    { value: "dev", label: "Dev ports" },
+    { value: "lan", label: "LAN ready" },
+    { value: "docker", label: "Docker" }
+  ]
   readonly property bool searchMode: searchField.activeFocus
   property int selectedIndex: 0
   property int selectedActionIndex: 0
@@ -57,11 +64,13 @@ Item {
   readonly property real cardInset: Style.space(2)
   readonly property int listHeight: Math.min(serverList.contentHeight, Style.space(450))
   readonly property bool hasDiagnostics: scanError !== "" || warnings.length > 0
+  readonly property bool resultsFiltered: query.trim() !== "" || portFilter !== "all"
 
   implicitWidth: panelWidth
   implicitHeight: panelLayout.implicitHeight
 
   function matches(server, needle) {
+    if (!RadarModel.matchesServerFilter(server, portFilter)) return false
     if (!needle) return true
     var haystack = [
       server.name, server.framework, server.frameworkId, server.port,
@@ -69,6 +78,13 @@ Item {
       server.containerId
     ].join(" ").toLowerCase()
     return haystack.indexOf(needle) !== -1
+  }
+
+  function portFilterLabel() {
+    for (var index = 0; index < portFilterOptions.length; index++)
+      if (portFilterOptions[index].value === portFilter)
+        return portFilterOptions[index].label
+    return "All ports"
   }
 
   function filteredIndex(serverId) {
@@ -181,6 +197,9 @@ Item {
       focusNavigation()
     } else if (query) {
       clearSearch()
+    } else if (portFilter !== "all") {
+      portFilter = "all"
+      focusNavigation()
     } else {
       closeRequested()
     }
@@ -331,6 +350,7 @@ Item {
 
   onRevisionChanged: rebuildFilteredModel()
   onQueryChanged: rebuildFilteredModel()
+  onPortFilterChanged: rebuildFilteredModel()
   Component.onCompleted: rebuildFilteredModel()
 
   ListModel { id: filteredModel }
@@ -367,7 +387,9 @@ Item {
 
         Text {
           Layout.fillWidth: true
-          text: root.serverCount + " server" + (root.serverCount === 1 ? "" : "s")
+          text: (root.resultsFiltered
+              ? root.resultCount + " of " + root.serverCount + " servers"
+              : root.serverCount + " server" + (root.serverCount === 1 ? "" : "s"))
             + (root.lanIp ? "  ·  " + root.lanIp : "")
           color: root.dim
           font.family: Style.font.family
@@ -410,18 +432,39 @@ Item {
       }
     }
 
-    TextField {
-      id: searchField
+    RowLayout {
       visible: !root.showFirewallRules && !root.showDiagnostics
       Layout.fillWidth: true
-      placeholderText: "Search projects, frameworks, ports, or paths…"
-      foreground: root.foreground
-      text: root.query
-      onTextChanged: {
-        if (root.query !== text) root.query = text
+      spacing: Style.space(6)
+
+      TextField {
+        id: searchField
+        Layout.fillWidth: true
+        placeholderText: "Search projects, ports, or paths…"
+        foreground: root.foreground
+        text: root.query
+        onTextChanged: {
+          if (root.query !== text) root.query = text
+        }
+        onPressed: root.beginSearch()
+        Keys.onPressed: function(event) { root.handleSearchKey(event) }
       }
-      onPressed: root.beginSearch()
-      Keys.onPressed: function(event) { root.handleSearchKey(event) }
+
+      Dropdown {
+        id: portFilterDropdown
+        Layout.preferredWidth: Style.space(116)
+        Layout.preferredHeight: searchField.implicitHeight
+        showLabel: false
+        rowHeight: searchField.implicitHeight
+        popupRowHeight: Style.space(30)
+        options: root.portFilterOptions
+        value: root.portFilter
+        foreground: root.foreground
+        onChanged: function(value) {
+          root.portFilter = value
+          root.focusNavigation()
+        }
+      }
     }
 
     Rectangle {
@@ -600,7 +643,7 @@ Item {
         visible: root.resultCount > 0
         model: filteredModel
         clip: true
-        spacing: Style.space(8)
+        spacing: Style.space(5)
         boundsBehavior: Flickable.StopAtBounds
         flickableDirection: Flickable.VerticalFlick
         interactive: contentHeight > height
@@ -697,7 +740,11 @@ Item {
 
         Text {
           width: parent.width
-          text: root.query ? "No projects match “" + root.query + "”" : (root.scanning ? "Looking for development servers…" : "No development servers found")
+          text: root.query
+            ? "No projects match “" + root.query + "” in " + root.portFilterLabel().toLowerCase()
+            : (root.portFilter !== "all"
+              ? "No servers match “" + root.portFilterLabel() + "”"
+              : (root.scanning ? "Looking for development servers…" : "No development servers found"))
           color: root.foreground
           opacity: 0.75
           font.family: Style.font.family
@@ -707,7 +754,7 @@ Item {
         }
 
         Text {
-          visible: !root.query && !root.scanning
+          visible: !root.query && root.portFilter === "all" && !root.scanning
           width: parent.width
           text: "Start a server or press Ctrl+R to scan again."
           color: root.dim
@@ -806,7 +853,7 @@ Item {
         ? Style.hoverBorderFor(root.foreground, Color.accent)
         : Style.normalBorderFor(root.foreground, Color.accent),
       Math.max(1, hasCursor ? Style.hoverBorderWidth : Style.normalBorderWidth))
-    implicitHeight: rowContent.implicitHeight + Style.space(20)
+    implicitHeight: rowContent.implicitHeight + Style.space(12)
 
     HoverHandler {
       onHoveredChanged: if (hovered) root.selectedIndex = row.index
@@ -817,17 +864,17 @@ Item {
       anchors.left: parent.left
       anchors.right: parent.right
       anchors.verticalCenter: parent.verticalCenter
-      anchors.leftMargin: Style.space(12)
-      anchors.rightMargin: Style.space(10)
-      spacing: Style.space(8)
+      anchors.leftMargin: Style.space(10)
+      anchors.rightMargin: Style.space(8)
+      spacing: Style.space(5)
 
       RowLayout {
         Layout.fillWidth: true
-        spacing: Style.space(8)
+        spacing: Style.space(7)
 
         BorderSurface {
-          Layout.preferredWidth: Style.space(36)
-          Layout.preferredHeight: Style.space(36)
+          Layout.preferredWidth: Style.space(32)
+          Layout.preferredHeight: Style.space(32)
           Layout.alignment: Qt.AlignTop
           color: Style.selectedFillFor(root.foreground, Color.accent)
           radius: Style.cornerRadius
@@ -838,7 +885,7 @@ Item {
             text: row.frameworkIcon
             color: Color.accent
             fontFamily: Style.font.family
-            fontSize: Math.round(Style.font.heading * 1.25)
+            fontSize: Math.round(Style.font.heading * 1.1)
           }
 
           Text {
@@ -905,24 +952,34 @@ Item {
             }
           }
 
-          Text {
+          RowLayout {
             Layout.fillWidth: true
-            text: row.framework + "  ·  :" + row.port
-            color: root.dim
-            font.family: Style.font.family
-            font.pixelSize: Style.font.caption
-            elide: Text.ElideRight
+            spacing: Style.space(4)
+
+            Text {
+              text: row.framework
+              color: root.dim
+              font.family: Style.font.family
+              font.pixelSize: Style.font.caption
+            }
+
+            Text {
+              text: "·"
+              color: root.dim
+              font.family: Style.font.family
+              font.pixelSize: Style.font.caption
+            }
+
+            Text {
+              Layout.fillWidth: true
+              text: row.effectiveUrl
+              color: row.lanAvailable ? root.foreground : root.dim
+              font.family: Style.font.family
+              font.pixelSize: Style.font.caption
+              elide: Text.ElideMiddle
+            }
           }
         }
-      }
-
-      Text {
-        Layout.fillWidth: true
-        text: row.effectiveUrl
-        color: row.lanAvailable ? root.foreground : root.dim
-        font.family: Style.font.family
-        font.pixelSize: Style.font.bodySmall
-        elide: Text.ElideMiddle
       }
 
       RowLayout {
@@ -933,6 +990,9 @@ Item {
           text: "Open"
           foreground: root.foreground
           bordered: true
+          fontSize: Style.font.caption
+          horizontalPadding: Style.space(8)
+          verticalPadding: Style.space(4)
           hasCursor: row.index === root.selectedIndex && root.selectedActionIndex === 0
           onHovered: function(on) { if (on) root.setActionCursor(row.index, 0) }
           onClicked: root.openRequested(row.server)
@@ -940,6 +1000,9 @@ Item {
         Button {
           text: "Copy"
           foreground: root.foreground
+          fontSize: Style.font.caption
+          horizontalPadding: Style.space(8)
+          verticalPadding: Style.space(4)
           hasCursor: row.index === root.selectedIndex && root.selectedActionIndex === 1
           onHovered: function(on) { if (on) root.setActionCursor(row.index, 1) }
           onClicked: root.copyRequested(row.server)
@@ -950,6 +1013,9 @@ Item {
           accent: Color.accent
           active: row.lanAvailable
           enabled: row.lanAvailable
+          fontSize: Style.font.caption
+          horizontalPadding: Style.space(8)
+          verticalPadding: Style.space(4)
           hasCursor: row.index === root.selectedIndex && root.selectedActionIndex === 2
           tooltipText: row.lanAvailable ? "Open phone-ready QR code" : "Bind the server to 0.0.0.0 first"
           onHovered: function(on) { if (on) root.setActionCursor(row.index, 2) }

@@ -141,7 +141,7 @@ BarWidget {
     else openPanel()
   }
 
-  // Shape contract used by `omarchy-shell shell toggle emils.localhost`.
+  // Direct IPC contract used by `omarchy-shell emils.localhost toggle`.
   function open() { openPanel() }
   function close() { closePanel() }
   function toggle() { togglePanel() }
