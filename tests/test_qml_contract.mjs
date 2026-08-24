@@ -5,6 +5,7 @@ import test from "node:test"
 const service = readFileSync(new URL("../RadarService.qml", import.meta.url), "utf8")
 const widget = readFileSync(new URL("../Widget.qml", import.meta.url), "utf8")
 const panel = readFileSync(new URL("../ServerPanel.qml", import.meta.url), "utf8")
+const readme = readFileSync(new URL("../README.md", import.meta.url), "utf8")
 
 test("process actions cross the verified helper boundary", () => {
   assert.match(service, /"python3", helperPath, "process-action"/)
@@ -35,6 +36,12 @@ test("the server count badge overlays the button outside the icon canvas", () =>
   assert.match(widget, /iconComponent: Component\s*\{[\s\S]*?OpticalGlyph[\s\S]*?\}\s*\}\s*Rectangle\s*\{\s*id: countBadge/)
   assert.match(widget, /id: countBadge[\s\S]*?visible: root\.showCountBadge && root\.serverCount > 0/)
   assert.match(widget, /text: root\.serverCount > 9 \? "9\+" : String\(root\.serverCount\)/)
+})
+
+test("the global shortcut targets the bar widget instead of the QR overlay", () => {
+  assert.match(widget, /IpcHandler\s*\{\s*target: root\.moduleName[\s\S]*?function toggle\(\): string/)
+  assert.match(readme, /omarchy-shell emils\.localhost toggle/)
+  assert.doesNotMatch(readme, /omarchy-shell shell toggle emils\.localhost/)
 })
 
 test("the server panel supports keyboard search and safe destructive actions", () => {
@@ -86,6 +93,22 @@ test("server cards keep their borders and scroll promptly", () => {
   assert.match(panel, /width: Style\.space\(8\)[\s\S]*?implicitWidth: Style\.space\(3\)/)
   assert.match(panel, /serverScrollBar\.hovered \? 0\.64 : 0\.46/)
   assert.doesNotMatch(panel, /minimumSize: 0\.12/)
+})
+
+test("the server panel has a compact, composable global port filter", () => {
+  assert.match(panel, /property string portFilter: "all"/)
+  assert.match(panel, /value: "dev", label: "Dev ports"/)
+  assert.match(panel, /value: "lan", label: "LAN ready"/)
+  assert.match(panel, /value: "docker", label: "Docker"/)
+  assert.match(panel, /RadarModel\.matchesServerFilter\(server, portFilter\)/)
+  assert.match(panel, /onPortFilterChanged: rebuildFilteredModel\(\)/)
+  assert.match(panel, /else if \(portFilter !== "all"\) \{\s*portFilter = "all"/)
+  assert.match(panel, /Dropdown\s*\{[\s\S]*?value: root\.portFilter[\s\S]*?root\.portFilter = value/)
+  assert.match(panel, /implicitHeight: rowContent\.implicitHeight \+ Style\.space\(12\)/)
+  assert.match(panel, /Layout\.preferredWidth: Style\.space\(32\)/)
+  assert.match(panel, /text: row\.framework\s*color: root\.dim/)
+  assert.doesNotMatch(panel, /text: row\.framework \+ "  ·  :" \+ row\.port/)
+  assert.doesNotMatch(panel, /text: row\.effectiveUrl[\s\S]*?font\.pixelSize: Style\.font\.bodySmall/)
 })
 
 test("firewall writes are explicit, scoped, and manageable", () => {

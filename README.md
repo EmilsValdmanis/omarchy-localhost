@@ -66,7 +66,7 @@ optional and only runs when Docker is available.
 it to toggle Localhost, add this to `~/.config/hypr/bindings.lua`:
 
 ```lua
-o.bind("SUPER + SHIFT + L", "Localhost", "omarchy-shell shell toggle emils.localhost")
+o.bind("SUPER + SHIFT + L", "Localhost", "omarchy-shell emils.localhost toggle")
 ```
 
 ## Use it from a phone

@@ -4,6 +4,19 @@ var COMMON_DEV_PORTS = {
   8001: true, 8080: true, 8787: true
 }
 
+function isCommonDevPort(port) {
+  return COMMON_DEV_PORTS[Number(port)] === true
+}
+
+function matchesServerFilter(server, filterId) {
+  var normalized = normalizeServer(server)
+  var selectedFilter = String(filterId || "all")
+  if (selectedFilter === "dev") return isCommonDevPort(normalized.port)
+  if (selectedFilter === "lan") return normalized.lanAvailable
+  if (selectedFilter === "docker") return normalized.source === "docker"
+  return true
+}
+
 // Active HTTP probes are noisy when they hit databases and other services:
 // some of them log the HTTP request as a malformed protocol handshake. Match
 // the container-side port so a remapped service (for example 15432->5432) is

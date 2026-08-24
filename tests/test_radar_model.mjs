@@ -81,6 +81,21 @@ test("parses bounded port settings", () => {
   })
 })
 
+test("matches the global server filters", () => {
+  const commonDev = { port: 5173, source: "process", lanAvailable: false }
+  const unusualLan = { port: 4567, source: "process", lanAvailable: true }
+  const docker = { port: 9000, source: "docker", lanAvailable: true }
+
+  assert.equal(radar.matchesServerFilter(commonDev, "all"), true)
+  assert.equal(radar.matchesServerFilter(commonDev, "dev"), true)
+  assert.equal(radar.matchesServerFilter(unusualLan, "dev"), false)
+  assert.equal(radar.matchesServerFilter(unusualLan, "lan"), true)
+  assert.equal(radar.matchesServerFilter(commonDev, "lan"), false)
+  assert.equal(radar.matchesServerFilter(docker, "docker"), true)
+  assert.equal(radar.matchesServerFilter(commonDev, "docker"), false)
+  assert.equal(radar.matchesServerFilter(commonDev, "unknown"), true)
+})
+
 test("extracts declared ports", () => {
   assert.deepEqual(plain(radar.declaredPorts("vite --port 3000 --listen-port=4000 -p5000")), [3000, 4000, 5000])
 })
