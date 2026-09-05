@@ -45,11 +45,14 @@ test("parses verified process metadata from the helper", () => {
   assert.deepEqual(plain(radar.parseProcessPayload(payload, 1000)), {
     ok: true,
     error: "",
+    projects: {},
     processes: {
       410: {
         pid: 410,
         uid: 1000,
         command: "node app.js",
+        argv: ["node", "app.js"],
+        project: {},
         cwd: "/work/app",
         executable: "/usr/bin/node",
         startTime: 991,
@@ -100,21 +103,15 @@ test("extracts declared ports", () => {
   assert.deepEqual(plain(radar.declaredPorts("vite --port 3000 --listen-port=4000 -p5000")), [3000, 4000, 5000])
 })
 
-test("keeps an explicit server port and drops helper listeners", () => {
-  const listeners = [listener(3000), listener(33945), listener(41125)]
-  assert.deepEqual(plain(radar.primaryListeners(listeners, "vite --port 3000")), [listeners[0]])
+test("keeps multiple listeners and a fallback port despite the requested --port", () => {
+  const listeners = [listener(3001), listener(5173), listener(41125)]
+  const processes = { 410: { command: "vite --port 3000", cwd: "/work/app" } }
+  assert.deepEqual(plain(radar.candidateContexts(listeners, processes)).map(row => row.listener), listeners)
 })
 
-test("drops a worker listener whose port flag names its parent", () => {
-  assert.deepEqual(
-    plain(radar.primaryListeners([listener(41523)], "nodejsWorker.js --host 127.0.0.1 --port 35729")),
-    [],
-  )
-})
-
-test("prefers a conventional port without an explicit flag", () => {
-  const listeners = [listener(46869), listener(5173)]
-  assert.deepEqual(plain(radar.primaryListeners(listeners, "vite")), [listeners[1]])
+test("excludes named worker processes independently of their port flag", () => {
+  const processes = { 410: { command: "nodejsWorker.js --host 127.0.0.1 --port 35729", cwd: "/work/app" } }
+  assert.deepEqual(plain(radar.candidateContexts([listener(41523)], processes)), [])
 })
 
 test("detects common localhost frameworks", () => {
@@ -122,7 +119,7 @@ test("detects common localhost frameworks", () => {
     ["node node_modules/.bin/next dev", "next"],
     ["node node_modules/.bin/vue-cli-service serve", "vue"],
     ["bun run dev", "bun"],
-    ["python -m uvicorn app:app", "fastapi"],
+    ["python -m uvicorn app:app", "python"],
     ["python manage.py runserver 8000", "django"],
     ["php artisan serve", "laravel"],
     ["mix phx.server", "phoenix"],
@@ -133,6 +130,51 @@ test("detects common localhost frameworks", () => {
 
   for (const [command, id] of cases)
     assert.equal(radar.frameworkFor(command).id, id, command)
+})
+
+test("framework detection ignores incidental directory names and option values", () => {
+  for (const command of [
+    "node /work/next-project/server.js", "node /work/chair/index.js",
+    "node app.js --cert=/tmp/next", "node app.js --directory next",
+  ]) assert.equal(radar.frameworkFor(command).id, "node", command)
+  assert.equal(radar.frameworkFor("custom daemon --port 4555").id, "server")
+})
+
+test("nearest project dependencies refine generic runtimes without overriding explicit frameworks", () => {
+  const cases = [
+    ["vite", ["@sveltejs/kit", "svelte", "vite"], "SvelteKit"],
+    ["vite", ["react", "vite", "next"], "React"],
+    ["node dist/main.js", ["@nestjs/core"], "NestJS"],
+    ["bun src/index.ts", ["hono"], "Hono"],
+    ["next dev", ["react", "express"], "Next.js"],
+    ["python -m uvicorn app:app", ["fastapi", "uvicorn"], "FastAPI"],
+    ["python -m uvicorn app:app", ["react"], "Uvicorn"],
+    ["python -m http.server 8000", ["fastapi"], "Python HTTP"],
+  ]
+  for (const [command, dependencies, name] of cases)
+    assert.equal(radar.frameworkFor(command, { dependencies }).name, name, command)
+})
+
+test("recognizes the Next.js process title read as a single argv entry", () => {
+  const title = "next-server (v16.0.0)"
+  assert.equal(radar.frameworkFor(title, {}, [title]).id, "next")
+  assert.equal(radar.frameworkFor("node app.js", {}, ["node", "app.js", "--label", title]).id, "node")
+})
+
+test("port hints parse addresses and positional ports, not unrelated numeric options", () => {
+  assert.deepEqual(plain(radar.declaredPorts("gunicorn app:app --bind=0.0.0.0:4567 --workers 4")), [4567])
+  assert.deepEqual(plain(radar.declaredPorts("php -S [::]:8082")), [8082])
+  assert.deepEqual(plain(radar.declaredPorts("python -m http.server 8010 --bind 127.0.0.1")), [8010])
+  assert.deepEqual(plain(radar.declaredPorts("custom --port 70000 --timeout 3000")), [])
+})
+
+test("debugger and database listeners are excluded unless explicitly included", () => {
+  const listeners = [listener(3000), listener(9229), listener(6379)]
+  const process = { command: "node --inspect app.js", cwd: "/work/app" }
+  assert.deepEqual(plain(radar.candidateContexts(listeners, { 410: process })).map(row => row.listener.port), [3000])
+  assert.deepEqual(plain(radar.candidateContexts(listeners, { 410: process }, {}, { 9229: true })).map(row => row.listener.port), [3000, 9229])
+  assert.deepEqual(plain(radar.inspectorPorts("node --inspect-brk=127.0.0.1:9230 app.js")), [9230])
+  assert.equal(radar.isCandidate(listener(4567), { command: "custom-server --port 4567" }, { id: "server" }), true)
 })
 
 test("keeps unknown servers on the letter fallback path", () => {
@@ -189,7 +231,7 @@ test("respects ignored ports and explicit include overrides", () => {
   assert.equal(radar.isCandidate(generic, process, framework, { 4567: true }, { 4567: true }), false)
 })
 
-test("explains rejected and auxiliary listeners", () => {
+test("explains rejected listeners without hiding extra HTTP candidates", () => {
   const listeners = [listener(4567), listener(5173), listener(5199)]
   const processes = {
     410: {
@@ -204,7 +246,6 @@ test("explains rejected and auxiliary listeners", () => {
 
   assert.deepEqual(plain(radar.candidateDiagnostics(listeners, processes, selected, { 4567: true }, {})), [
     { port: 4567, process: "node", reason: "ignored by settings" },
-    { port: 5199, process: "node", reason: "auxiliary listener for the same process" },
   ])
 })
 
@@ -248,6 +289,8 @@ test("normalizes servers from discovery and model rows", () => {
     lanUrl: "http://192.168.0.119:5173",
     lanAvailable: true,
     hint: "",
+    projectRoot: "/work/app",
+    projectPath: "",
   })
 
   const fromModelRow = radar.normalizeServer({ serverId: "docker:x:8000", port: "8000" })
@@ -270,6 +313,8 @@ test("normalizes servers from discovery and model rows", () => {
     lanUrl: "",
     lanAvailable: false,
     hint: "",
+    projectRoot: "Other servers",
+    projectPath: "",
   })
 })
 
@@ -294,6 +339,7 @@ test("discovers published Docker Compose HTTP ports", () => {
     source: "docker",
     containerId: "ed3fec6359f3",
     displayName: "api / app",
+    projectRoot: "/work/betterat/apps/api",
     listener: {
       pid: 0,
       port: 8000,
@@ -321,6 +367,7 @@ test("does not HTTP-probe remapped database ports", () => {
     source: "docker",
     containerId: "b49bb7bdabef",
     displayName: "api / queue",
+    projectRoot: "/work/api",
     listener: {
       pid: 0,
       port: 15672,

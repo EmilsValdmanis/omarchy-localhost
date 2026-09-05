@@ -56,49 +56,8 @@ Item {
 
   ListModel { id: serverModel }
 
-  function modelIndex(serverId) {
-    for (var i = 0; i < serverModel.count; i++) {
-      if (serverModel.get(i).serverId === serverId) return i
-    }
-    return -1
-  }
-
   function syncServers(nextServers) {
-    var incoming = {}
-    var normalized = []
-    var changed = false
-    for (var i = 0; i < nextServers.length; i++) {
-      var server = RadarModel.normalizeServer(nextServers[i])
-      if (server.serverId === "") continue
-      incoming[server.serverId] = true
-      normalized.push(server)
-    }
-
-    for (var oldIndex = serverModel.count - 1; oldIndex >= 0; oldIndex--) {
-      if (!incoming[serverModel.get(oldIndex).serverId]) {
-        serverModel.remove(oldIndex)
-        changed = true
-      }
-    }
-
-    for (var targetIndex = 0; targetIndex < normalized.length; targetIndex++) {
-      var next = normalized[targetIndex]
-      var currentIndex = modelIndex(next.serverId)
-      if (currentIndex === -1) {
-        serverModel.insert(targetIndex, next)
-        changed = true
-      } else {
-        if (currentIndex !== targetIndex) {
-          serverModel.move(currentIndex, targetIndex, 1)
-          changed = true
-        }
-        if (!RadarModel.serversEqual(serverModel.get(targetIndex), next)) {
-          serverModel.set(targetIndex, next)
-          changed = true
-        }
-      }
-    }
-    if (changed) revision++
+    if (RadarModel.syncServerModel(serverModel, nextServers)) revision++
   }
 
   function addWarning(message) {
@@ -122,6 +81,7 @@ Item {
       scanQueued = true
       return
     }
+    scanQueued = false
     scanning = true
     pendingWarnings = []
     for (var warningIndex = 0; warningIndex < dependencyWarnings.length; warningIndex++)
@@ -142,7 +102,7 @@ Item {
       return
     }
     dockerProcess.command = [
-      "bash", "-c", "command -v docker >/dev/null 2>&1 || exit 127; exec docker \"$@\"",
+      "bash", "-c", "command -v docker >/dev/null 2>&1 || exit 127; exec timeout 3s docker \"$@\"",
       "localhost-docker", "ps", "--format",
       "[{{json .ID}},{{json .Names}},{{json .Image}},{{json .Ports}},{{json (.Label \"com.docker.compose.project.working_dir\")}},{{json (.Label \"com.docker.compose.service\")}},{{json (.Label \"com.docker.compose.project\")}}]"
     ]
@@ -164,7 +124,12 @@ Item {
         processIds.push(pid)
       }
     }
-    if (!processIds.length) {
+    var projectPaths = []
+    for (var dockerIndex = 0; dockerIndex < pendingDockerContexts.length; dockerIndex++) {
+      var path = pendingDockerContexts[dockerIndex].process.cwd
+      if (path && projectPaths.indexOf(path) === -1) projectPaths.push(path)
+    }
+    if (!processIds.length && !projectPaths.length) {
       processCache = ({})
       selectCandidates()
       return
@@ -174,7 +139,7 @@ Item {
     metadataError = ""
     metadataProcess.command = [
       "python3", helperPath, "inspect", "--pids", processIds.join(","),
-      "--uid", String(currentUid)
+      "--uid", String(currentUid), "--paths", JSON.stringify(projectPaths.slice(0, 256))
     ]
     metadataProcess.running = true
   }
@@ -182,6 +147,11 @@ Item {
   function cacheMetadata() {
     var parsed = RadarModel.parseProcessPayload(metadataOutput, currentUid)
     processCache = parsed.processes
+    var projects = parsed.projects || {}
+    for (var index = 0; index < pendingDockerContexts.length; index++) {
+      var context = pendingDockerContexts[index]
+      context.process.project = projects[context.process.cwd] || {}
+    }
     if (!parsed.ok) addWarning(parsed.error || metadataError)
     selectCandidates()
   }
@@ -206,16 +176,9 @@ Item {
       pendingListeners, processCache, nativeContexts, ignored, alwaysInclude).slice(0, 30)
     pendingContexts = nativeContexts.concat(pendingDockerContexts)
     pruneProbeCache(pendingContexts)
-    pendingSchemes = ({})
-    var toProbe = []
-    var now = Date.now()
-    for (var index = 0; index < pendingContexts.length; index++) {
-      var context = pendingContexts[index]
-      var id = RadarModel.contextId(context)
-      var cached = probeCache[id]
-      if (cached && cached.scheme) pendingSchemes[id] = cached.scheme
-      else if (!cached || Number(cached.expiresAt || 0) <= now) toProbe.push(context)
-    }
+    var plan = RadarModel.probePlan(pendingContexts, probeCache, Date.now())
+    pendingSchemes = plan.schemes
+    var toProbe = plan.pending
     if (!toProbe.length) {
       applyCandidates()
       return
@@ -346,7 +309,7 @@ Item {
     interval: Math.max(1, root.refreshIntervalSec) * 1000
     running: true
     repeat: true
-    onTriggered: root.scan()
+    onTriggered: if (!root.scanning) root.scan()
   }
 
   Timer {

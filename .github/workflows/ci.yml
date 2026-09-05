@@ -8,7 +8,7 @@ on:
 
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 permissions:
   contents: read
@@ -29,7 +29,61 @@ jobs:
           node-version: "24"
 
       - name: Run tests
-        run: node --test tests/*.mjs
+        run: node --test --test-isolation=none tests/*.mjs
 
       - name: Run helper tests
         run: python3 -m unittest discover -s tests -p 'test_*.py' -v
+
+      - name: Check release notes
+        run: python3 scripts/release.py
+
+  native-ui:
+    runs-on: ubuntu-latest
+    container: archlinux:base
+    timeout-minutes: 10
+    steps:
+      - name: Install Quickshell and test dependencies
+        run: pacman -Syu --noconfirm git python quickshell qt6-declarative iproute2 curl qrencode ttf-jetbrains-mono-nerd
+
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Check out the supported Omarchy UI
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: basecamp/omarchy
+          ref: v4.0.2
+          path: .test-omarchy
+          sparse-checkout: shell
+          persist-credentials: false
+
+      - name: Lint and test the real Quickshell UI
+        env:
+          OMARCHY_PATH: ${{ github.workspace }}/.test-omarchy
+        run: |
+          python3 tests/lint_qml.py
+          python3 tests/run_qml.py
+
+  release:
+    needs: [quality, native-ui]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: write
+    concurrency:
+      group: publish-release
+      cancel-in-progress: false
+    steps:
+      - name: Check out the tested commit
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+
+      - name: Publish the version and its changelog
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 scripts/release.py --publish

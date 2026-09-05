@@ -20,6 +20,8 @@ import time
 from pathlib import Path
 from typing import Any, Sequence
 
+from project_metadata import ProjectInspector
+
 
 CONTAINER_ID_RE = re.compile(r"^[0-9a-f]{12,64}$")
 MAX_RESTART_LOGS = 10
@@ -97,6 +99,7 @@ def inspect_process(
         "pid": pid,
         "uid": uid,
         "command": shlex.join(argv),
+        "argv": argv,
         "cwd": cwd,
         "executable": executable,
         "startTime": start_time,
@@ -107,11 +110,14 @@ def inspect_processes(
     pids: Sequence[int],
     expected_uid: int,
     proc_root: Path = Path("/proc"),
+    inspector: ProjectInspector | None = None,
 ) -> list[dict[str, Any]]:
+    inspector = inspector or ProjectInspector()
     processes = []
     for pid in dict.fromkeys(pids):
         process = inspect_process(pid, expected_uid, proc_root)
         if process and process["cwd"] and process["command"]:
+            process["project"] = inspector.inspect(process["cwd"])
             processes.append(process)
     return processes
 
@@ -298,6 +304,7 @@ def build_parser() -> argparse.ArgumentParser:
     inspect_parser = subparsers.add_parser("inspect", help="Read owned process metadata")
     inspect_parser.add_argument("--pids", required=True)
     inspect_parser.add_argument("--uid", required=True, type=int)
+    inspect_parser.add_argument("--paths", default="[]", help="JSON array of Compose working directories")
 
     action_parser = subparsers.add_parser("process-action", help="Stop or restart a process")
     action_parser.add_argument("--action", choices=["stop", "force-stop", "restart"], required=True)
@@ -314,10 +321,18 @@ def main(argv: Sequence[str] | None = None) -> int:
     arguments = build_parser().parse_args(argv)
     try:
         if arguments.command == "inspect":
+            inspector = ProjectInspector()
+            try:
+                paths = json.loads(arguments.paths)
+            except ValueError as error:
+                raise LocalhostError("Invalid project paths") from error
+            if not isinstance(paths, list) or len(paths) > 256 or not all(isinstance(path, str) for path in paths):
+                raise LocalhostError("Invalid project paths")
             processes = inspect_processes(
-                comma_separated_pids(arguments.pids), arguments.uid
+                comma_separated_pids(arguments.pids), arguments.uid, inspector=inspector
             )
-            json_print({"ok": True, "processes": processes})
+            json_print({"ok": True, "processes": processes,
+                        "projects": {path: inspector.inspect(path) for path in dict.fromkeys(paths)}})
         elif arguments.command == "process-action":
             if arguments.action == "restart":
                 restarted, log_path = restart_process(arguments.pid, arguments.start_time)

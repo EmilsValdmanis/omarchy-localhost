@@ -1,3 +1,5 @@
+pragma ComponentBehavior: Bound
+
 import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
@@ -10,6 +12,7 @@ Item {
 
   property var servers: null
   property int revision: 0
+  property bool panelActive: true
   property string lanIp: ""
   property string notice: ""
   property bool noticeUrgent: false
@@ -23,6 +26,8 @@ Item {
   property string forceStopServerId: ""
 
   property string query: ""
+  property bool groupByProject: true
+  property var groups: ({})
   property string portFilter: "all"
   readonly property var portFilterOptions: [
     { value: "all", label: "All ports" },
@@ -56,11 +61,13 @@ Item {
   signal firewallRemovalConfirmed(var rule)
 
   readonly property color foreground: Color.popups.text
-  readonly property color dim: Qt.darker(foreground, 1.45)
-  readonly property int panelWidth: Style.space(500)
+  readonly property color dim: Qt.darker(foreground, 1.4)
+  readonly property int panelWidth: Style.space(460)
   readonly property int serverCount: servers ? servers.count : 0
   readonly property int resultCount: filteredModel.count
   readonly property int actionCount: 7
+  readonly property var currentServer: selectedServer()
+  readonly property int projectCount: Object.keys(groups).length
   readonly property real cardInset: Style.space(2)
   readonly property int listHeight: Math.min(serverList.contentHeight, Style.space(450))
   readonly property bool hasDiagnostics: scanError !== "" || warnings.length > 0
@@ -69,17 +76,6 @@ Item {
   implicitWidth: panelWidth
   implicitHeight: panelLayout.implicitHeight
 
-  function matches(server, needle) {
-    if (!RadarModel.matchesServerFilter(server, portFilter)) return false
-    if (!needle) return true
-    var haystack = [
-      server.name, server.framework, server.frameworkId, server.port,
-      server.cwd, server.localUrl, server.lanUrl, server.source,
-      server.containerId
-    ].join(" ").toLowerCase()
-    return haystack.indexOf(needle) !== -1
-  }
-
   function portFilterLabel() {
     for (var index = 0; index < portFilterOptions.length; index++)
       if (portFilterOptions[index].value === portFilter)
@@ -87,54 +83,30 @@ Item {
     return "All ports"
   }
 
-  function filteredIndex(serverId) {
-    for (var index = 0; index < filteredModel.count; index++)
-      if (filteredModel.get(index).serverId === serverId) return index
-    return -1
-  }
-
   function rebuildFilteredModel() {
+    if (!panelActive) return
     var previous = selectedServer()
     var previousId = previous ? previous.serverId : ""
     var needle = query.trim().toLowerCase()
-    var incoming = {}
     var filtered = []
     if (servers) {
       for (var index = 0; index < servers.count; index++) {
-        var server = RadarModel.normalizeServer(servers.get(index))
-        if (matches(server, needle)) {
-          incoming[server.serverId] = true
-          filtered.push(server)
-        }
+        var server = servers.get(index)
+        if (RadarModel.matchesSearch(server, needle, portFilter)) filtered.push(server)
       }
     }
-
-    for (var oldIndex = filteredModel.count - 1; oldIndex >= 0; oldIndex--)
-      if (!incoming[filteredModel.get(oldIndex).serverId]) filteredModel.remove(oldIndex)
-
-    for (var targetIndex = 0; targetIndex < filtered.length; targetIndex++) {
-      var next = filtered[targetIndex]
-      var currentIndex = filteredIndex(next.serverId)
-      if (currentIndex === -1) {
-        filteredModel.insert(targetIndex, next)
-      } else {
-        if (currentIndex !== targetIndex) filteredModel.move(currentIndex, targetIndex, 1)
-        if (!RadarModel.serversEqual(filteredModel.get(targetIndex), next))
-          filteredModel.set(targetIndex, next)
+    filtered.sort(function(a, b) { return RadarModel.compareServers(a, b, root.groupByProject) })
+    groups = RadarModel.projectGroups(filtered)
+    RadarModel.syncServerModel(filteredModel, filtered)
+    var nextIndex = Math.min(selectedIndex, Math.max(0, filteredModel.count - 1))
+    for (var i = 0; i < filteredModel.count; i++) {
+      if (filteredModel.get(i).serverId === previousId) {
+        nextIndex = i
+        break
       }
     }
-
-    selectedIndex = 0
-    if (previousId) {
-      for (var nextIndex = 0; nextIndex < filteredModel.count; nextIndex++) {
-        if (filteredModel.get(nextIndex).serverId === previousId) {
-          selectedIndex = nextIndex
-          break
-        }
-      }
-    }
+    selectedIndex = nextIndex
     normalizeSelectedAction(1)
-    ensureSelectedVisible()
   }
 
   function selectedServer() {
@@ -143,21 +115,23 @@ Item {
   }
 
   function ensureSelectedVisible() {
-    Qt.callLater(function() {
-      if (filteredModel.count > 0)
-        serverList.positionViewAtIndex(root.selectedIndex, ListView.Contain)
-    })
+    Qt.callLater(positionSelection)
+  }
+
+  function positionSelection() {
+    if (filteredModel.count > 0 && panelActive)
+      serverList.positionViewAtIndex(selectedIndex, ListView.Contain)
   }
 
   function select(delta) {
-    if (!filteredModel.count) return
+    if (!filteredModel.count || showDiagnostics || showFirewallRules) return
     selectedIndex = (selectedIndex + delta + filteredModel.count) % filteredModel.count
     normalizeSelectedAction(delta < 0 ? -1 : 1)
     ensureSelectedVisible()
   }
 
   function actionEnabled(actionIndex, server) {
-    return !!server && (actionIndex !== 2 || server.lanAvailable)
+    return RadarModel.actionEnabled(actionIndex, server)
   }
 
   function normalizeSelectedAction(direction) {
@@ -207,15 +181,18 @@ Item {
 
   function activateSelected() {
     if (showDiagnostics || showFirewallRules) return
-    var selected = selectedServer()
-    if (!actionEnabled(selectedActionIndex, selected)) return
-    if (selectedActionIndex === 0) openRequested(selected)
-    else if (selectedActionIndex === 1) copyRequested(selected)
-    else if (selectedActionIndex === 2) qrRequested(selected)
-    else if (selectedActionIndex === 3) terminalRequested(selected)
-    else if (selectedActionIndex === 4) projectRequested(selected)
-    else if (selectedActionIndex === 5) restartRequested(selected)
-    else if (selectedActionIndex === 6)
+    activateAction(selectedActionIndex, selectedServer())
+  }
+
+  function activateAction(actionIndex, selected) {
+    if (!actionEnabled(actionIndex, selected)) return
+    if (actionIndex === 0) openRequested(selected)
+    else if (actionIndex === 1) copyRequested(selected)
+    else if (actionIndex === 2) qrRequested(selected)
+    else if (actionIndex === 3) terminalRequested(selected)
+    else if (actionIndex === 4) projectRequested(selected)
+    else if (actionIndex === 5) restartRequested(selected)
+    else if (actionIndex === 6)
       requestStop(selected, selected.serverId === forceStopServerId && selected.source !== "docker")
   }
 
@@ -231,7 +208,6 @@ Item {
   function clearSearch() {
     query = ""
     searchField.text = ""
-    rebuildFilteredModel()
     focusNavigation()
   }
 
@@ -348,9 +324,12 @@ Item {
     }
   }
 
-  onRevisionChanged: rebuildFilteredModel()
-  onQueryChanged: rebuildFilteredModel()
-  onPortFilterChanged: rebuildFilteredModel()
+  onRevisionChanged: Qt.callLater(rebuildFilteredModel)
+  onServersChanged: Qt.callLater(rebuildFilteredModel)
+  onPanelActiveChanged: if (panelActive) Qt.callLater(rebuildFilteredModel)
+  onGroupByProjectChanged: { rebuildFilteredModel(); ensureSelectedVisible() }
+  onQueryChanged: { rebuildFilteredModel(); ensureSelectedVisible() }
+  onPortFilterChanged: { rebuildFilteredModel(); ensureSelectedVisible() }
   Component.onCompleted: rebuildFilteredModel()
 
   ListModel { id: filteredModel }
@@ -366,7 +345,7 @@ Item {
   ColumnLayout {
     id: panelLayout
     anchors.fill: parent
-    spacing: Style.space(10)
+    spacing: Style.space(6)
 
     RowLayout {
       Layout.fillWidth: true
@@ -376,26 +355,33 @@ Item {
         Layout.fillWidth: true
         spacing: Style.space(1)
 
-        Text {
+        PanelSectionHeader {
           text: "LOCALHOST"
-          color: root.foreground
-          font.family: Style.font.family
-          font.pixelSize: Style.font.heading
-          font.bold: true
-          font.letterSpacing: 1.2
+          foreground: root.foreground
+          fontSize: Style.font.heading
         }
 
         Text {
+          textFormat: Text.PlainText
           Layout.fillWidth: true
           text: (root.resultsFiltered
               ? root.resultCount + " of " + root.serverCount + " servers"
               : root.serverCount + " server" + (root.serverCount === 1 ? "" : "s"))
-            + (root.lanIp ? "  ·  " + root.lanIp : "")
+            + (root.groupByProject ? " · " + root.projectCount + " project" + (root.projectCount === 1 ? "" : "s") : "")
           color: root.dim
           font.family: Style.font.family
           font.pixelSize: Style.font.caption
           elide: Text.ElideRight
         }
+      }
+
+      PanelActionButton {
+        objectName: "groupToggle"
+        iconText: "\uf07b"
+        tooltipText: root.groupByProject ? "Grouped by project · click to sort by port" : "Group by project"
+        foreground: root.foreground
+        bordered: root.groupByProject
+        onClicked: { root.groupByProject = !root.groupByProject; root.focusNavigation() }
       }
 
       PanelActionButton {
@@ -440,7 +426,7 @@ Item {
       TextField {
         id: searchField
         Layout.fillWidth: true
-        placeholderText: "Search projects, ports, or paths…"
+        placeholderText: "Search projects or ports…"
         foreground: root.foreground
         text: root.query
         onTextChanged: {
@@ -467,10 +453,9 @@ Item {
       }
     }
 
-    Rectangle {
+    PanelSeparator {
       Layout.fillWidth: true
-      height: Math.max(1, Style.spacing.hairline)
-      color: Qt.rgba(root.foreground.r, root.foreground.g, root.foreground.b, 0.14)
+      foreground: root.foreground
     }
 
     BorderSurface {
@@ -482,10 +467,13 @@ Item {
       radius: Style.cornerRadius
 
       Text {
+        textFormat: Text.PlainText
         id: diagnosticText
         anchors.fill: parent
         anchors.margins: Style.space(7)
         text: root.scanError || root.warnings.join("\n")
+        maximumLineCount: 3
+        elide: Text.ElideRight
         color: root.scanError ? Color.urgent : root.dim
         font.family: Style.font.family
         font.pixelSize: Style.font.caption
@@ -493,25 +481,23 @@ Item {
       }
     }
 
-    ColumnLayout {
+    PanelScrollArea {
+      objectName: "firewallList"
       visible: root.showFirewallRules
       Layout.fillWidth: true
       spacing: Style.space(6)
 
-      Text {
+      PanelSectionHeader {
         Layout.fillWidth: true
         text: "LAN ACCESS RULES"
-        color: root.dim
-        font.family: Style.font.family
-        font.pixelSize: Style.font.caption
-        font.bold: true
-        font.letterSpacing: 0.8
+        foreground: root.foreground
       }
 
       Repeater {
         model: root.firewallRules
 
         CursorSurface {
+          id: firewallRow
           required property var modelData
           Layout.fillWidth: true
           Layout.preferredHeight: Style.space(38)
@@ -525,7 +511,8 @@ Item {
             spacing: Style.space(8)
 
             Text {
-              text: ":" + modelData.port
+              textFormat: Text.PlainText
+              text: ":" + firewallRow.modelData.port
               color: root.foreground
               font.family: Style.font.family
               font.pixelSize: Style.font.body
@@ -533,8 +520,9 @@ Item {
             }
 
             Text {
+              textFormat: Text.PlainText
               Layout.fillWidth: true
-              text: modelData.subnet + (modelData.interfaceName ? "  ·  " + modelData.interfaceName : "")
+              text: firewallRow.modelData.subnet + (firewallRow.modelData.interfaceName ? "  ·  " + firewallRow.modelData.interfaceName : "")
               color: root.dim
               font.family: Style.font.family
               font.pixelSize: Style.font.caption
@@ -551,19 +539,21 @@ Item {
               horizontalPadding: Style.space(8)
               verticalPadding: Style.space(4)
               enabled: !root.firewallBusy
-              onClicked: root.requestFirewallRemoval(modelData)
+              onClicked: root.requestFirewallRemoval(firewallRow.modelData)
             }
           }
         }
       }
     }
 
-    ColumnLayout {
+    PanelScrollArea {
+      objectName: "diagnosticList"
       visible: root.showDiagnostics
       Layout.fillWidth: true
       spacing: Style.space(6)
 
       Text {
+        textFormat: Text.PlainText
         Layout.fillWidth: true
         text: root.scanSummary || "DISCOVERY DETAILS"
         color: root.dim
@@ -578,6 +568,7 @@ Item {
         model: root.diagnostics.slice(0, 8)
 
         BorderSurface {
+          id: diagnosticItem
           required property var modelData
           Layout.fillWidth: true
           Layout.preferredHeight: diagnosticRow.implicitHeight + Style.space(12)
@@ -595,23 +586,26 @@ Item {
             spacing: Style.space(8)
 
             Text {
-              text: ":" + modelData.port
+              textFormat: Text.PlainText
+              text: ":" + diagnosticItem.modelData.port
               color: root.foreground
               font.family: Style.font.family
               font.pixelSize: Style.font.caption
               font.bold: true
             }
             Text {
+              textFormat: Text.PlainText
               Layout.preferredWidth: Style.space(90)
-              text: modelData.process
+              text: diagnosticItem.modelData.process
               color: root.foreground
               font.family: Style.font.family
               font.pixelSize: Style.font.caption
               elide: Text.ElideRight
             }
             Text {
+              textFormat: Text.PlainText
               Layout.fillWidth: true
-              text: modelData.reason
+              text: diagnosticItem.modelData.reason
               color: root.dim
               font.family: Style.font.family
               font.pixelSize: Style.font.caption
@@ -622,6 +616,7 @@ Item {
       }
 
       Text {
+        textFormat: Text.PlainText
         visible: root.diagnostics.length > 8
         Layout.fillWidth: true
         text: "+ " + (root.diagnostics.length - 8) + " more skipped listeners"
@@ -635,102 +630,74 @@ Item {
     Item {
       visible: !root.showFirewallRules && !root.showDiagnostics
       Layout.fillWidth: true
+      Layout.fillHeight: true
+      Layout.minimumHeight: 0
       Layout.preferredHeight: root.resultCount > 0 ? Math.max(Style.space(80), root.listHeight) : Style.space(120)
 
       ListView {
         id: serverList
+        objectName: "serverList"
         anchors.fill: parent
         visible: root.resultCount > 0
         model: filteredModel
         clip: true
-        spacing: Style.space(5)
+        spacing: Style.space(2)
         boundsBehavior: Flickable.StopAtBounds
         flickableDirection: Flickable.VerticalFlick
         interactive: contentHeight > height
         currentIndex: root.selectedIndex
+        highlightFollowsCurrentItem: false
+        reuseItems: true
 
         ScrollBar.vertical: ScrollBar {
           id: serverScrollBar
-          policy: serverList.contentHeight > serverList.height
-            ? ScrollBar.AlwaysOn
-            : ScrollBar.AlwaysOff
-          width: Style.space(8)
-          padding: Style.space(2)
-          interactive: true
-
-          contentItem: Rectangle {
-            implicitWidth: Style.space(3)
-            implicitHeight: Style.space(32)
-            radius: width / 2
-            color: root.foreground
-            opacity: serverScrollBar.pressed
-              ? 0.82
-              : (serverScrollBar.hovered ? 0.64 : 0.46)
-          }
-
-          background: Item {}
+          policy: ScrollBar.AsNeeded
         }
 
-        delegate: Item {
-          id: cardWrapper
-          required property int index
-          required property string serverId
-          required property string name
-          required property string framework
-          required property string frameworkId
-          required property int pid
-          required property double startTime
-          required property string source
-          required property string containerId
-          required property int port
-          required property string cwd
-          required property string localUrl
-          required property string lanUrl
-          required property bool lanAvailable
-          required property string hint
-
+        section.property: root.groupByProject ? "projectRoot" : ""
+        section.criteria: ViewSection.FullString
+        section.delegate: Item {
+          id: groupHeader
+          required property string section
+          readonly property var group: root.groups[section] || { name: "Project", count: 0 }
           width: serverList.width
-            - (serverScrollBar.visible ? serverScrollBar.width + Style.space(4) : 0)
-          height: serverCard.implicitHeight
-
-          ServerRow {
-            id: serverCard
-            x: root.cardInset
-            width: parent.width - root.cardInset * 2
-            index: cardWrapper.index
-            serverId: cardWrapper.serverId
-            name: cardWrapper.name
-            framework: cardWrapper.framework
-            frameworkId: cardWrapper.frameworkId
-            pid: cardWrapper.pid
-            startTime: cardWrapper.startTime
-            source: cardWrapper.source
-            containerId: cardWrapper.containerId
-            port: cardWrapper.port
-            cwd: cardWrapper.cwd
-            localUrl: cardWrapper.localUrl
-            lanUrl: cardWrapper.lanUrl
-            lanAvailable: cardWrapper.lanAvailable
-            hint: cardWrapper.hint
+          height: Style.space(28)
+          RowLayout {
+            anchors.fill: parent
+            anchors.leftMargin: Style.space(8)
+            anchors.rightMargin: Style.space(10)
+            spacing: Style.space(8)
+            PanelSectionHeader {
+              Layout.fillWidth: true
+              text: groupHeader.group.name
+              foreground: root.foreground
+              elide: Text.ElideMiddle
+            }
+            Text {
+              textFormat: Text.PlainText
+              text: groupHeader.group.count
+              color: root.dim
+              font.family: Style.font.family
+              font.pixelSize: Style.font.caption
+            }
           }
         }
-      }
 
-      MouseArea {
-        anchors.fill: parent
-        z: 100
-        acceptedButtons: Qt.NoButton
-        hoverEnabled: false
-        onWheel: function(wheel) {
-          if (!serverList.interactive) return
-          var pixelDelta = wheel.pixelDelta.y
-          var distance = pixelDelta !== 0 ? -pixelDelta * 1.5 : -wheel.angleDelta.y * 1.25
-          var maximum = Math.max(0, serverList.contentHeight - serverList.height)
-          serverList.cancelFlick()
-          serverList.contentY = Math.max(0, Math.min(maximum, serverList.contentY + distance))
-          wheel.accepted = true
+        delegate: ServerRow {
+          required property var model
+          server: RadarModel.normalizeServer(model)
+          x: root.cardInset
+          width: serverList.width - root.cardInset * 2
+            - (serverScrollBar.visible ? serverScrollBar.width + Style.space(4) : 0)
+          height: implicitHeight
+          selected: index === root.selectedIndex
+          foreground: root.foreground
+          onRowHovered: root.selectedIndex = index
+          onRowSelected: { root.selectedIndex = index; root.focusNavigation() }
+          onOpenRequested: { root.selectedIndex = index; root.activateAction(0, server) }
         }
       }
+
 
       Column {
         visible: root.resultCount === 0
@@ -739,6 +706,7 @@ Item {
         spacing: Style.space(6)
 
         Text {
+          textFormat: Text.PlainText
           width: parent.width
           text: root.query
             ? "No projects match “" + root.query + "” in " + root.portFilterLabel().toLowerCase()
@@ -754,6 +722,7 @@ Item {
         }
 
         Text {
+          textFormat: Text.PlainText
           visible: !root.query && root.portFilter === "all" && !root.scanning
           width: parent.width
           text: "Start a server or press Ctrl+R to scan again."
@@ -765,10 +734,30 @@ Item {
       }
     }
 
+    PanelSeparator {
+      visible: !root.showFirewallRules && !root.showDiagnostics && root.resultCount > 0
+      Layout.fillWidth: true
+      foreground: root.foreground
+    }
+
+    ServerActions {
+      visible: !root.showFirewallRules && !root.showDiagnostics && root.resultCount > 0
+      Layout.fillWidth: true
+      server: root.currentServer
+      selectedActionIndex: root.selectedActionIndex
+      forceStopAvailable: !!server && server.serverId === root.forceStopServerId && server.source !== "docker"
+      foreground: root.foreground
+      onActionHovered: function(actionIndex) { root.selectedActionIndex = actionIndex }
+      onActionTriggered: function(actionIndex) { root.activateAction(actionIndex, root.currentServer) }
+    }
+
     Text {
+      textFormat: Text.PlainText
       visible: root.notice !== ""
       Layout.fillWidth: true
       text: root.notice
+      maximumLineCount: 3
+      elide: Text.ElideRight
       color: root.noticeUrgent ? Color.urgent : root.dim
       font.family: Style.font.family
       font.pixelSize: Style.font.caption
@@ -777,8 +766,9 @@ Item {
     }
 
     Text {
+      textFormat: Text.PlainText
       Layout.fillWidth: true
-      text: "j/k card  ·  h/l action  ·  enter run  ·  / search"
+      text: "↑↓ select · ←→ action · enter run · / search"
       color: root.dim
       opacity: 0.66
       font.family: Style.font.family
@@ -800,268 +790,4 @@ Item {
     onConfirmed: root.confirmPendingAction()
   }
 
-  component ServerRow: CursorSurface {
-    id: row
-    required property int index
-    required property string serverId
-    required property string name
-    required property string framework
-    required property string frameworkId
-    required property int pid
-    required property double startTime
-    required property string source
-    required property string containerId
-    required property int port
-    required property string cwd
-    required property string localUrl
-    required property string lanUrl
-    required property bool lanAvailable
-    required property string hint
-
-    readonly property var server: RadarModel.normalizeServer(row)
-    readonly property string effectiveUrl: lanAvailable ? lanUrl : localUrl
-    readonly property color statusDotColor: lanAvailable ? Color.accent : Color.urgent
-    readonly property color statusTextColor: lanAvailable ? Color.accent : root.dim
-    readonly property string statusTooltip: lanAvailable
-      ? row.hint
-      : "Bound to localhost only.\nStart with --host / 0.0.0.0 to use it from another device."
-    readonly property bool forceStopAvailable: row.serverId === root.forceStopServerId && row.source !== "docker"
-    readonly property var frameworkIcons: ({
-      next: "", vite: "", svelte: "", astro: "", nuxt: "",
-      angular: "", react: "", vue: "", solid: "", qwik: "",
-      remix: "", gatsby: "", ember: "", eleventy: "", expo: "",
-      electron: "", tauri: "", webpack: "", storybook: "",
-      cloudflare: "", azure: "", firebase: "", supabase: "",
-      graphql: "", prisma: "", bun: "", deno: "", node: "", docker: "",
-      express: "", nestjs: "", adonis: "", python: "",
-      django: "", fastapi: "", flask: "", streamlit: "",
-      jupyter: "", ruby: "", rails: "", php: "", laravel: "",
-      symfony: "", wordpress: "", elixir: "", phoenix: "",
-      rust: "", go: "", java: "", spring: "", quarkus: "",
-      dotnet: "", grafana: "", prometheus: ""
-    })
-    readonly property bool hasFrameworkIcon: !!frameworkIcons[frameworkId]
-    readonly property string frameworkIcon: hasFrameworkIcon
-      ? frameworkIcons[frameworkId]
-      : (framework.length ? framework.charAt(0).toUpperCase() : "?")
-
-    hasCursor: index === root.selectedIndex
-    bordered: true
-    foreground: root.foreground
-    borderSpec: Border.flat(
-      hasCursor
-        ? Style.hoverBorderFor(root.foreground, Color.accent)
-        : Style.normalBorderFor(root.foreground, Color.accent),
-      Math.max(1, hasCursor ? Style.hoverBorderWidth : Style.normalBorderWidth))
-    implicitHeight: rowContent.implicitHeight + Style.space(12)
-
-    HoverHandler {
-      onHoveredChanged: if (hovered) root.selectedIndex = row.index
-    }
-
-    ColumnLayout {
-      id: rowContent
-      anchors.left: parent.left
-      anchors.right: parent.right
-      anchors.verticalCenter: parent.verticalCenter
-      anchors.leftMargin: Style.space(10)
-      anchors.rightMargin: Style.space(8)
-      spacing: Style.space(5)
-
-      RowLayout {
-        Layout.fillWidth: true
-        spacing: Style.space(7)
-
-        BorderSurface {
-          Layout.preferredWidth: Style.space(32)
-          Layout.preferredHeight: Style.space(32)
-          Layout.alignment: Qt.AlignTop
-          color: Style.selectedFillFor(root.foreground, Color.accent)
-          radius: Style.cornerRadius
-
-          OpticalGlyph {
-            visible: row.hasFrameworkIcon
-            anchors.fill: parent
-            text: row.frameworkIcon
-            color: Color.accent
-            fontFamily: Style.font.family
-            fontSize: Math.round(Style.font.heading * 1.1)
-          }
-
-          Text {
-            visible: !row.hasFrameworkIcon
-            anchors.centerIn: parent
-            text: row.frameworkIcon
-            color: Color.accent
-            font.family: Style.font.family
-            font.pixelSize: Style.font.heading
-            font.bold: true
-          }
-        }
-
-        ColumnLayout {
-          Layout.fillWidth: true
-          Layout.alignment: Qt.AlignTop
-          spacing: 0
-
-          RowLayout {
-            Layout.fillWidth: true
-            spacing: Style.space(6)
-
-            Text {
-              Layout.fillWidth: true
-              text: row.name
-              color: root.foreground
-              font.family: Style.font.family
-              font.pixelSize: Style.font.body
-              font.bold: true
-              elide: Text.ElideRight
-            }
-
-            Item {
-              id: status
-              implicitWidth: statusContent.implicitWidth
-              implicitHeight: statusContent.implicitHeight
-              Layout.alignment: Qt.AlignVCenter
-
-              Row {
-                id: statusContent
-                spacing: Style.space(4)
-                Rectangle {
-                  anchors.verticalCenter: parent.verticalCenter
-                  width: Style.space(5)
-                  height: width
-                  radius: width / 2
-                  color: row.statusDotColor
-                }
-                Text {
-                  text: row.lanAvailable ? "LAN ready" : "Local only"
-                  color: row.statusTextColor
-                  font.family: Style.font.family
-                  font.pixelSize: Style.font.caption
-                  font.weight: Font.Medium
-                }
-              }
-
-              HoverHandler { id: statusHover }
-              PanelToolTip {
-                visible: statusHover.hovered
-                text: row.statusTooltip
-                fontFamily: Style.font.family
-              }
-            }
-          }
-
-          RowLayout {
-            Layout.fillWidth: true
-            spacing: Style.space(4)
-
-            Text {
-              text: row.framework
-              color: root.dim
-              font.family: Style.font.family
-              font.pixelSize: Style.font.caption
-            }
-
-            Text {
-              text: "·"
-              color: root.dim
-              font.family: Style.font.family
-              font.pixelSize: Style.font.caption
-            }
-
-            Text {
-              Layout.fillWidth: true
-              text: row.effectiveUrl
-              color: row.lanAvailable ? root.foreground : root.dim
-              font.family: Style.font.family
-              font.pixelSize: Style.font.caption
-              elide: Text.ElideMiddle
-            }
-          }
-        }
-      }
-
-      RowLayout {
-        Layout.fillWidth: true
-        spacing: Style.space(4)
-
-        Button {
-          text: "Open"
-          foreground: root.foreground
-          bordered: true
-          fontSize: Style.font.caption
-          horizontalPadding: Style.space(8)
-          verticalPadding: Style.space(4)
-          hasCursor: row.index === root.selectedIndex && root.selectedActionIndex === 0
-          onHovered: function(on) { if (on) root.setActionCursor(row.index, 0) }
-          onClicked: root.openRequested(row.server)
-        }
-        Button {
-          text: "Copy"
-          foreground: root.foreground
-          fontSize: Style.font.caption
-          horizontalPadding: Style.space(8)
-          verticalPadding: Style.space(4)
-          hasCursor: row.index === root.selectedIndex && root.selectedActionIndex === 1
-          onHovered: function(on) { if (on) root.setActionCursor(row.index, 1) }
-          onClicked: root.copyRequested(row.server)
-        }
-        Button {
-          text: "QR"
-          foreground: row.lanAvailable ? root.foreground : root.dim
-          accent: Color.accent
-          active: row.lanAvailable
-          enabled: row.lanAvailable
-          fontSize: Style.font.caption
-          horizontalPadding: Style.space(8)
-          verticalPadding: Style.space(4)
-          hasCursor: row.index === root.selectedIndex && root.selectedActionIndex === 2
-          tooltipText: row.lanAvailable ? "Open phone-ready QR code" : "Bind the server to 0.0.0.0 first"
-          onHovered: function(on) { if (on) root.setActionCursor(row.index, 2) }
-          onClicked: root.qrRequested(row.server)
-        }
-
-        Item { Layout.fillWidth: true }
-
-        PanelActionButton {
-          iconText: "\uf120"
-          tooltipText: "Open terminal here"
-          foreground: root.foreground
-          hasCursor: row.index === root.selectedIndex && root.selectedActionIndex === 3
-          bordered: hasCursor
-          onHovered: function(on) { if (on) root.setActionCursor(row.index, 3) }
-          onClicked: root.terminalRequested(row.server)
-        }
-        PanelActionButton {
-          iconText: "\uf121"
-          tooltipText: "Open project in editor"
-          foreground: root.foreground
-          hasCursor: row.index === root.selectedIndex && root.selectedActionIndex === 4
-          bordered: hasCursor
-          onHovered: function(on) { if (on) root.setActionCursor(row.index, 4) }
-          onClicked: root.projectRequested(row.server)
-        }
-        PanelActionButton {
-          iconText: "\uf2f9"
-          tooltipText: "Restart server (Alt+R)"
-          foreground: root.foreground
-          hasCursor: row.index === root.selectedIndex && root.selectedActionIndex === 5
-          bordered: hasCursor
-          onHovered: function(on) { if (on) root.setActionCursor(row.index, 5) }
-          onClicked: root.restartRequested(row.server)
-        }
-        PanelActionButton {
-          iconText: row.forceStopAvailable ? "\uf714" : "\uf04d"
-          tooltipText: row.forceStopAvailable ? "Force stop server" : "Stop server"
-          foreground: Color.urgent
-          hoverColor: Color.urgent
-          hasCursor: row.index === root.selectedIndex && root.selectedActionIndex === 6
-          bordered: hasCursor
-          onHovered: function(on) { if (on) root.setActionCursor(row.index, 6) }
-          onClicked: root.requestStop(row.server, row.forceStopAvailable)
-        }
-      }
-    }
-  }
 }

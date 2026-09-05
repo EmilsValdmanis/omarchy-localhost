@@ -1,0 +1,12 @@
+#!/usr/bin/env bash
+set -euo pipefail
+cd -- "$(dirname -- "${BASH_SOURCE[0]}")"
+
+node --test --test-isolation=none tests/*.mjs
+python3 -m unittest discover -s tests -p 'test_*.py' -v
+python3 scripts/release.py
+omarchy plugin validate .
+python3 tests/lint_qml.py
+qml_args=()
+if [[ -n "${WAYLAND_DISPLAY:-}" ]]; then qml_args+=(--wayland-smoke); fi
+python3 tests/run_qml.py "${qml_args[@]}"
