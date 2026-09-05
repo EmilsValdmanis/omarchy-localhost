@@ -37,6 +37,12 @@ var EXCLUDED_PROCESSES = {
   "dnsmasq": true,
   "docker-proxy": true,
   "opendeck": true,
+  "postgres": true,
+  "redis-server": true,
+  "mysqld": true,
+  "mariadbd": true,
+  "mongod": true,
+  "memcached": true,
   "qemu-system-x86_64": true,
   "sshd": true,
   "systemd-resolved": true
@@ -134,10 +140,12 @@ function parseProcessPayload(raw, currentUid) {
         command: command,
         cwd: cwd,
         executable: String(row.executable || ""),
-        startTime: startTime
+        startTime: startTime,
+        argv: Array.isArray(row.argv) ? row.argv.map(String) : commandTokens(command),
+        project: row.project && typeof row.project === "object" ? row.project : {}
       }
     }
-    return { ok: true, error: "", processes: processes }
+    return { ok: true, error: "", processes: processes, projects: payload.projects || {} }
   } catch (exception) {
     return { ok: false, error: "Could not parse process metadata", processes: {} }
   }
@@ -159,7 +167,9 @@ function normalizeServer(server) {
     localUrl: String(source.localUrl || ""),
     lanUrl: String(source.lanUrl || ""),
     lanAvailable: source.lanAvailable === true,
-    hint: String(source.hint || "")
+    hint: String(source.hint || ""),
+    projectRoot: String(source.projectRoot || source.cwd || source.serverId || source.id || "Other servers"),
+    projectPath: String(source.projectPath || "")
   }
 }
 
@@ -178,6 +188,89 @@ function serversEqual(left, right) {
     && left.lanUrl === right.lanUrl
     && left.lanAvailable === right.lanAvailable
     && left.hint === right.hint
+    && left.projectRoot === right.projectRoot
+    && left.projectPath === right.projectPath
+}
+
+// Synchronize a QML ListModel without resetting delegates or their scroll origin.
+// Stable scans take a single linear pass; only structural changes move rows.
+function syncServerModel(model, servers) {
+  var incoming = Object.create(null)
+  var rows = []
+  for (var i = 0; i < servers.length; i++) {
+    var row = normalizeServer(servers[i])
+    if (!row.serverId || incoming[row.serverId]) continue
+    incoming[row.serverId] = true
+    rows.push(row)
+  }
+  var changed = false
+  for (var old = model.count - 1; old >= 0; old--) {
+    if (!incoming[model.get(old).serverId]) {
+      model.remove(old)
+      changed = true
+    }
+  }
+  for (var target = 0; target < rows.length; target++) {
+    var next = rows[target]
+    if (target >= model.count || model.get(target).serverId !== next.serverId) {
+      var current = target + 1
+      while (current < model.count && model.get(current).serverId !== next.serverId) current++
+      if (current < model.count) model.move(current, target, 1)
+      else model.insert(target, next)
+      changed = true
+    }
+    if (!serversEqual(model.get(target), next)) {
+      model.set(target, next)
+      changed = true
+    }
+  }
+  return changed
+}
+
+function matchesSearch(server, query, filterId) {
+  if (!matchesServerFilter(server, filterId)) return false
+  if (!query) return true
+  return [server.name, server.framework, server.frameworkId, server.port,
+    server.cwd, server.projectRoot, server.projectPath, server.localUrl, server.lanUrl, server.source, server.containerId]
+    .join(" ").toLowerCase().indexOf(query) !== -1
+}
+
+function probePlan(contexts, cache, now) {
+  var schemes = {}
+  var pending = []
+  for (var i = 0; i < contexts.length; i++) {
+    var context = contexts[i]
+    var id = contextId(context)
+    var cached = cache[id]
+    if (!cached || Number(cached.expiresAt || 0) <= now) pending.push(context)
+    else if (cached.scheme) schemes[id] = cached.scheme
+  }
+  return { schemes: schemes, pending: pending }
+}
+
+function compareServers(left, right, grouped) {
+  if (grouped) {
+    var group = basename(left.projectRoot).localeCompare(basename(right.projectRoot))
+      || left.projectRoot.localeCompare(right.projectRoot)
+    if (group) return group
+  }
+  return left.port - right.port || left.name.localeCompare(right.name) || left.serverId.localeCompare(right.serverId)
+}
+
+function projectGroups(servers) {
+  var groups = Object.create(null)
+  for (var i = 0; i < servers.length; i++) {
+    var server = servers[i]
+    var key = server.projectRoot
+    if (!groups[key]) groups[key] = { name: basename(key).replace(/^compose:/, ""), count: 0 }
+    groups[key].count++
+  }
+  return groups
+}
+
+function actionEnabled(index, server) {
+  return !!server && (index !== 2 || server.lanAvailable)
+    && ((index !== 3 && index !== 4) || server.cwd !== "")
 }
 
 function parseActionPayload(raw, fallback) {
@@ -371,21 +464,15 @@ function parseManagedUfwRules(raw, managedComment) {
 
 function declaredPorts(command) {
   var ports = []
-  var value = String(command || "")
-  var pattern = /(?:^|\s)(?:-p|--port|--listen-port|--server\.port)(?:=|\s+)(\d+)(?=\s|$)/g
-  var match
-  while ((match = pattern.exec(value)) !== null) addPort(ports, match[1])
-
-  pattern = /(?:^|\s)-p(\d+)(?=\s|$)/g
-  while ((match = pattern.exec(value)) !== null) addPort(ports, match[1])
-
-  var lower = value.toLowerCase()
-  if (lower.indexOf("http.server") !== -1 || lower.indexOf("manage.py runserver") !== -1) {
-    var words = value.split(/\s+/)
-    for (var index = 0; index < words.length; index++) {
-      match = words[index].match(/^(?:(?:127\.\d+\.\d+\.\d+|0\.0\.0\.0|localhost|\[::\]):)?(\d+)$/)
-      if (match) addPort(ports, match[1])
-    }
+  var tokens = commandTokens(command)
+  for (var i = 0; i < tokens.length; i++) {
+    var token = tokens[i]
+    var match = token.match(/^(?:-p|--port|--listen-port|--server\.port|--bind|--listen|-b|-S)(?:=(.*))?$/)
+    var value = match ? (match[1] === undefined ? tokens[++i] : match[1]) : ""
+    if (/^-p\d+$/.test(token)) value = token.slice(2)
+    if (token === "http.server" || token === "runserver") value = tokens[i + 1]
+    var endpoint = String(value || "").match(/(?:^|:)(\d+)$/)
+    if (endpoint) addPort(ports, endpoint[1])
   }
   return ports
 }
@@ -396,88 +483,152 @@ function addPort(ports, rawPort) {
     ports.push(port)
 }
 
-function frameworkFor(command) {
-  var lower = String(command || "").toLowerCase()
-  var frameworks = [
-    ["docusaurus", "Docusaurus", "docusaurus"],
-    ["react-email", "React Email", "react"],
-    ["func start", "Azure Functions", "azure"],
-    ["wrangler dev", "Cloudflare Workers", "cloudflare"],
-    ["firebase emulators", "Firebase", "firebase"],
-    ["supabase start", "Supabase", "supabase"],
-    ["prisma studio", "Prisma Studio", "prisma"],
-    ["graphql-yoga", "GraphQL Yoga", "graphql"],
-    ["apollo-server", "Apollo Server", "graphql"],
-    ["vue-cli-service", "Vue", "vue"],
-    ["ng serve", "Angular", "angular"],
-    ["solid-start", "SolidStart", "solid"],
-    ["qwik", "Qwik", "qwik"],
-    ["remix", "Remix", "remix"],
-    ["gatsby", "Gatsby", "gatsby"],
-    ["ember serve", "Ember", "ember"],
-    ["eleventy", "Eleventy", "eleventy"],
-    ["electron", "Electron", "electron"],
-    ["tauri dev", "Tauri", "tauri"],
-    ["expo start", "Expo", "expo"],
-    ["webpack serve", "Webpack", "webpack"],
-    ["webpack-dev-server", "Webpack", "webpack"],
-    ["parcel serve", "Parcel", "parcel"],
-    ["hugo server", "Hugo", "hugo"],
-    ["jekyll serve", "Jekyll", "jekyll"],
-    ["next", "Next.js", "next"],
-    ["nuxt", "Nuxt", "nuxt"],
-    ["svelte", "SvelteKit", "svelte"],
-    ["astro", "Astro", "astro"],
-    ["vite", "Vite", "vite"],
-    ["storybook", "Storybook", "storybook"],
-    ["nest start", "NestJS", "nestjs"],
-    ["nest.js", "NestJS", "nestjs"],
-    ["adonis serve", "AdonisJS", "adonis"],
-    ["node ace serve", "AdonisJS", "adonis"],
-    ["express", "Express", "express"],
-    ["bun", "Bun", "bun"],
-    ["deno", "Deno", "deno"],
-    ["streamlit run", "Streamlit", "streamlit"],
-    ["jupyter lab", "Jupyter", "jupyter"],
-    ["jupyter notebook", "Jupyter", "jupyter"],
-    ["gradio", "Gradio", "gradio"],
-    ["uvicorn", "FastAPI / Uvicorn", "fastapi"],
-    ["fastapi", "FastAPI", "fastapi"],
-    ["flask", "Flask", "flask"],
-    ["manage.py runserver", "Django", "django"],
-    ["gunicorn", "Python / Gunicorn", "python"],
-    ["hypercorn", "Python / Hypercorn", "python"],
-    ["rails server", "Rails", "rails"],
-    ["rails s", "Rails", "rails"],
-    ["sinatra", "Sinatra", "sinatra"],
-    ["php artisan serve", "Laravel", "laravel"],
-    ["symfony server", "Symfony", "symfony"],
-    ["wp-env start", "WordPress", "wordpress"],
-    ["php -s", "PHP", "php"],
-    ["mix phx.server", "Phoenix", "phoenix"],
-    ["mix run", "Elixir", "elixir"],
-    ["http.server", "Python HTTP", "python"],
-    ["trunk serve", "Rust / Trunk", "rust"],
-    ["leptos", "Leptos", "rust"],
-    ["cargo run", "Rust", "rust"],
-    ["go run", "Go", "go"],
-    ["air", "Go / Air", "go"],
-    ["spring-boot", "Spring Boot", "spring"],
-    ["bootrun", "Spring Boot", "spring"],
-    ["quarkus:dev", "Quarkus", "quarkus"],
-    ["quarkus dev", "Quarkus", "quarkus"],
-    ["dotnet watch", ".NET", "dotnet"],
-    ["dotnet run", ".NET", "dotnet"],
-    ["grafana server", "Grafana", "grafana"],
-    ["prometheus", "Prometheus", "prometheus"]
-  ]
-  for (var index = 0; index < frameworks.length; index++) {
-    if (lower.indexOf(frameworks[index][0]) !== -1)
-      return { name: frameworks[index][1], id: frameworks[index][2] }
+// Command arguments and executable/package names are matched exactly. A folder
+// named "next-project" or "chair" must not turn Node into Next.js or Go/Air.
+function commandTokens(command) {
+  var matches = String(command || "").match(/(?:[^\s"']+|"[^"\n]*"|'[^'\n]*')+/g) || []
+  return matches.map(function(token) { return token.replace(/^["']|["']$/g, "") })
+}
+
+// A true fourth field lets package dependencies refine a generic runtime label.
+var FRAMEWORK_RULES = [
+  ["docusaurus", "Docusaurus", "docusaurus"],
+  ["react-email", "React Email", "react"],
+  ["func start", "Azure Functions", "azure"],
+  ["wrangler dev", "Cloudflare Workers", "cloudflare"],
+  ["firebase emulators", "Firebase", "firebase"],
+  ["supabase start", "Supabase", "supabase"],
+  ["prisma studio", "Prisma Studio", "prisma"],
+  ["graphql-yoga", "GraphQL Yoga", "graphql"],
+  ["apollo-server", "Apollo Server", "graphql"],
+  ["vue-cli-service", "Vue", "vue"],
+  ["ng serve", "Angular", "angular"],
+  ["solid-start", "SolidStart", "solid"],
+  ["qwik", "Qwik", "qwik"],
+  ["remix", "Remix", "remix"],
+  ["gatsby", "Gatsby", "gatsby"],
+  ["ember serve", "Ember", "ember"],
+  ["eleventy", "Eleventy", "eleventy"],
+  ["electron", "Electron", "electron"],
+  ["tauri dev", "Tauri", "tauri"],
+  ["expo start", "Expo", "expo"],
+  ["webpack serve", "Webpack", "webpack"],
+  ["webpack-dev-server", "Webpack", "webpack"],
+  ["parcel serve", "Parcel", "parcel"],
+  ["hugo server", "Hugo", "hugo"],
+  ["jekyll serve", "Jekyll", "jekyll"],
+  ["next", "Next.js", "next"],
+  ["next-server", "Next.js", "next"],
+  ["nuxt", "Nuxt", "nuxt"],
+  ["svelte", "Svelte", "svelte"],
+  ["astro", "Astro", "astro"],
+  ["vite", "Vite", "vite", true],
+  ["storybook", "Storybook", "storybook"],
+  ["nest start", "NestJS", "nestjs"],
+  ["nest.js", "NestJS", "nestjs"],
+  ["adonis serve", "AdonisJS", "adonis"],
+  ["node ace serve", "AdonisJS", "adonis"],
+  ["express", "Express", "express"],
+  ["bun", "Bun", "bun", true],
+  ["deno", "Deno", "deno", true],
+  ["streamlit run", "Streamlit", "streamlit"],
+  ["jupyter lab", "Jupyter", "jupyter"],
+  ["jupyter notebook", "Jupyter", "jupyter"],
+  ["gradio", "Gradio", "gradio"],
+  ["uvicorn", "Uvicorn", "python", true],
+  ["fastapi", "FastAPI", "fastapi"],
+  ["flask", "Flask", "flask"],
+  ["manage.py runserver", "Django", "django"],
+  ["gunicorn", "Python / Gunicorn", "python", true],
+  ["hypercorn", "Python / Hypercorn", "python", true],
+  ["rails server", "Rails", "rails"],
+  ["rails s", "Rails", "rails"],
+  ["sinatra", "Sinatra", "sinatra"],
+  ["php artisan serve", "Laravel", "laravel"],
+  ["symfony server", "Symfony", "symfony"],
+  ["wp-env start", "WordPress", "wordpress"],
+  ["php -s", "PHP", "php"],
+  ["mix phx.server", "Phoenix", "phoenix"],
+  ["mix run", "Elixir", "elixir"],
+  ["http.server", "Python HTTP", "python"],
+  ["trunk serve", "Rust / Trunk", "rust"],
+  ["leptos", "Leptos", "rust"],
+  ["cargo run", "Rust", "rust"],
+  ["go run", "Go", "go"],
+  ["air", "Go / Air", "go"],
+  ["spring-boot", "Spring Boot", "spring"],
+  ["bootrun", "Spring Boot", "spring"],
+  ["quarkus:dev", "Quarkus", "quarkus"],
+  ["quarkus dev", "Quarkus", "quarkus"],
+  ["dotnet watch", ".NET", "dotnet"],
+  ["dotnet run", ".NET", "dotnet"],
+  ["grafana server", "Grafana", "grafana"],
+  ["prometheus", "Prometheus", "prometheus"]
+]
+
+var PROJECT_FRAMEWORKS = [
+  ["@sveltejs/kit", "SvelteKit", "svelte"], ["@astrojs/core", "Astro", "astro"],
+  ["astro", "Astro", "astro"], ["next", "Next.js", "next"], ["nuxt", "Nuxt", "nuxt"],
+  ["@nestjs/core", "NestJS", "nestjs"], ["@remix-run/react", "Remix", "remix"],
+  ["@solidjs/start", "SolidStart", "solid"], ["@builder.io/qwik", "Qwik", "qwik"],
+  ["@angular/core", "Angular", "angular"], ["hono", "Hono", "hono"],
+  ["fastify", "Fastify", "fastify"], ["express", "Express", "express"],
+  ["svelte", "Svelte", "svelte"], ["solid-js", "SolidJS", "solid"],
+  ["react", "React", "react"], ["vue", "Vue", "vue"], ["vite", "Vite", "vite"],
+  ["fastapi", "FastAPI", "fastapi"], ["django", "Django", "django"], ["flask", "Flask", "flask"]
+]
+
+function frameworkFor(command, project, argv) {
+  var args = argv && argv.length ? argv : commandTokens(command)
+  var tokens = args.map(function(arg, index) {
+    // Next rewrites argv[0] through process.title, including its version suffix.
+    if (index === 0 && /^next-server \(v[^\s)]+\)$/.test(arg)) return "next-server"
+    var previous = String(args[index - 1] || "")
+    if (/^--?[^=]+$/.test(previous) && ["-m", "--", "--watch"].indexOf(previous) === -1) return ""
+    return (arg.charAt(0) === "-" ? arg : basename(arg)).toLowerCase().replace(/\.(?:m?js|cjs)$/, "")
+  })
+  var result = null
+  var generic = true
+  for (var i = 0; i < FRAMEWORK_RULES.length && !result; i++) {
+    var rule = FRAMEWORK_RULES[i]
+    var parts = rule[0].replace(/\.js$/, "").split(" ")
+    for (var j = 0; j <= tokens.length - parts.length; j++) {
+      if (parts.every(function(part, offset) { return tokens[j + offset] === part })) {
+        result = { name: rule[1], id: rule[2] }
+        generic = rule[3] === true
+        break
+      }
+    }
   }
-  if (/(?:^|[ /])node(?:$|[ /])/.test(lower) || lower.indexOf("node_modules") !== -1)
+  if (generic) {
+    var dependencies = project && Array.isArray(project.dependencies) ? project.dependencies : []
+    var python = tokens.some(function(token) { return /^(?:python[\d.]*|uvicorn|gunicorn|hypercorn|flask|django)$/.test(token) })
+    var javascript = tokens.some(function(token) { return /^(?:node|nodejs|bun|deno|vite|tsx|ts-node|npm|pnpm|yarn)$/.test(token) })
+    for (var k = 0; k < PROJECT_FRAMEWORKS.length; k++) {
+      var candidate = PROJECT_FRAMEWORKS[k]
+      var pythonFramework = ["fastapi", "django", "flask"].indexOf(candidate[2]) !== -1
+      if ((pythonFramework ? !python : !javascript) || dependencies.indexOf(candidate[0]) === -1) continue
+      if (result && result.id === "vite" && ["next", "nuxt", "nestjs", "express", "fastify", "hono"].indexOf(candidate[2]) !== -1) continue
+      return { name: candidate[1], id: candidate[2] }
+    }
+  }
+  if (result) return result
+  if (tokens.indexOf("node") !== -1 || tokens.indexOf("nodejs") !== -1 || tokens.indexOf("tsx") !== -1)
     return { name: "Node.js", id: "node" }
   return { name: "Dev server", id: "server" }
+}
+
+function inspectorPorts(command) {
+  var ports = []
+  var tokens = commandTokens(command)
+  for (var i = 0; i < tokens.length; i++) {
+    var match = tokens[i].match(/^--inspect(?:-brk|-wait|-port)?(?:=(.*))?$/)
+    if (!match) continue
+    var value = match[1] === undefined ? "9229" : match[1]
+    var endpoint = value.match(/(?:^|:)(\d+)$/)
+    addPort(ports, endpoint ? endpoint[1] : 9229)
+  }
+  return ports
 }
 
 function candidateRejectionReason(listener, process, framework, ignoredPorts, alwaysIncludePorts) {
@@ -490,9 +641,12 @@ function candidateRejectionReason(listener, process, framework, ignoredPorts, al
   var processName = String(listener.process || "").toLowerCase()
   if (EXCLUDED_PROCESSES[processName]) return "excluded desktop or system process"
   if (RUNTIME_HELPER_PATTERN.test(String(process.command || ""))) return "runtime helper process"
+  if (NON_HTTP_CONTAINER_PORTS[listener.port]) return "non-HTTP service port"
+  if (/(?:^|[ /])(?:nodejsWorker|tsserver|typingsInstaller)\.js(?:[ \'"]|$)/i.test(process.command)) return "runtime helper process"
+  if (inspectorPorts(process.command).indexOf(listener.port) !== -1) return "debugger port"
   if (framework.id !== "server") return ""
   if (DEV_COMMAND_PATTERN.test(process.command)) return ""
-  if (COMMON_DEV_PORTS[listener.port]) return ""
+  if (COMMON_DEV_PORTS[listener.port] || declaredPorts(process.command).indexOf(listener.port) !== -1) return ""
   return "command and port are not recognized as a development server"
 }
 
@@ -501,54 +655,22 @@ function isCandidate(listener, process, framework, ignoredPorts, alwaysIncludePo
     listener, process, framework, ignoredPorts, alwaysIncludePorts) === ""
 }
 
-function primaryListeners(listeners, command) {
-  if (!listeners.length) return []
-  var explicit = declaredPorts(command)
-  if (explicit.length) {
-    return listeners.filter(function(listener) {
-      return explicit.indexOf(listener.port) !== -1
-    })
-  }
-  if (listeners.length === 1) return listeners
-  var conventional = listeners.filter(function(listener) {
-    return !!COMMON_DEV_PORTS[listener.port]
-  })
-  var pool = conventional.length ? conventional : listeners
-  var primary = pool[0]
-  for (var index = 1; index < pool.length; index++) {
-    if (pool[index].port < primary.port) primary = pool[index]
-  }
-  return [primary]
-}
-
 function candidateContexts(listeners, processCache, ignoredPorts, alwaysIncludePorts) {
-  var grouped = {}
+  var contexts = []
+  var frameworks = {}
   for (var index = 0; index < listeners.length; index++) {
     var listener = listeners[index]
     var process = processCache[String(listener.pid)]
     if (!process || !process.cwd) continue
-    var framework = frameworkFor(process.command)
-    if (!isCandidate(listener, process, framework, ignoredPorts, alwaysIncludePorts)) continue
-    var key = String(listener.pid)
-    if (!grouped[key]) grouped[key] = []
-    grouped[key].push({ listener: listener, process: process, framework: framework })
-  }
-
-  var contexts = []
-  for (var pid in grouped) {
-    var records = grouped[pid]
-    var selected = primaryListeners(records.map(function(record) { return record.listener }), records[0].process.command)
-    for (var recordIndex = 0; recordIndex < records.length; recordIndex++) {
-      var record = records[recordIndex]
-      for (var selectedIndex = 0; selectedIndex < selected.length; selectedIndex++) {
-        if (record.listener.port === selected[selectedIndex].port) {
-          contexts.push(record)
-          break
-        }
-      }
+    var framework = frameworks[listener.pid]
+    if (!framework) {
+      framework = frameworkFor(process.command, process.project, process.argv)
+      frameworks[listener.pid] = framework
     }
+    if (isCandidate(listener, process, framework, ignoredPorts, alwaysIncludePorts))
+      contexts.push({ listener: listener, process: process, framework: framework })
   }
-  contexts.sort(function(a, b) { return a.listener.port - b.listener.port })
+  contexts.sort(function(a, b) { return a.listener.port - b.listener.port || a.listener.pid - b.listener.pid })
   return contexts
 }
 
@@ -564,13 +686,13 @@ function candidateDiagnostics(listeners, processCache, selectedContexts, ignored
   for (var index = 0; index < listeners.length; index++) {
     var listener = listeners[index]
     var process = processCache[String(listener.pid)]
-    var framework = process ? frameworkFor(process.command) : { name: "Dev server", id: "server" }
+    var framework = process ? frameworkFor(process.command, process.project, process.argv) : { name: "Dev server", id: "server" }
     var reason = !process || !process.cwd
       ? "process metadata unavailable"
       : candidateRejectionReason(
         listener, process, framework, ignoredPorts, alwaysIncludePorts)
     if (!reason && !selected[listener.pid + ":" + listener.port])
-      reason = "auxiliary listener for the same process"
+      reason = "listener not selected"
     if (!reason) continue
     diagnostics.push({
       port: listener.port,
@@ -631,6 +753,7 @@ function dockerPublishedContexts(raw, ignoredPorts, alwaysIncludePorts) {
         id: "docker:" + containerId + ":" + hostPort,
         source: "docker",
         containerId: containerId,
+        projectRoot: cwd || (project ? "compose:" + project : "docker:" + containerId),
         displayName: name,
         listener: {
           pid: 0,
@@ -734,7 +857,7 @@ function serverFromContext(context, scheme, lanIp) {
   var localHost = loopbackBound || wildcardBound ? "localhost" : (lanHost || "localhost")
   return {
     id: contextId(context),
-    name: context.displayName || basename(process.cwd) || listener.process || "Development server",
+    name: context.displayName || (process.project && process.project.name) || basename(process.cwd) || listener.process || "Development server",
     framework: context.framework.name,
     frameworkId: context.framework.id,
     pid: Number(listener.pid || 0),
@@ -743,6 +866,8 @@ function serverFromContext(context, scheme, lanIp) {
     containerId: String(context.containerId || ""),
     port: listener.port,
     cwd: process.cwd,
+    projectRoot: (process.project && process.project.root) || process.cwd || context.projectRoot || contextId(context),
+    projectPath: (process.project && process.project.relativePath) || "",
     command: String(process.command || "").slice(0, 240),
     bindAddresses: listener.addresses,
     localUrl: scheme + "://" + urlHost(localHost) + ":" + listener.port,
@@ -789,4 +914,24 @@ function parseQrAscii(raw) {
   for (var index = 0; index < rows.length; index++)
     if (rows[index].length !== size || !/^[01]+$/.test(rows[index])) return { size: 0, rows: [] }
   return { size: size, rows: rows }
+}
+
+var FRAMEWORK_ICONS = {
+  hono: "\uf06d", fastify: "\uf0e7",
+  next: "", vite: "", svelte: "", astro: "", nuxt: "",
+  angular: "", react: "", vue: "", solid: "", qwik: "",
+  remix: "", gatsby: "", ember: "", eleventy: "", expo: "",
+  electron: "", tauri: "", webpack: "", storybook: "",
+  cloudflare: "", azure: "", firebase: "", supabase: "",
+  graphql: "", prisma: "", bun: "", deno: "", node: "", docker: "",
+  express: "", nestjs: "", adonis: "", python: "",
+  django: "", fastapi: "", flask: "", streamlit: "",
+  jupyter: "", ruby: "", rails: "", php: "", laravel: "",
+  symfony: "", wordpress: "", elixir: "", phoenix: "",
+  rust: "", go: "", java: "", spring: "", quarkus: "",
+  dotnet: "", grafana: "", prometheus: ""
+}
+
+function frameworkIcon(frameworkId) {
+  return FRAMEWORK_ICONS[frameworkId] || ""
 }

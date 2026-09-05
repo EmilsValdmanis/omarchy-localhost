@@ -7,15 +7,17 @@ Discover, control, and share local development servers from the Omarchy bar.
 Start Vite, Next.js, Astro, Rails, or another server and Localhost adds it
 automatically.
 
+See [GitHub Releases](https://github.com/EmilsValdmanis/omarchy-localhost/releases)
+for version history and release notes.
+
 > `pnpm dev` → Localhost appears → click **QR** → scan with your phone
 
-|                                                Server panel                                                 |                                      LAN QR sharing                                       |
-| :---------------------------------------------------------------------------------------------------------: | :---------------------------------------------------------------------------------------: |
-| ![Localhost panel listing development servers and project controls](docs/images/localhost-server-panel.png) | ![Localhost QR overlay showing a scannable LAN URL](docs/images/localhost-qr-sharing.png) |
+![Localhost for Omarchy: automatic server discovery, monorepo grouping, and LAN QR sharing in the Everforest theme](preview.png)
 
 ## Features
 
 - Automatic process, framework, Docker, and Compose discovery
+- Repository and monorepo grouping with package-aware framework detection
 - Localhost and LAN URLs with bind-address-aware availability
 - Open, copy, QR, terminal, editor, restart, and stop actions
 - Search and complete arrow-key or Vim-style navigation
@@ -23,6 +25,10 @@ automatically.
 - Discovery diagnostics, port filters, and LAN-rule management
 - Process identity verification before stop or restart
 - Native Omarchy styling with no daemon, database, or account
+
+Servers in the same repository or workspace appear together, with package paths
+under each name. Use the folder button to switch to a flat list sorted by port.
+Select a row to use its shared action toolbar, or click its port to open it.
 
 LAN-ready servers listen on `0.0.0.0`, `::`, or a LAN interface. Servers bound
 to `127.0.0.1` or `::1` remain available for desktop actions, but QR sharing is
@@ -43,7 +49,7 @@ omarchy bar move emils.localhost --section left   # or center / right
 ```
 
 The intended Omarchy environment already provides the required system tools:
-Python 3, `ss`, `ip`, `curl`, `wl-copy`, and `qrencode`. Docker discovery is
+Python 3.11+, `ss`, `ip`, `curl`, `wl-copy`, and `qrencode`. Docker discovery is
 optional and only runs when Docker is available.
 
 ## Keyboard
@@ -51,8 +57,8 @@ optional and only runs when Docker is available.
 | Key                                  | Action                                                 |
 | ------------------------------------ | ------------------------------------------------------ |
 | `/` or click search                  | Search by project, framework, port, path, or container |
-| `up/down`, `j/k`, `ctrl+p/ctrl+n`    | Select a server card                                   |
-| `left/right`, `h/l`                  | Select an action on the card                           |
+| `up/down`, `j/k`, `ctrl+p/ctrl+n`    | Select a server                                        |
+| `left/right`, `h/l`                  | Select an action in the footer                         |
 | `enter`                              | Run the selected action                                |
 | `ctrl+c`                             | Copy the selected URL                                  |
 | `ctrl+r`                             | Refresh discovery                                      |
@@ -103,6 +109,17 @@ small Python helper, and probes likely development servers over HTTP and HTTPS.
 It filters helper sockets, databases, and other non-browser services. Published
 Docker ports are discovered separately because they do not expose a host PID.
 
+Every eligible listening port is checked, including multiple HTTP servers in
+one process and fallback ports chosen when a default is busy. Framework labels
+use executable arguments and dependencies from the nearest `package.json` or
+`pyproject.toml`. Project metadata is read once per discovery batch without
+executing project code or searching directory trees.
+
+Grouping uses the nearest Git repository, including worktrees and nested
+repositories. Outside Git, it recognizes pnpm, npm/Yarn workspaces, Lerna,
+Cargo workspaces, and `go.work`. Native processes and Compose services share a
+group when their working directories resolve to the same project root.
+
 Nothing is sent elsewhere. Before stopping or restarting a process, the helper
 verifies its owner and Linux start time so a reused PID cannot target the wrong
 process. See [SECURITY.md](SECURITY.md) for security reporting.
@@ -140,14 +157,17 @@ if you want to replace it with the development install.
 Run the checks before opening a pull request:
 
 ```bash
-node --test tests/*.mjs
-python3 -m unittest discover -s tests -p 'test_*.py' -v
-omarchy plugin validate .
-qmllint -I /usr/share/omarchy/shell \
-  RadarService.qml ServerPanel.qml Widget.qml QrOverlay.qml
+./check
 ```
 
-See [CONTRIBUTING.md](CONTRIBUTING.md) for the development workflow.
+This runs model/helper tests, plugin validation, Qt 6 lint, and real Quickshell
+UI tests, including native wheel input, model changes while scrolled, keyboard
+actions, grouping, QR rendering, and two HTTP listeners in one disposable
+process. It also checks the hidden
+Wayland entry points when a compositor is available. Screenshots and logs are
+saved to `/tmp/localhost-test-artifacts`; your installed plugin is untouched.
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for the development workflow and CI setup.
 
 ## License
 

@@ -1,3 +1,5 @@
+pragma ComponentBehavior: Bound
+
 import QtQuick
 import Quickshell
 import Quickshell.Io
@@ -24,6 +26,10 @@ BarWidget {
   readonly property bool showCountBadge: setting("showCountBadge", true)
   readonly property bool showWhenEmpty: setting("showWhenEmpty", false)
   readonly property bool opened: card.open
+  readonly property var firewallStatusCommand: [
+    "bash", "-c",
+    "if ! command -v ufw >/dev/null || ! systemctl is-active --quiet ufw; then echo inactive; exit 0; fi; echo active; cat /etc/ufw/user.rules 2>/dev/null || echo unreadable"
+  ]
 
   visible: serverCount > 0 || showWhenEmpty
   implicitWidth: button.implicitWidth
@@ -148,7 +154,7 @@ BarWidget {
 
   RadarService {
     id: radar
-    refreshIntervalSec: Math.max(1, Number(root.setting("refreshIntervalSec", 2)))
+    refreshIntervalSec: Math.min(30, Math.max(1, Number(root.setting("refreshIntervalSec", 2)) || 2))
     includeDocker: root.setting("includeDocker", true)
     ignoredPorts: String(root.setting("ignoredPorts", "") || "")
     alwaysIncludePorts: String(root.setting("alwaysIncludePorts", "") || "")
@@ -211,10 +217,7 @@ BarWidget {
 
   Process {
     id: firewallCheckProcess
-    command: [
-      "bash", "-c",
-      "if ! command -v ufw >/dev/null || ! systemctl is-active --quiet ufw; then echo inactive; exit 0; fi; echo active; cat /etc/ufw/user.rules 2>/dev/null || echo unreadable"
-    ]
+    command: root.firewallStatusCommand
     stdout: StdioCollector {
       waitForEnd: true
       onStreamFinished: root.firewallCheckOutput = String(text || "")
@@ -236,17 +239,14 @@ BarWidget {
         return
       }
       if (unreadable)
-        showNotice("UFW rules could not be read; confirming LAN access for :" + server.port, false)
+        root.showNotice("UFW rules could not be read; confirming LAN access for :" + server.port, false)
       panel.requestFirewallAuthorization(server)
     }
   }
 
   Process {
     id: firewallRulesProcess
-    command: [
-      "bash", "-c",
-      "if ! command -v ufw >/dev/null || ! systemctl is-active --quiet ufw; then echo inactive; exit 0; fi; echo active; cat /etc/ufw/user.rules 2>/dev/null || echo unreadable"
-    ]
+    command: root.firewallStatusCommand
     stdout: StdioCollector {
       waitForEnd: true
       onStreamFinished: root.firewallRulesOutput = String(text || "")
@@ -366,6 +366,7 @@ BarWidget {
     ServerPanel {
       id: panel
       anchors.fill: parent
+      panelActive: card.open
       servers: radar.servers
       revision: radar.revision
       lanIp: radar.lanIp
