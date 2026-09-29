@@ -1,7 +1,6 @@
 # Localhost for Omarchy
 
-[![Version](https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fraw.githubusercontent.com%2FEmilsValdmanis%2Fomarchy-localhost%2Fmain%2Fmanifest.json&query=%24.version&prefix=v&label=version&style=flat-square&labelColor=0c0b0c&color=c9a29a)](manifest.json)
-[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg?style=flat-square&labelColor=0c0b0c&color=373637)](LICENSE)
+[![Built for Omarchy: Plugin](https://raw.githubusercontent.com/tcballard/omarchy-badges/75975e5b5bf75e7ede3764bcd2950046f7abfe2c/badges/v1/omarchy-plugin.svg)](https://github.com/tcballard/omarchy-badges)
 
 Discover, control, and share local development servers from the Omarchy bar.
 Start Vite, Next.js, Astro, Rails, or another server and Localhost adds it
@@ -12,7 +11,7 @@ for version history and release notes.
 
 > `pnpm dev` → Localhost appears → click **QR** → scan with your phone
 
-![Localhost for Omarchy: automatic server discovery, monorepo grouping, and LAN QR sharing in the Everforest theme](preview.png)
+![Localhost for Omarchy in Everforest: server RAM breakdown, memory trends, project groups, and QR sharing](preview.png)
 
 ## Features
 
@@ -98,7 +97,7 @@ Localhost can be removed from the shield menu.
 | Setting              | Purpose                                         |
 | -------------------- | ----------------------------------------------- |
 | Refresh interval     | Scan every 1–30 seconds                         |
-| Show server count    | Show the detected count beside the bar icon    |
+| Show server count    | Show the detected count beside the bar icon     |
 | Show when empty      | Keep the widget available with no servers       |
 | Include Docker       | Discover browser-ready Docker and Compose ports |
 | Ignored ports        | Hide ports or ranges such as `3001,8000-8010`   |
@@ -154,15 +153,15 @@ The root keeps the two entry points named in `manifest.json`: `Widget.qml`
 for the bar and panel, and `QrOverlay.qml` for phone sharing. Implementation
 components live in `qml/`:
 
-| Path | Responsibility |
-| ---- | -------------- |
-| `qml/RadarService.qml` | Run discovery scans and actions; keep live samples |
-| `qml/RadarModel.js` | Parse, normalize, filter, and summarize server data |
-| `qml/ServerPanel.qml`, `qml/ServerRow.qml`, `qml/ServerActions.qml` | Render the server list and controls |
-| `qml/MemorySparkline.qml`, `qml/PanelScrollArea.qml` | Shared panel pieces |
-| `qml/QrService.qml`, `qml/QrContent.qml`, `qml/QrCode.qml` | QR state and display |
-| `localhost_helper.py`, `project_metadata.py` | Read Linux and Docker metadata; verify process actions |
-| `tests/` | Model, helper, QML, and preview checks |
+| Path                                                                | Responsibility                                         |
+| ------------------------------------------------------------------- | ------------------------------------------------------ |
+| `qml/RadarService.qml`                                              | Run discovery scans and actions; keep live samples     |
+| `qml/RadarModel.js`                                                 | Parse, normalize, filter, and summarize server data    |
+| `qml/ServerPanel.qml`, `qml/ServerRow.qml`, `qml/ServerActions.qml` | Render the server list and controls                    |
+| `qml/MemorySparkline.qml`, `qml/PanelScrollArea.qml`                | Shared panel pieces                                    |
+| `qml/QrService.qml`, `qml/QrContent.qml`, `qml/QrCode.qml`          | QR state and display                                   |
+| `localhost_helper.py`, `project_metadata.py`                        | Read Linux and Docker metadata; verify process actions |
+| `tests/`                                                            | Model, helper, QML, and preview checks                 |
 
 Data flows from `RadarService` through `RadarModel` into `ServerPanel`. The
 Python helper reads OS data; QML handles presentation and interactions. Keep
