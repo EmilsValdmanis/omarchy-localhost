@@ -34,9 +34,6 @@ jobs:
       - name: Run helper tests
         run: python3 -m unittest discover -s tests -p 'test_*.py' -v
 
-      - name: Check release notes
-        run: python3 scripts/release.py
-
   native-ui:
     runs-on: ubuntu-latest
     container: archlinux:base
@@ -83,7 +80,17 @@ jobs:
           ref: ${{ github.sha }}
           persist-credentials: false
 
-      - name: Publish the version and its changelog
+      - name: Publish with GitHub-generated release notes
         env:
           GH_TOKEN: ${{ github.token }}
-        run: python3 scripts/release.py --publish
+        run: |
+          tag="v$(jq -r .version manifest.json)"
+          if gh release view "$tag" >/dev/null 2>&1; then
+            echo "$tag is already published"
+            exit 0
+          fi
+          if [ "$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/main" --jq .object.sha)" != "$GITHUB_SHA" ]; then
+            echo "Skipping release because main has advanced"
+            exit 0
+          fi
+          gh release create "$tag" --target "$GITHUB_SHA" --title "$tag" --generate-notes --latest
