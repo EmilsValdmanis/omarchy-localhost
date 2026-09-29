@@ -30,9 +30,13 @@ class ReleaseNotesTests(unittest.TestCase):
 class PublishingTests(unittest.TestCase):
     sha = "a" * 40
     url = "https://github.com/owner/repo/releases/tag/v0.5.0"
+    body = ("## What's Changed\n* Fix scrolling by @contributor in #13\n\n"
+            "**Full Changelog**: https://github.com/owner/repo/compare/v0.4.5...v0.5.0")
 
     def api(self, release=None, tag=None, head=None, annotation=None):
         def request(method, path, payload=None):
+            if path.endswith("/releases/generate-notes"):
+                return {"name": "Generated title", "body": self.body}
             if method == "POST":
                 return {"html_url": self.url}
             if path.endswith("/heads/main"):
@@ -45,14 +49,18 @@ class PublishingTests(unittest.TestCase):
         return mock.Mock(side_effect=request)
 
     def publish(self, api):
-        return publish("owner/repo", self.sha, "v0.5.0", "- Fixed scroll", api)
+        return publish("owner/repo", self.sha, "v0.5.0", api)
 
-    def test_creates_release_at_tested_commit_with_changelog(self):
+    def test_creates_release_at_tested_commit_with_generated_notes_and_version_title(self):
         api = self.api()
         self.assertEqual(self.publish(api), "Published: " + self.url)
+        api.assert_any_call("POST", "repos/owner/repo/releases/generate-notes", {
+            "tag_name": "v0.5.0", "target_commitish": self.sha,
+        })
         api.assert_called_with("POST", "repos/owner/repo/releases", {
-            "tag_name": "v0.5.0", "target_commitish": self.sha, "name": "Localhost v0.5.0",
-            "body": "- Fixed scroll", "draft": False, "prerelease": False, "make_latest": "true",
+            "tag_name": "v0.5.0", "target_commitish": self.sha, "name": "v0.5.0",
+            "body": self.body,
+            "draft": False, "prerelease": False, "make_latest": "true",
         })
 
     def test_reruns_do_not_modify_existing_releases(self):

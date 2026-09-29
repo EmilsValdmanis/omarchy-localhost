@@ -81,8 +81,15 @@ top of `CHANGELOG.md` in the same PR. Use a `major.minor.patch` version and a
 heading such as `## 0.5.1 — 2026-09-06`, followed by the user-facing changes.
 `./check` and CI require matching, nonempty notes.
 
+Group changes under level-three headings such as `### Features`, `### Bug Fixes`,
+and `### Tests`, omitting empty sections. Describe the user-visible change and
+link its pull request. GitHub release titles contain only the version (for
+example, `v0.5.1`). The publisher uses GitHub-generated release notes with
+"What's Changed", pull request links, contributor credits, and a full changelog
+comparison link. GitHub includes "New Contributors" when applicable.
+
 After the PR merges, CI runs on `main`. Once both test jobs pass, it creates
-the version tag and publishes a GitHub Release with that changelog entry.
+the version tag and publishes a GitHub Release with those generated notes.
 Commits with an already published version leave its release unchanged. No
 personal token or manual tag push is required. Publishing is restricted to
 the tested commit while it is still the current `main` commit. Rerun the CI

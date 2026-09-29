@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Publish a tested main commit using the manifest version and changelog notes."""
+"""Publish a tested main commit with a version title and GitHub-generated notes."""
 
 import argparse
 import json
@@ -37,7 +37,7 @@ def github(method, path, payload=None):
     return json.loads(result.stdout)
 
 
-def publish(repo, commit, tag, notes, api=github):
+def publish(repo, commit, tag, api=github):
     if not re.fullmatch(r"[\w.-]+/[\w.-]+", repo) or not re.fullmatch(r"[0-9a-f]{40}", commit):
         raise ValueError("Publishing requires a repository and full tested commit SHA")
     base = "repos/" + repo
@@ -64,9 +64,12 @@ def publish(repo, commit, tag, notes, api=github):
             target = annotation["object"]
         if target["type"] != "commit" or target["sha"] != commit:
             raise RuntimeError("Existing tag does not identify the tested commit")
+    notes = api("POST", base + "/releases/generate-notes", {
+        "tag_name": tag, "target_commitish": commit,
+    })
     release = api("POST", base + "/releases", {
         "tag_name": tag, "target_commitish": commit,
-        "name": "Localhost " + tag, "body": notes,
+        "name": tag, "body": notes["body"],
         "draft": False, "prerelease": False, "make_latest": "true",
     })
     return "Published: " + release["html_url"]
@@ -76,9 +79,9 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--publish", action="store_true", help="publish after CI passes on main")
     args = parser.parse_args()
-    tag, notes = release_notes(Path(__file__).resolve().parent.parent)
+    tag, _ = release_notes(Path(__file__).resolve().parent.parent)
     if args.publish:
-        print(publish(os.environ.get("GITHUB_REPOSITORY", ""), os.environ.get("GITHUB_SHA", ""), tag, notes))
+        print(publish(os.environ.get("GITHUB_REPOSITORY", ""), os.environ.get("GITHUB_SHA", ""), tag))
     else:
         print(f"Release notes validated for {tag}")
 
