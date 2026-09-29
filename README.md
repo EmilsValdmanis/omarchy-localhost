@@ -114,7 +114,9 @@ Docker ports are discovered separately because they do not expose a host PID.
 RAM readings use resident memory for native listener processes and Docker's
 container memory usage for published services. The total counts a shared
 process or container once even if it serves multiple ports. Unavailable
-readings are shown as a dash and excluded from the total.
+readings are shown as a dash and excluded from the total. Docker RAM is sampled
+separately from discovery, no more often than every eight seconds, so a new
+container may show a dash briefly.
 The system breakdown uses Linux `MemTotal` and `MemAvailable`; "Free" includes
 reclaimable cache. The other bucket includes non-server processes and system
 usage. Server portions use resident-memory estimates, so their sum may differ

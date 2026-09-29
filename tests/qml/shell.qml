@@ -391,6 +391,21 @@ ShellRoot {
         check(service.systemMemory.totalBytes > 0, "system RAM remains available with no servers")
       }
 
+      function test_docker_memory_sample_updates_cache_and_queues_refresh() {
+        var service = createTemporaryObject(serviceComponent, tests, { includeDocker: true })
+        check(service !== null)
+        var containerId = "abc123def456"
+        service.scanning = true
+        service.dockerMemoryRequestedIds = [containerId]
+        service.dockerMemoryOutput = JSON.stringify({
+          ok: true, processes: [], containers: { "abc123def456": 25165824 }
+        })
+        service.finishDockerMemorySample(0)
+        equal(service.dockerMemoryCache[containerId], 25165824)
+        check(service.dockerMemoryAt[containerId] > 0)
+        equal(service.scanQueued, true)
+      }
+
       function test_qr_canvas_pixels_and_replacement() {
         var qr = createTemporaryObject(qrComponent, tests, { x: 600, rows: ["101", "010", "111"], moduleSize: 8 })
         tryCompare(qr, "available", true)

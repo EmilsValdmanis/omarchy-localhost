@@ -145,27 +145,29 @@ def read_system_memory(meminfo_path: Path = Path("/proc/meminfo")) -> dict[str, 
 
 
 def inspect_container_memory(container_ids: Sequence[str]) -> dict[str, int]:
-    ids = list(dict.fromkeys(value for value in container_ids if CONTAINER_ID_RE.fullmatch(value)))[:128]
+    ids = list(dict.fromkeys(value for value in container_ids if CONTAINER_ID_RE.fullmatch(value)))
     if not ids:
         return {}
-    try:
-        result = subprocess.run(
-            ["docker", "stats", "--no-stream", "--format", "{{.ID}}\t{{.MemUsage}}", *ids],
-            check=False, capture_output=True, text=True, timeout=3,
-        )
-    except (subprocess.TimeoutExpired, OSError):
-        return {}
-    if result.returncode != 0:
-        return {}
     memory = {}
-    for line in result.stdout.splitlines():
-        fields = line.split("\t", 1)
-        if len(fields) != 2:
+    for offset in range(0, len(ids), 128):
+        batch = ids[offset : offset + 128]
+        try:
+            result = subprocess.run(
+                ["docker", "stats", "--no-stream", "--format", "{{.ID}}\t{{.MemUsage}}", *batch],
+                check=False, capture_output=True, text=True, timeout=3,
+            )
+        except (subprocess.TimeoutExpired, OSError):
             continue
-        for container_id in ids:
-            if container_id.startswith(fields[0]) or fields[0].startswith(container_id):
-                memory[container_id] = parse_docker_memory(fields[1])
-                break
+        if result.returncode != 0:
+            continue
+        for line in result.stdout.splitlines():
+            fields = line.split("\t", 1)
+            if len(fields) != 2:
+                continue
+            for container_id in batch:
+                if container_id.startswith(fields[0]) or fields[0].startswith(container_id):
+                    memory[container_id] = parse_docker_memory(fields[1])
+                    break
     return memory
 
 

@@ -36,6 +36,8 @@ Item {
   property var dockerMemoryCache: ({})
   property var dockerMemoryAt: ({})
   property real lastDockerMemoryScanMs: 0
+  property var dockerMemoryRequestedIds: []
+  property string dockerMemoryOutput: ""
   property var memoryHistoryById: ({})
   property var probeCache: ({})
   property var pendingListeners: []
@@ -152,14 +154,44 @@ Item {
     metadataOutput = ""
     metadataError = ""
     var now = Date.now()
-    var sampleContainers = containerIds.length && now - lastDockerMemoryScanMs >= 8000
-    if (sampleContainers) lastDockerMemoryScanMs = now
+    if (containerIds.length && !dockerMemoryProcess.running
+        && now - lastDockerMemoryScanMs >= 8000) {
+      lastDockerMemoryScanMs = now
+      dockerMemoryRequestedIds = containerIds
+      dockerMemoryOutput = ""
+      dockerMemoryProcess.command = [
+        "python3", helperPath, "inspect", "--pids", "", "--uid", String(currentUid),
+        "--paths", "[]", "--containers", containerIds.join(",")
+      ]
+      dockerMemoryProcess.running = true
+    }
     metadataProcess.command = [
       "python3", helperPath, "inspect", "--pids", processIds.join(","),
       "--uid", String(currentUid), "--paths", JSON.stringify(projectPaths.slice(0, 256)),
-      "--containers", sampleContainers ? containerIds.join(",") : ""
+      "--containers", ""
     ]
     metadataProcess.running = true
+  }
+
+  function finishDockerMemorySample(exitCode) {
+    if (exitCode !== 0 || !includeDocker) return
+    var parsed = RadarModel.parseProcessPayload(dockerMemoryOutput, currentUid)
+    if (!parsed.ok) return
+    var nextMemory = Object.assign({}, dockerMemoryCache)
+    var nextAt = Object.assign({}, dockerMemoryAt)
+    var now = Date.now()
+    var changed = false
+    for (var index = 0; index < dockerMemoryRequestedIds.length; index++) {
+      var containerId = dockerMemoryRequestedIds[index]
+      var bytes = RadarModel.validMemory(parsed.containers[containerId])
+      if (bytes < 0) continue
+      if (nextMemory[containerId] !== bytes) changed = true
+      nextMemory[containerId] = bytes
+      nextAt[containerId] = now
+    }
+    dockerMemoryCache = nextMemory
+    dockerMemoryAt = nextAt
+    if (changed) scan()
   }
 
   function cacheMetadata() {
@@ -171,11 +203,8 @@ Item {
     var now = Date.now()
     for (var containerIndex = 0; containerIndex < pendingDockerContexts.length; containerIndex++) {
       var containerId = pendingDockerContexts[containerIndex].containerId
-      var memory = parsed.containers && parsed.containers[containerId]
-      if (memory !== undefined) {
-        nextDockerMemory[containerId] = memory
-        nextDockerMemoryAt[containerId] = now
-      } else if (now - Number(dockerMemoryAt[containerId] || 0) < 20000) {
+      if (dockerMemoryCache[containerId] !== undefined
+          && now - Number(dockerMemoryAt[containerId] || 0) < 20000) {
         nextDockerMemory[containerId] = dockerMemoryCache[containerId]
         nextDockerMemoryAt[containerId] = dockerMemoryAt[containerId]
       }
@@ -476,6 +505,15 @@ Item {
         root.addWarning(root.metadataError || "Process metadata is unavailable")
       root.cacheMetadata()
     }
+  }
+
+  Process {
+    id: dockerMemoryProcess
+    stdout: StdioCollector {
+      waitForEnd: true
+      onStreamFinished: root.dockerMemoryOutput = String(text || "")
+    }
+    onExited: function(exitCode) { root.finishDockerMemorySample(exitCode) }
   }
 
   Process {

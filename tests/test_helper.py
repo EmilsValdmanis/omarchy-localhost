@@ -56,6 +56,17 @@ class ProcessInspectionTests(unittest.TestCase):
         with mock.patch.object(helper.subprocess, "run", side_effect=subprocess.TimeoutExpired("docker", 3)):
             self.assertEqual(helper.inspect_container_memory(["abc123def456"]), {})
 
+        ids = [f"{index:012x}" for index in range(150)]
+        def stats_for_batch(command, **_kwargs):
+            output = "".join(f"{container_id}\t1MiB / 2GiB\n" for container_id in command[5:])
+            return subprocess.CompletedProcess(command, 0, output, "")
+
+        with mock.patch.object(helper.subprocess, "run", side_effect=stats_for_batch) as run:
+            memory = helper.inspect_container_memory(ids)
+            self.assertEqual(len(memory), 150)
+            self.assertEqual(memory[ids[-1]], 1048576)
+            self.assertEqual([len(call.args[0]) - 5 for call in run.call_args_list], [128, 22])
+
 
 class ProcessActionTests(unittest.TestCase):
     def setUp(self):
