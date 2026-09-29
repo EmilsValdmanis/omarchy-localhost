@@ -108,9 +108,12 @@ def main():
             output = smoke.stdout + smoke.stderr
             (artifacts / "wayland.log").write_text(output)
             print(output, end="")
-            if smoke.returncode or "LOCALHOST_WAYLAND_SMOKE emils.localhost false" not in output or re.search(r"\b(?:WARN|ERROR)\b", output):
+            if (smoke.returncode
+                    or "LOCALHOST_WAYLAND_SMOKE emils.localhost false" not in output
+                    or "LOCALHOST_BAR_LABEL PASS" not in output
+                    or re.search(r"\b(?:WARN|ERROR)\b", output)):
                 sys.exit("Wayland entry-point smoke test failed")
-            print("Both plugin entry points loaded on Wayland")
+            print("Both plugin entry points and themed bar label passed on Wayland")
 
 
 if __name__ == "__main__":

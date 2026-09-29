@@ -24,18 +24,15 @@ test("discovery settings are wired from the manifest-facing widget", () => {
   assert.doesNotMatch(service, /shift; exec docker/)
 })
 
-test("the bar icon is centered and hidden when it has no servers by default", () => {
+test("the bar icon and count share Omarchy's themed text label", () => {
   assert.match(widget, /readonly property bool showWhenEmpty: setting\("showWhenEmpty", false\)/)
   assert.match(widget, /visible: serverCount > 0 \|\| showWhenEmpty/)
   assert.doesNotMatch(widget, /visible: serverCount > 0 \|\| showWhenEmpty \|\|/)
-  assert.match(widget, /OpticalGlyph\s*\{\s*anchors\.centerIn: parent\s*anchors\.verticalCenterOffset: -Style\.spaceReal\(1\)/)
-  assert.doesNotMatch(widget, /OpticalGlyph\s*\{[\s\S]*?y: Style\.spaceReal\(1\)[\s\S]*?text: "\\uf0ac"/)
-})
-
-test("the server count badge overlays the button outside the icon canvas", () => {
-  assert.match(widget, /iconComponent: Component\s*\{[\s\S]*?OpticalGlyph[\s\S]*?\}\s*\}\s*Rectangle\s*\{\s*id: countBadge/)
-  assert.match(widget, /id: countBadge[\s\S]*?visible: root\.showCountBadge && root\.serverCount > 0/)
-  assert.match(widget, /text: root\.serverCount > 9 \? "9\+" : String\(root\.serverCount\)/)
+  assert.match(widget, /readonly property bool showServerCount: setting\("showCountBadge", true\)/)
+  assert.match(widget, /readonly property string countLabel: showServerCount && serverCount > 0 \? String\(serverCount\) : ""/)
+  assert.match(widget, /WidgetButton\s*\{\s*id: button\s*objectName: "localhostBarButton"\s*anchors\.fill: parent\s*bar: root\.bar/)
+  assert.match(widget, /text: root\.vertical \? "" : root\.glyph \+ \(root\.countLabel \? " " \+ root\.countLabel : ""\)/)
+  assert.doesNotMatch(widget, /countBadge|badgeInk|"9\+"/)
 })
 
 test("the global shortcut targets the bar widget instead of the QR overlay", () => {

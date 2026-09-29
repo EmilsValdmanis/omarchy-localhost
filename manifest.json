@@ -41,6 +41,7 @@
         "key": "showCountBadge",
         "type": "boolean",
         "label": "Show server count",
+        "description": "Show the detected count beside the bar icon.",
         "defaultValue": true
       },
       {

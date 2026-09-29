@@ -27,7 +27,8 @@ def upstream_metadata(warning, source):
         return False
     name = member[1]
     tokens = {
-        "Style.font": {"family", "heading", "title", "body", "bodySmall", "caption"},
+        "Style.font": {"family", "heading", "title", "body", "bodySmall", "caption", "icon"},
+        "Style.bar": {"iconSlot"},
         "Style.spacing": {"hairline"},
         "Color.popups": {"text", "background"},
         "root.bar": {"background"},

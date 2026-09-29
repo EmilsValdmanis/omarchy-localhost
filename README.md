@@ -98,7 +98,7 @@ Localhost can be removed from the shield menu.
 | Setting              | Purpose                                         |
 | -------------------- | ----------------------------------------------- |
 | Refresh interval     | Scan every 1–30 seconds                         |
-| Show server count    | Toggle the bar badge                            |
+| Show server count    | Show the detected count beside the bar icon    |
 | Show when empty      | Keep the widget available with no servers       |
 | Include Docker       | Discover browser-ready Docker and Compose ports |
 | Ignored ports        | Hide ports or ranges such as `3001,8000-8010`   |
