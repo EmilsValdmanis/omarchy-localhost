@@ -46,7 +46,7 @@ def main():
         imports.mkdir()
         for module in ("Commons", "Ui"):
             (imports / module).symlink_to(shell / module, target_is_directory=True)
-        files = sorted(repo.glob("*.qml"))
+        files = sorted(repo.glob("*.qml")) + sorted((repo / "qml").glob("*.qml"))
         result = subprocess.run([lint, "--ignore-settings", "--json", "-", "-I", directory, *map(str, files)],
                                 capture_output=True, text=True, timeout=30)
         try:

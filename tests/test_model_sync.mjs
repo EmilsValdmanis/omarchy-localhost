@@ -4,7 +4,7 @@ import test from "node:test"
 import vm from "node:vm"
 
 const radar = vm.createContext({})
-vm.runInContext(readFileSync(new URL("../RadarModel.js", import.meta.url), "utf8"), radar)
+vm.runInContext(readFileSync(new URL("../qml/RadarModel.js", import.meta.url), "utf8"), radar)
 const plain = value => JSON.parse(JSON.stringify(value))
 
 function modelFor(rows = []) {

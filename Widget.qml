@@ -5,7 +5,8 @@ import Quickshell
 import Quickshell.Io
 import qs.Commons
 import qs.Ui
-import "RadarModel.js" as RadarModel
+import "qml" as Internal
+import "qml/RadarModel.js" as RadarModel
 
 BarWidget {
   id: root
@@ -152,7 +153,7 @@ BarWidget {
   function close() { closePanel() }
   function toggle() { togglePanel() }
 
-  RadarService {
+  Internal.RadarService {
     id: radar
     refreshIntervalSec: Math.min(30, Math.max(1, Number(root.setting("refreshIntervalSec", 2)) || 2))
     includeDocker: root.setting("includeDocker", true)
@@ -363,12 +364,13 @@ BarWidget {
     contentWidth: fittedContentWidth(panel.implicitWidth, Style.space(560))
     contentHeight: fittedContentHeight(panel.implicitHeight, Style.space(680))
 
-    ServerPanel {
+    Internal.ServerPanel {
       id: panel
       anchors.fill: parent
       panelActive: card.open
       servers: radar.servers
       revision: radar.revision
+      systemMemory: radar.systemMemory
       lanIp: radar.lanIp
       notice: root.notice
       noticeUrgent: root.noticeUrgent

@@ -141,13 +141,101 @@ function parseProcessPayload(raw, currentUid) {
         cwd: cwd,
         executable: String(row.executable || ""),
         startTime: startTime,
+        memoryBytes: validMemory(row.memoryBytes),
         argv: Array.isArray(row.argv) ? row.argv.map(String) : commandTokens(command),
         project: row.project && typeof row.project === "object" ? row.project : {}
       }
     }
-    return { ok: true, error: "", processes: processes, projects: payload.projects || {} }
+    return { ok: true, error: "", processes: processes, projects: payload.projects || {},
+      containers: payload.containers || {}, systemMemory: normalizeSystemMemory(payload.systemMemory) }
   } catch (exception) {
     return { ok: false, error: "Could not parse process metadata", processes: {} }
+  }
+}
+
+function validMemory(value) {
+  if (value === undefined || value === null || value === "") return -1
+  var bytes = Number(value)
+  return Number.isFinite(bytes) && bytes >= 0 ? Math.round(bytes) : -1
+}
+
+function normalizeSystemMemory(value) {
+  var total = validMemory(value && value.totalBytes)
+  var available = validMemory(value && value.availableBytes)
+  if (total <= 0 || available < 0 || available > total)
+    return { totalBytes: -1, availableBytes: -1 }
+  return { totalBytes: total, availableBytes: available }
+}
+
+function formatMemory(value) {
+  var bytes = validMemory(value)
+  if (bytes < 0) return "—"
+  var mib = bytes / 1048576
+  if (mib >= 1024) return (mib / 1024).toFixed(2) + " GiB"
+  if (mib >= 10) return Math.round(mib) + " MiB"
+  return mib.toFixed(1) + " MiB"
+}
+
+function parseMemoryHistory(value) {
+  var samples = value
+  if (typeof value === "string") {
+    try { samples = JSON.parse(value) } catch (exception) { return [] }
+  }
+  if (!Array.isArray(samples)) return []
+  return samples.slice(-30).map(validMemory).filter(function(bytes) { return bytes >= 0 })
+}
+
+function memorySummary(servers) {
+  var seen = Object.create(null)
+  var total = 0
+  var measured = 0
+  var unmeasured = 0
+  for (var index = 0; index < servers.length; index++) {
+    var row = servers[index]
+    var key = memorySourceKey(row)
+    if (seen[key]) continue
+    seen[key] = true
+    var bytes = validMemory(row.memoryBytes)
+    if (bytes < 0) unmeasured++
+    else { total += bytes; measured++ }
+  }
+  return { totalBytes: total, measured: measured, unmeasured: unmeasured }
+}
+
+function memorySourceKey(row) {
+  return row.source === "docker"
+    ? (row.containerId ? "docker:" + row.containerId : "server:" + row.serverId)
+    : (row.pid > 0 && row.startTime > 0
+      ? "process:" + row.pid + ":" + row.startTime : "server:" + row.serverId)
+}
+
+function memoryBreakdown(servers, systemMemory) {
+  var system = normalizeSystemMemory(systemMemory)
+  var summary = memorySummary(servers)
+  var seen = Object.create(null)
+  var sources = []
+  for (var index = 0; index < servers.length; index++) {
+    var row = servers[index]
+    var key = memorySourceKey(row)
+    if (seen[key]) continue
+    seen[key] = true
+    var bytes = validMemory(row.memoryBytes)
+    if (bytes >= 0) sources.push({ key: key, name: String(row.name || "Server"),
+      port: Number(row.port || 0), bytes: bytes })
+  }
+  var used = system.totalBytes < 0 ? -1 : system.totalBytes - system.availableBytes
+  var shownServers = used < 0 ? 0 : Math.min(summary.totalBytes, used)
+  var scale = summary.totalBytes > 0 ? shownServers / summary.totalBytes : 0
+  for (var sourceIndex = 0; sourceIndex < sources.length; sourceIndex++)
+    sources[sourceIndex].barBytes = sources[sourceIndex].bytes * scale
+  return {
+    totalBytes: system.totalBytes,
+    availableBytes: system.availableBytes,
+    serverBytes: summary.totalBytes,
+    otherBytes: used < 0 ? -1 : used - shownServers,
+    measured: summary.measured,
+    unmeasured: summary.unmeasured,
+    sources: sources
   }
 }
 
@@ -169,7 +257,9 @@ function normalizeServer(server) {
     lanAvailable: source.lanAvailable === true,
     hint: String(source.hint || ""),
     projectRoot: String(source.projectRoot || source.cwd || source.serverId || source.id || "Other servers"),
-    projectPath: String(source.projectPath || "")
+    projectPath: String(source.projectPath || ""),
+    memoryBytes: validMemory(source.memoryBytes),
+    memoryHistoryJson: JSON.stringify(parseMemoryHistory(source.memoryHistoryJson || source.memoryHistory))
   }
 }
 
@@ -190,6 +280,8 @@ function serversEqual(left, right) {
     && left.hint === right.hint
     && left.projectRoot === right.projectRoot
     && left.projectPath === right.projectPath
+    && Number(left.memoryBytes) === Number(right.memoryBytes)
+    && left.memoryHistoryJson === right.memoryHistoryJson
 }
 
 // Synchronize a QML ListModel without resetting delegates or their scroll origin.
@@ -877,7 +969,8 @@ function serverFromContext(context, scheme, lanIp) {
     status: lanAvailable ? "Available on LAN" : "Not available on LAN",
     hint: lanAvailable
       ? "Same Wi-Fi network required"
-      : "Server is bound to localhost only. Start it with --host / 0.0.0.0 to test on another device."
+      : "Server is bound to localhost only. Start it with --host / 0.0.0.0 to test on another device.",
+    memoryBytes: validMemory(process.memoryBytes)
   }
 }
 

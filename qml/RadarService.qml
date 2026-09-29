@@ -32,6 +32,11 @@ Item {
 
   property int currentUid: -1
   property var processCache: ({})
+  property var systemMemory: ({ totalBytes: -1, availableBytes: -1 })
+  property var dockerMemoryCache: ({})
+  property var dockerMemoryAt: ({})
+  property real lastDockerMemoryScanMs: 0
+  property var memoryHistoryById: ({})
   property var probeCache: ({})
   property var pendingListeners: []
   property var pendingContexts: []
@@ -50,13 +55,24 @@ Item {
   property string routeWarning: ""
 
   readonly property string helperPath: decodeURIComponent(
-    String(Qt.resolvedUrl("localhost_helper.py")).replace(/^file:\/\//, ""))
+    String(Qt.resolvedUrl("../localhost_helper.py")).replace(/^file:\/\//, ""))
 
   signal actionFinished(string action, bool successful, string detail, string serverId)
 
   ListModel { id: serverModel }
 
   function syncServers(nextServers) {
+    var nextHistory = Object.create(null)
+    for (var index = 0; index < nextServers.length; index++) {
+      var server = nextServers[index]
+      var id = String(server.id)
+      var previous = memoryHistoryById[id] || []
+      var bytes = RadarModel.validMemory(server.memoryBytes)
+      var history = bytes < 0 ? [] : previous.concat([bytes]).slice(-30)
+      nextHistory[id] = history
+      server.memoryHistory = history
+    }
+    memoryHistoryById = nextHistory
     if (RadarModel.syncServerModel(serverModel, nextServers)) revision++
   }
 
@@ -125,21 +141,23 @@ Item {
       }
     }
     var projectPaths = []
+    var containerIds = []
     for (var dockerIndex = 0; dockerIndex < pendingDockerContexts.length; dockerIndex++) {
-      var path = pendingDockerContexts[dockerIndex].process.cwd
+      var dockerContext = pendingDockerContexts[dockerIndex]
+      var path = dockerContext.process.cwd
       if (path && projectPaths.indexOf(path) === -1) projectPaths.push(path)
+      if (containerIds.indexOf(dockerContext.containerId) === -1)
+        containerIds.push(dockerContext.containerId)
     }
-    if (!processIds.length && !projectPaths.length) {
-      processCache = ({})
-      selectCandidates()
-      return
-    }
-
     metadataOutput = ""
     metadataError = ""
+    var now = Date.now()
+    var sampleContainers = containerIds.length && now - lastDockerMemoryScanMs >= 8000
+    if (sampleContainers) lastDockerMemoryScanMs = now
     metadataProcess.command = [
       "python3", helperPath, "inspect", "--pids", processIds.join(","),
-      "--uid", String(currentUid), "--paths", JSON.stringify(projectPaths.slice(0, 256))
+      "--uid", String(currentUid), "--paths", JSON.stringify(projectPaths.slice(0, 256)),
+      "--containers", sampleContainers ? containerIds.join(",") : ""
     ]
     metadataProcess.running = true
   }
@@ -147,10 +165,29 @@ Item {
   function cacheMetadata() {
     var parsed = RadarModel.parseProcessPayload(metadataOutput, currentUid)
     processCache = parsed.processes
+    systemMemory = parsed.systemMemory || { totalBytes: -1, availableBytes: -1 }
+    var nextDockerMemory = Object.create(null)
+    var nextDockerMemoryAt = Object.create(null)
+    var now = Date.now()
+    for (var containerIndex = 0; containerIndex < pendingDockerContexts.length; containerIndex++) {
+      var containerId = pendingDockerContexts[containerIndex].containerId
+      var memory = parsed.containers && parsed.containers[containerId]
+      if (memory !== undefined) {
+        nextDockerMemory[containerId] = memory
+        nextDockerMemoryAt[containerId] = now
+      } else if (now - Number(dockerMemoryAt[containerId] || 0) < 20000) {
+        nextDockerMemory[containerId] = dockerMemoryCache[containerId]
+        nextDockerMemoryAt[containerId] = dockerMemoryAt[containerId]
+      }
+    }
+    dockerMemoryCache = nextDockerMemory
+    dockerMemoryAt = nextDockerMemoryAt
     var projects = parsed.projects || {}
     for (var index = 0; index < pendingDockerContexts.length; index++) {
       var context = pendingDockerContexts[index]
       context.process.project = projects[context.process.cwd] || {}
+      context.process.memoryBytes = dockerMemoryCache[context.containerId] === undefined
+        ? -1 : dockerMemoryCache[context.containerId]
     }
     if (!parsed.ok) addWarning(parsed.error || metadataError)
     selectCandidates()
@@ -394,6 +431,7 @@ Item {
       }
       else {
         root.scanError = root.ssError || "Could not scan local ports"
+        root.systemMemory = { totalBytes: -1, availableBytes: -1 }
         root.diagnostics = []
         root.scanSummary = ""
         root.syncServers([])

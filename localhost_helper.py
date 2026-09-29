@@ -95,6 +95,15 @@ def inspect_process(
     except (FileNotFoundError, PermissionError, ProcessLookupError, OSError):
         executable = ""
 
+    memory_bytes = -1
+    try:
+        for line in (directory / "status").read_text(errors="replace").splitlines():
+            if line.startswith("VmRSS:"):
+                memory_bytes = int(line.split()[1]) * 1024
+                break
+    except (FileNotFoundError, PermissionError, ProcessLookupError, OSError, ValueError, IndexError):
+        pass
+
     return {
         "pid": pid,
         "uid": uid,
@@ -103,7 +112,61 @@ def inspect_process(
         "cwd": cwd,
         "executable": executable,
         "startTime": start_time,
+        "memoryBytes": memory_bytes,
     }
+
+
+def parse_docker_memory(value: str) -> int:
+    """Convert the used half of Docker's human-readable MemUsage to bytes."""
+    match = re.match(r"^\s*([\d.]+)\s*([KMGTPE]?i?B|B)\b", value, re.IGNORECASE)
+    if not match:
+        return -1
+    unit = match.group(2).upper()
+    power = "KMGTPE".find(unit[0]) + 1 if unit != "B" else 0
+    base = 1024 if "I" in unit else 1000
+    return round(float(match.group(1)) * base ** power)
+
+
+def read_system_memory(meminfo_path: Path = Path("/proc/meminfo")) -> dict[str, int]:
+    """Read physical RAM and the kernel's estimate of immediately available RAM."""
+    values: dict[str, int] = {}
+    try:
+        for line in meminfo_path.read_text().splitlines():
+            fields = line.split()
+            if len(fields) == 3 and fields[0] in {"MemTotal:", "MemAvailable:"} and fields[2] == "kB":
+                values[fields[0]] = int(fields[1]) * 1024
+    except (OSError, ValueError):
+        return {"totalBytes": -1, "availableBytes": -1}
+    total = values.get("MemTotal:", -1)
+    available = values.get("MemAvailable:", -1)
+    if total <= 0 or available < 0 or available > total:
+        return {"totalBytes": -1, "availableBytes": -1}
+    return {"totalBytes": total, "availableBytes": available}
+
+
+def inspect_container_memory(container_ids: Sequence[str]) -> dict[str, int]:
+    ids = list(dict.fromkeys(value for value in container_ids if CONTAINER_ID_RE.fullmatch(value)))[:128]
+    if not ids:
+        return {}
+    try:
+        result = subprocess.run(
+            ["docker", "stats", "--no-stream", "--format", "{{.ID}}\t{{.MemUsage}}", *ids],
+            check=False, capture_output=True, text=True, timeout=3,
+        )
+    except (subprocess.TimeoutExpired, OSError):
+        return {}
+    if result.returncode != 0:
+        return {}
+    memory = {}
+    for line in result.stdout.splitlines():
+        fields = line.split("\t", 1)
+        if len(fields) != 2:
+            continue
+        for container_id in ids:
+            if container_id.startswith(fields[0]) or fields[0].startswith(container_id):
+                memory[container_id] = parse_docker_memory(fields[1])
+                break
+    return memory
 
 
 def inspect_processes(
@@ -305,6 +368,7 @@ def build_parser() -> argparse.ArgumentParser:
     inspect_parser.add_argument("--pids", required=True)
     inspect_parser.add_argument("--uid", required=True, type=int)
     inspect_parser.add_argument("--paths", default="[]", help="JSON array of Compose working directories")
+    inspect_parser.add_argument("--containers", default="", help="Comma-separated container IDs to sample")
 
     action_parser = subparsers.add_parser("process-action", help="Stop or restart a process")
     action_parser.add_argument("--action", choices=["stop", "force-stop", "restart"], required=True)
@@ -332,7 +396,9 @@ def main(argv: Sequence[str] | None = None) -> int:
                 comma_separated_pids(arguments.pids), arguments.uid, inspector=inspector
             )
             json_print({"ok": True, "processes": processes,
-                        "projects": {path: inspector.inspect(path) for path in dict.fromkeys(paths)}})
+                        "projects": {path: inspector.inspect(path) for path in dict.fromkeys(paths)},
+                        "containers": inspect_container_memory(arguments.containers.split(",")),
+                        "systemMemory": read_system_memory()})
         elif arguments.command == "process-action":
             if arguments.action == "restart":
                 restarted, log_path = restart_process(arguments.pid, arguments.start_time)

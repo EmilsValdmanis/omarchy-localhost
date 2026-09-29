@@ -2,9 +2,9 @@ import assert from "node:assert/strict"
 import { readFileSync } from "node:fs"
 import test from "node:test"
 
-const service = readFileSync(new URL("../RadarService.qml", import.meta.url), "utf8")
+const service = readFileSync(new URL("../qml/RadarService.qml", import.meta.url), "utf8")
 const widget = readFileSync(new URL("../Widget.qml", import.meta.url), "utf8")
-const panel = readFileSync(new URL("../ServerPanel.qml", import.meta.url), "utf8")
+const panel = readFileSync(new URL("../qml/ServerPanel.qml", import.meta.url), "utf8")
 const readme = readFileSync(new URL("../README.md", import.meta.url), "utf8")
 
 test("process actions cross the verified helper boundary", () => {
