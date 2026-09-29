@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "id": "emils.localhost",
   "name": "Localhost",
-  "version": "0.5.1",
+  "version": "0.6.0",
   "author": "Emil Valdmanis",
   "license": "MIT",
   "description": "Discover local development servers, open them instantly, and send LAN-ready projects to your phone with a QR code.",
@@ -41,6 +41,7 @@
         "key": "showCountBadge",
         "type": "boolean",
         "label": "Show server count",
+        "description": "Show the detected count beside the bar icon.",
         "defaultValue": true
       },
       {

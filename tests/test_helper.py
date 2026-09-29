@@ -18,6 +18,7 @@ class ProcessInspectionTests(unittest.TestCase):
         self.assertEqual(process["pid"], os.getpid())
         self.assertEqual(process["uid"], os.geteuid())
         self.assertGreater(process["startTime"], 0)
+        self.assertGreater(process["memoryBytes"], 0)
         self.assertTrue(process["command"])
         self.assertTrue(process["cwd"])
 
@@ -28,6 +29,43 @@ class ProcessInspectionTests(unittest.TestCase):
         self.assertEqual(helper.comma_separated_pids("12,bad,0,12,34"), [12, 12, 34])
         inspected = helper.inspect_processes([os.getpid(), os.getpid()], os.geteuid())
         self.assertEqual(len(inspected), 1)
+
+    def test_parses_docker_memory_units(self):
+        self.assertEqual(helper.parse_docker_memory("1.5GiB / 4GiB"), 1610612736)
+        self.assertEqual(helper.parse_docker_memory("100MiB / 4GiB"), 104857600)
+        self.assertEqual(helper.parse_docker_memory("12.5MB / 1GB"), 12500000)
+        self.assertEqual(helper.parse_docker_memory("unavailable"), -1)
+
+    def test_reads_total_and_available_system_ram(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "meminfo"
+            path.write_text("MemTotal:       16384 kB\nMemFree: 1024 kB\nMemAvailable: 4096 kB\n")
+            self.assertEqual(helper.read_system_memory(path), {
+                "totalBytes": 16384 * 1024, "availableBytes": 4096 * 1024
+            })
+            path.write_text("MemTotal: 10 kB\nMemAvailable: 11 kB\n")
+            self.assertEqual(helper.read_system_memory(path), {
+                "totalBytes": -1, "availableBytes": -1
+            })
+
+    def test_container_stats_are_batched_and_fail_open(self):
+        result = subprocess.CompletedProcess([], 0, "abc123def456\t24MiB / 1GiB\n", "")
+        with mock.patch.object(helper.subprocess, "run", return_value=result) as run:
+            self.assertEqual(helper.inspect_container_memory(["abc123def456", "abc123def456"]), {"abc123def456": 25165824})
+            self.assertEqual(run.call_args.args[0][-1], "abc123def456")
+        with mock.patch.object(helper.subprocess, "run", side_effect=subprocess.TimeoutExpired("docker", 3)):
+            self.assertEqual(helper.inspect_container_memory(["abc123def456"]), {})
+
+        ids = [f"{index:012x}" for index in range(150)]
+        def stats_for_batch(command, **_kwargs):
+            output = "".join(f"{container_id}\t1MiB / 2GiB\n" for container_id in command[5:])
+            return subprocess.CompletedProcess(command, 0, output, "")
+
+        with mock.patch.object(helper.subprocess, "run", side_effect=stats_for_batch) as run:
+            memory = helper.inspect_container_memory(ids)
+            self.assertEqual(len(memory), 150)
+            self.assertEqual(memory[ids[-1]], 1048576)
+            self.assertEqual([len(call.args[0]) - 5 for call in run.call_args_list], [128, 22])
 
 
 class ProcessActionTests(unittest.TestCase):

@@ -1,6 +1,7 @@
 import QtQuick
 import Quickshell
 import Quickshell.Wayland
+import "qml" as Internal
 
 Item {
   id: root
@@ -19,7 +20,7 @@ Item {
   readonly property var qrRows: qr.qrRows
   readonly property bool showingQr: qr.showingQr
 
-  QrService { id: qr }
+  Internal.QrService { id: qr }
 
   function open(payloadJson) {
     qr.open(payloadJson)
@@ -82,7 +83,7 @@ Item {
 
         MouseArea { anchors.fill: parent; onClicked: function(mouse) { mouse.accepted = true } }
 
-        QrContent {
+        Internal.QrContent {
           id: content
           anchors.fill: parent
           qrState: qr

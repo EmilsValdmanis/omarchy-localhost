@@ -5,7 +5,8 @@ import Quickshell
 import Quickshell.Io
 import qs.Commons
 import qs.Ui
-import "RadarModel.js" as RadarModel
+import "qml" as Internal
+import "qml/RadarModel.js" as RadarModel
 
 BarWidget {
   id: root
@@ -23,7 +24,10 @@ BarWidget {
   property string forceStopServerId: ""
 
   readonly property int serverCount: radar.serverCount
-  readonly property bool showCountBadge: setting("showCountBadge", true)
+  // Keep the existing setting key so saved preferences survive the badge removal.
+  readonly property bool showServerCount: setting("showCountBadge", true)
+  readonly property string countLabel: showServerCount && serverCount > 0 ? String(serverCount) : ""
+  readonly property string glyph: "\uf0ac"
   readonly property bool showWhenEmpty: setting("showWhenEmpty", false)
   readonly property bool opened: card.open
   readonly property var firewallStatusCommand: [
@@ -152,8 +156,9 @@ BarWidget {
   function close() { closePanel() }
   function toggle() { togglePanel() }
 
-  RadarService {
+  Internal.RadarService {
     id: radar
+    objectName: "localhostRadarService"
     refreshIntervalSec: Math.min(30, Math.max(1, Number(root.setting("refreshIntervalSec", 2)) || 2))
     includeDocker: root.setting("includeDocker", true)
     ignoredPorts: String(root.setting("ignoredPorts", "") || "")
@@ -298,10 +303,16 @@ BarWidget {
     }
   }
 
-  BarIconButton {
+  WidgetButton {
     id: button
-    anchors.centerIn: parent
+    objectName: "localhostBarButton"
+    anchors.fill: parent
     bar: root.bar
+    text: root.vertical ? "" : root.glyph + (root.countLabel ? " " + root.countLabel : "")
+    labelVisible: !root.vertical
+    hasVisualContent: true
+    fixedHeight: root.vertical
+      ? (root.countLabel ? 2 : 1) * Style.bar.iconSlot : -1
     tooltipText: root.serverCount > 0
       ? "Localhost · " + root.serverCount + " server" + (root.serverCount === 1 ? "" : "s")
       : "Localhost · no servers"
@@ -312,44 +323,30 @@ BarWidget {
       } else root.togglePanel()
     }
 
-    iconComponent: Component {
-      Item {
-        OpticalGlyph {
-          anchors.centerIn: parent
-          anchors.verticalCenterOffset: -Style.spaceReal(1)
-          width: parent.width
-          height: parent.height
-          text: "\uf0ac"
-          fontFamily: button.fontFamily
-          fontSize: button.fontSize
-          color: Color.accent
-        }
-      }
-    }
+    Column {
+      visible: root.vertical
+      anchors.fill: parent
 
-    Rectangle {
-      id: countBadge
-      visible: root.showCountBadge && root.serverCount > 0
-      anchors.right: parent.right
-      anchors.top: parent.top
-      anchors.rightMargin: Style.space(1)
-      anchors.topMargin: Style.space(1)
-      width: Math.max(Style.space(12), badgeText.implicitWidth + Style.space(5))
-      height: Style.space(12)
-      radius: height / 2
-      color: Color.accent
-      border.width: Math.max(1, Style.spacing.hairline)
-      border.color: root.bar ? root.bar.background : Color.background
-      z: 1
+      OpticalGlyph {
+        width: button.width
+        height: Style.bar.iconSlot
+        text: root.glyph
+        fontFamily: button.fontFamily
+        fontSize: Style.font.icon
+        color: button.foreground
+      }
 
       Text {
-        id: badgeText
-        anchors.centerIn: parent
-        text: root.serverCount > 9 ? "9+" : String(root.serverCount)
-        color: Color.background
-        font.family: Style.font.family
-        font.pixelSize: Style.space(8)
-        font.bold: true
+        visible: root.countLabel !== ""
+        width: button.width
+        height: Style.bar.iconSlot
+        textFormat: Text.PlainText
+        text: root.countLabel
+        color: button.foreground
+        font.family: button.fontFamily
+        font.pixelSize: button.fontSize
+        horizontalAlignment: Text.AlignHCenter
+        verticalAlignment: Text.AlignVCenter
       }
     }
   }
@@ -363,12 +360,13 @@ BarWidget {
     contentWidth: fittedContentWidth(panel.implicitWidth, Style.space(560))
     contentHeight: fittedContentHeight(panel.implicitHeight, Style.space(680))
 
-    ServerPanel {
+    Internal.ServerPanel {
       id: panel
       anchors.fill: parent
       panelActive: card.open
       servers: radar.servers
       revision: radar.revision
+      systemMemory: radar.systemMemory
       lanIp: radar.lanIp
       notice: root.notice
       noticeUrgent: root.noticeUrgent

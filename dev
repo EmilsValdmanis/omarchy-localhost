@@ -31,9 +31,11 @@ mkdir -p "$target_dir"
 touch "$marker_path"
 
 sync_plugin() {
-  rsync -a --delete \
-    --exclude '/.git/' \
+  rsync -a --delete --delete-excluded \
     --filter='protect /.omarchy-localhost-dev' \
+    --exclude '/.*' \
+    --exclude '__pycache__/' \
+    --exclude '*.py[cod]' \
     "$repo_dir/" "$target_dir/"
 }
 
@@ -61,12 +63,16 @@ echo "Live plugin: $target_dir"
 echo "Save a file to sync it and hot-reload Localhost. Press Ctrl+C to stop."
 
 while IFS= read -r changed_path; do
+  relative_path="${changed_path#"$repo_dir"/}"
+  case "/$relative_path" in
+    */.*|*/__pycache__/*|*/__pycache__) continue ;;
+  esac
   sync_plugin
-  echo "Synced ${changed_path#"$repo_dir"/}"
+  echo "Synced $relative_path"
 done < <(
   inotifywait -r -q -m \
     -e close_write,create,delete,move \
-    --exclude '(^|/)\.git(/|$)' \
+    --exclude '(^|/)\.[^/]+(/|$)|(^|/)__pycache__(/|$)' \
     --format '%w%f' \
     "$repo_dir"
 )

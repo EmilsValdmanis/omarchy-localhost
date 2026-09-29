@@ -1,7 +1,6 @@
 # Localhost for Omarchy
 
-[![Version](https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fraw.githubusercontent.com%2FEmilsValdmanis%2Fomarchy-localhost%2Fmain%2Fmanifest.json&query=%24.version&prefix=v&label=version&style=flat-square&labelColor=0c0b0c&color=c9a29a)](manifest.json)
-[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg?style=flat-square&labelColor=0c0b0c&color=373637)](LICENSE)
+[![Built for Omarchy: Plugin](https://raw.githubusercontent.com/tcballard/omarchy-badges/75975e5b5bf75e7ede3764bcd2950046f7abfe2c/badges/v1/omarchy-plugin.svg)](https://github.com/tcballard/omarchy-badges)
 
 Discover, control, and share local development servers from the Omarchy bar.
 Start Vite, Next.js, Astro, Rails, or another server and Localhost adds it
@@ -12,7 +11,7 @@ for version history and release notes.
 
 > `pnpm dev` → Localhost appears → click **QR** → scan with your phone
 
-![Localhost for Omarchy: automatic server discovery, monorepo grouping, and LAN QR sharing in the Everforest theme](preview.png)
+![Localhost for Omarchy in Everforest: server RAM breakdown, memory trends, project groups, and QR sharing](preview.png)
 
 ## Features
 
@@ -25,6 +24,8 @@ for version history and release notes.
 - Discovery diagnostics, port filters, and LAN-rule management
 - Process identity verification before stop or restart
 - Native Omarchy styling with no daemon, database, or account
+- System RAM breakdown showing individual server portions, other usage, and free capacity
+- Live RAM sparkline and usage number for each server
 
 Servers in the same repository or workspace appear together, with package paths
 under each name. Use the folder button to switch to a flat list sorted by port.
@@ -96,7 +97,7 @@ Localhost can be removed from the shield menu.
 | Setting              | Purpose                                         |
 | -------------------- | ----------------------------------------------- |
 | Refresh interval     | Scan every 1–30 seconds                         |
-| Show server count    | Toggle the bar badge                            |
+| Show server count    | Show the detected count beside the bar icon     |
 | Show when empty      | Keep the widget available with no servers       |
 | Include Docker       | Discover browser-ready Docker and Compose ports |
 | Ignored ports        | Hide ports or ranges such as `3001,8000-8010`   |
@@ -109,6 +110,16 @@ Localhost reads listening sockets from `ss`, batches process metadata through a
 small Python helper, and probes likely development servers over HTTP and HTTPS.
 It filters helper sockets, databases, and other non-browser services. Published
 Docker ports are discovered separately because they do not expose a host PID.
+RAM readings use resident memory for native listener processes and Docker's
+container memory usage for published services. The total counts a shared
+process or container once even if it serves multiple ports. Unavailable
+readings are shown as a dash and excluded from the total. Docker RAM is sampled
+separately from discovery, no more often than every eight seconds, so a new
+container may show a dash briefly.
+The system breakdown uses Linux `MemTotal` and `MemAvailable`; "Free" includes
+reclaimable cache. The other bucket includes non-server processes and system
+usage. Server portions use resident-memory estimates, so their sum may differ
+slightly from physical memory accounting.
 
 Every eligible listening port is checked, including multiple HTTP servers in
 one process and fallback ports chosen when a default is busy. Framework labels
@@ -138,6 +149,25 @@ commented `omarchy-localhost` and remove the matching rule numbers.
 
 ## Development
 
+The root keeps the two entry points named in `manifest.json`: `Widget.qml`
+for the bar and panel, and `QrOverlay.qml` for phone sharing. Implementation
+components live in `qml/`:
+
+| Path                                                                | Responsibility                                         |
+| ------------------------------------------------------------------- | ------------------------------------------------------ |
+| `qml/RadarService.qml`                                              | Run discovery scans and actions; keep live samples     |
+| `qml/RadarModel.js`                                                 | Parse, normalize, filter, and summarize server data    |
+| `qml/ServerPanel.qml`, `qml/ServerRow.qml`, `qml/ServerActions.qml` | Render the server list and controls                    |
+| `qml/MemorySparkline.qml`, `qml/PanelScrollArea.qml`                | Shared panel pieces                                    |
+| `qml/QrService.qml`, `qml/QrContent.qml`, `qml/QrCode.qml`          | QR state and display                                   |
+| `localhost_helper.py`, `project_metadata.py`                        | Read Linux and Docker metadata; verify process actions |
+| `tests/`                                                            | Model, helper, QML, and preview checks                 |
+
+Data flows from `RadarService` through `RadarModel` into `ServerPanel`. The
+Python helper reads OS data; QML handles presentation and interactions. Keep
+the manifest entry points at the root and update imports and tests when moving
+internal components.
+
 Run the development watcher from the repository root:
 
 ```bash
@@ -152,8 +182,9 @@ stop watching. The development install remains available for the next run;
 remove it with `omarchy plugin remove emils.localhost` when it is no longer
 needed.
 
-`./dev` will not overwrite a normal Git-installed copy. Remove that copy first
-if you want to replace it with the development install.
+`./dev` will not overwrite a normal Git-installed copy. Move or remove that
+copy first if you want to replace it with the development install. Keep a moved
+copy outside the active plugin path if you plan to restore it later.
 
 Run the checks before opening a pull request:
 

@@ -11,10 +11,12 @@ CursorSurface {
   required property int index
   required property var server
   property bool selected: false
+  property color memoryColor: Color.accent
   readonly property color dim: Qt.darker(foreground, 1.4)
   readonly property string frameworkIcon: RadarModel.frameworkIcon(server.frameworkId)
   readonly property string detail: server.framework
     + (server.projectPath && server.projectPath !== "." ? " · " + server.projectPath : "")
+  readonly property var memoryHistory: RadarModel.parseMemoryHistory(server.memoryHistoryJson)
 
   signal rowSelected()
   signal openRequested()
@@ -91,6 +93,37 @@ CursorSurface {
         visible: statusHover.hovered
         text: row.server.lanAvailable ? "Available on LAN" : "Localhost only"
       }
+    }
+
+    Item {
+      Layout.preferredWidth: Style.space(48)
+      Layout.preferredHeight: Style.space(20)
+
+      MemorySparkline {
+        anchors.fill: parent
+        samples: row.memoryHistory
+        lineColor: row.memoryColor
+        opacity: row.server.memoryBytes >= 0 ? 1 : 0.35
+      }
+      HoverHandler { id: memoryHover }
+      PanelToolTip {
+        visible: memoryHover.hovered
+        text: row.server.memoryBytes >= 0
+          ? "Recent server RAM · last " + row.memoryHistory.length + " scans"
+          : "RAM usage unavailable"
+      }
+    }
+
+    Text {
+      objectName: "serverMemory"
+      Layout.preferredWidth: Style.space(66)
+      textFormat: Text.PlainText
+      text: RadarModel.formatMemory(row.server.memoryBytes)
+      color: row.server.memoryBytes >= 0 ? row.foreground : row.dim
+      font.family: Style.font.family
+      font.pixelSize: Style.font.caption
+      horizontalAlignment: Text.AlignRight
+      elide: Text.ElideRight
     }
 
     Button {

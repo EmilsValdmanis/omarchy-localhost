@@ -3,8 +3,8 @@ import QtTest
 import Quickshell
 import qs.Commons
 import qs.Ui
-import "Plugin" as Plugin
-import "Plugin/RadarModel.js" as RadarModel
+import "Plugin/qml" as PluginUi
+import "Plugin/qml/RadarModel.js" as RadarModel
 
 ShellRoot {
   FloatingWindow {
@@ -22,7 +22,7 @@ ShellRoot {
       property string output: Quickshell.env("LOCALHOST_PREVIEW_DIR")
 
       ListModel { id: servers }
-      Plugin.QrService { id: qr }
+      PluginUi.QrService { id: qr }
 
       component Copy: Text {
         textFormat: Text.PlainText
@@ -82,12 +82,13 @@ ShellRoot {
         Column {
           id: features
           x: 112; y: 337
-          spacing: 12
+          spacing: 8
           Repeater {
             model: [
               "Automatic framework & port detection",
               "Related apps grouped by monorepo",
               "Docker & Compose discovery",
+              "Live RAM totals & per-server trends",
               "Open, copy, restart, and stop",
               "Quick search & keyboard navigation"
             ]
@@ -107,7 +108,7 @@ ShellRoot {
           width: 506; height: 209
           color: "#21272c"
           border.color: "#343f44"
-          Plugin.QrCode {
+          PluginUi.QrCode {
             id: qrCode
             x: 22 + Math.floor((165 - width) / 2)
             y: 22 + Math.floor((165 - height) / 2)
@@ -136,19 +137,20 @@ ShellRoot {
 
         BorderSurface {
           id: card
-          x: 886; y: 129
+          x: 840; y: 62
           width: panel.implicitWidth + Style.spacing.popupPadding * 2
           height: panel.implicitHeight + Style.spacing.popupPadding * 2
-          scale: 1.25
+          scale: 1.12
           transformOrigin: Item.TopLeft
           color: Color.popups.background
           radius: Style.cornerRadius
           borderSpec: Border.surfaceSpec("popups", "border", Color.popups.border, 2)
-          Plugin.ServerPanel {
+          PluginUi.ServerPanel {
             id: panel
             anchors.fill: parent
             anchors.margins: Style.spacing.popupPadding
             servers: servers
+            systemMemory: ({ totalBytes: 16 * 1073741824, availableBytes: 2.7 * 1073741824 })
             lanIp: "192.168.1.42"
             scanSummary: "6 browser-ready servers"
           }
@@ -175,16 +177,29 @@ ShellRoot {
           ["@storefront/ui", "Storybook", "storybook", 6006, "storefront", "packages/ui", false],
           ["@storefront/api", "Hono", "hono", 8787, "storefront", "apps/api", true]
         ]
+        var trends = [
+          [0.80, 0.83, 0.81, 0.88, 0.91, 0.97, 0.95, 1],
+          [1.15, 1.13, 1.11, 1.07, 1.08, 1.04, 1.02, 1],
+          [0.98, 1.01, 0.99, 1.02, 1.01, 1.00, 1.01, 1],
+          [0.76, 0.83, 0.80, 0.89, 0.94, 0.92, 0.98, 1],
+          [0.96, 0.98, 1.01, 1.00, 0.98, 1.02, 1.01, 1],
+          [1.10, 1.07, 1.08, 1.04, 1.03, 1.02, 1.01, 1]
+        ]
         for (var i = 0; i < demo.length; i++) {
           var row = demo[i]
           servers.append(RadarModel.normalizeServer({
             serverId: "demo-" + i, name: row[0], framework: row[1], frameworkId: row[2],
             port: row[3], projectRoot: "/work/" + row[4], projectPath: row[5],
+            memoryBytes: [445, 186, 92, 612, 205, 150][i] * 1048576,
+            memoryHistory: trends[i].map(function(factor) {
+              return Math.round([445, 186, 92, 612, 205, 150][i] * factor * 1048576)
+            }),
             cwd: "/work/" + row[4] + "/" + row[5], lanAvailable: row[6],
             localUrl: "http://localhost:" + row[3], lanUrl: "http://192.168.1.42:" + row[3]
           }))
         }
         panel.rebuildFilteredModel()
+        panel.revision++
         // A preview-only easter egg for anyone who scans the marketplace image.
         qr.open(JSON.stringify({ name: "Atlas / web", framework: "Next.js", url: "https://youtu.be/oHg5SJYRHA0" }))
         mouseMove(tests, 1590, 890)
@@ -195,6 +210,8 @@ ShellRoot {
         tryCompare(wallpaper, "status", Image.Ready)
         compare(panel.resultCount, 6)
         compare(panel.projectCount, 2)
+        compare(panel.labelForSource(panel.memoryStats.sources[2]), "api :8000")
+        compare(panel.labelForSource(panel.memoryStats.sources[5]), "api :8787")
         tryVerify(function() { return qr.showingQr }, 5000)
         verify(card.x + card.width * card.scale <= poster.width - 60)
         verify(card.y + card.height * card.scale < 800)

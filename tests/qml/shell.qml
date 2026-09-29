@@ -2,8 +2,8 @@ import QtQuick
 import QtTest
 import Quickshell
 import qs.Commons
-import "Plugin" as Plugin
-import "Plugin/RadarModel.js" as RadarModel
+import "Plugin/qml" as PluginUi
+import "Plugin/qml/RadarModel.js" as RadarModel
 
 ShellRoot {
   FloatingWindow {
@@ -27,10 +27,13 @@ ShellRoot {
       property int originalFontSize: 12
 
       Component { id: modelComponent; ListModel {} }
-      Component { id: panelComponent; Plugin.ServerPanel { width: 500; height: 560 } }
-      Component { id: qrComponent; Plugin.QrCode {} }
-      Component { id: serviceComponent; Plugin.RadarService { includeDocker: false } }
-      Component { id: overlayComponent; Plugin.QrService {} }
+      Component { id: panelComponent; PluginUi.ServerPanel {
+        width: 500; height: 560
+        systemMemory: ({ totalBytes: 16 * 1073741824, availableBytes: 4 * 1073741824 })
+      } }
+      Component { id: qrComponent; PluginUi.QrCode {} }
+      Component { id: serviceComponent; PluginUi.RadarService { includeDocker: false } }
+      Component { id: overlayComponent; PluginUi.QrService {} }
 
       SignalSpy { id: openSpy; signalName: "openRequested" }
       SignalSpy { id: stopSpy; signalName: "stopRequested" }
@@ -47,11 +50,20 @@ ShellRoot {
 
       function fixtures(count) {
         var rows = []
+        var trends = [
+          [7, 8, 10, 9, 11, 13, 12, 14],
+          [14, 13, 12, 12, 10, 9, 8, 7],
+          [9, 11, 8, 12, 10, 11, 9, 10]
+        ]
         for (var i = 0; i < count; i++) rows.push(RadarModel.normalizeServer({
           serverId: "server-" + i, name: "Project " + i,
           framework: "Vite", frameworkId: "vite", port: 3000 + i,
           pid: 1000 + i, startTime: 100, cwd: "/tmp/project-" + i,
           projectRoot: "/tmp/fixtures",
+          memoryBytes: (i + 1) * 10485760,
+          memoryHistory: trends[i % trends.length].map(function(sample) {
+            return sample * (i + 1) * 1048576
+          }),
           localUrl: "http://localhost:" + (3000 + i),
           lanUrl: "http://192.168.1.2:" + (3000 + i), lanAvailable: i % 2 === 0
         }))
@@ -167,6 +179,8 @@ ShellRoot {
         list.positionViewAtEnd()
         settled()
         verifyViewport()
+        var capturePath = Quickshell.env("LOCALHOST_TEST_ARTIFACTS")
+        if (capturePath) grabImage(panel).save(capturePath + "/compact-panel.png")
         var rules = []
         for (var i = 0; i < 40; i++) rules.push({ port: 3000 + i, subnet: "192.168.1.0/24", interfaceName: "wlan0" })
         panel.firewallRules = rules
@@ -355,10 +369,41 @@ ShellRoot {
           return false
         }, 5000, "two HTTP listeners from the same process are retained")
         check(server.startTime > 0)
+        check(server.memoryBytes > 0, "live process RAM was sampled")
+        check(service.systemMemory.totalBytes > service.systemMemory.availableBytes,
+          "live system RAM was sampled")
         // Only the disposable fixture is eligible for this integration action.
         equal(server.pid, Number(Quickshell.env("LOCALHOST_TEST_PID")))
+        var shared = []
+        for (var i = 0; i < service.servers.count; i++) {
+          var candidate = service.servers.get(i)
+          if (candidate.pid === server.pid) shared.push(candidate)
+        }
+        check(shared.length >= 2, "fixture process exposes two ports")
+        equal(RadarModel.memorySummary(shared).totalBytes, server.memoryBytes,
+          "shared process RAM is counted once")
+        tryVerify(function() {
+          var refreshed = detected()
+          return refreshed && RadarModel.parseMemoryHistory(refreshed.memoryHistoryJson).length >= 2
+        }, 5000, "live RAM history gains samples across scans")
         service.stop(server)
         tryVerify(function() { return detected() === null }, 10000, "verified stop removes the server")
+        check(service.systemMemory.totalBytes > 0, "system RAM remains available with no servers")
+      }
+
+      function test_docker_memory_sample_updates_cache_and_queues_refresh() {
+        var service = createTemporaryObject(serviceComponent, tests, { includeDocker: true })
+        check(service !== null)
+        var containerId = "abc123def456"
+        service.scanning = true
+        service.dockerMemoryRequestedIds = [containerId]
+        service.dockerMemoryOutput = JSON.stringify({
+          ok: true, processes: [], containers: { "abc123def456": 25165824 }
+        })
+        service.finishDockerMemorySample(0)
+        equal(service.dockerMemoryCache[containerId], 25165824)
+        check(service.dockerMemoryAt[containerId] > 0)
+        equal(service.scanQueued, true)
       }
 
       function test_qr_canvas_pixels_and_replacement() {
@@ -404,6 +449,47 @@ ShellRoot {
         wait(200)
         var path = Quickshell.env("LOCALHOST_TEST_ARTIFACTS")
         if (path) grabImage(panel).save(path + "/server-panel.png")
+      }
+
+      function test_memory_summary_and_row_label() {
+        RadarModel.syncServerModel(servers, fixtures(2))
+        panel.revision++
+        tryCompare(list, "count", 2)
+        tryCompare(findChild(panel, "totalMemory"), "text", "16.00 GiB")
+        tryCompare(findChild(panel, "trackedMemory"), "text", "30 MiB")
+        var memoryBar = findChild(panel, "memoryBar")
+        check(memoryBar !== null)
+        var firstSegment = findChild(panel, "memorySegment")
+        check(firstSegment !== null && firstSegment.width > 0)
+        var otherSegment = findChild(panel, "otherMemorySegment")
+        var freeSegment = findChild(panel, "freeMemorySegment")
+        check(otherSegment.width > 0 && freeSegment.width > 0)
+        check(Math.abs(firstSegment.width + (20 / 10) * firstSegment.width
+          + otherSegment.width + freeSegment.width - memoryBar.width) < 2,
+          "memory buckets fill the system RAM bar")
+        var rowMemory = findChild(panel, "serverMemory")
+        check(rowMemory !== null)
+        equal(rowMemory.text, "10 MiB")
+        var sparkline = findChild(panel, "memorySparkline")
+        check(sparkline !== null)
+        equal(sparkline.samples.length, 8)
+        waitForRendering(sparkline)
+        var pixels = grabImage(sparkline)
+        var painted = false
+        for (var x = 0; x < pixels.width; x++)
+          for (var y = 0; y < pixels.height; y++)
+            if (pixels.alpha(x, y) > 0) painted = true
+        check(painted, "sparkline has visible pixels")
+      }
+
+      function test_system_memory_remains_when_server_list_is_empty() {
+        servers.clear()
+        panel.revision++
+        tryCompare(list, "count", 0)
+        tryCompare(findChild(panel, "totalMemory"), "text", "16.00 GiB")
+        tryCompare(findChild(panel, "trackedMemory"), "text", "—")
+        check(findChild(panel, "otherMemorySegment").width > 0)
+        check(findChild(panel, "freeMemorySegment").width > 0)
       }
 
       onCompletedChanged: if (completed) console.log("LOCALHOST_RESULT " + JSON.stringify({
