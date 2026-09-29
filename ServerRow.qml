@@ -16,14 +16,13 @@ CursorSurface {
   readonly property string detail: server.framework
     + (server.projectPath && server.projectPath !== "." ? " · " + server.projectPath : "")
 
-  signal rowHovered()
   signal rowSelected()
   signal openRequested()
 
   hasCursor: selected
   implicitHeight: Math.max(labels.implicitHeight, Style.space(28)) + Style.space(14)
 
-  HoverHandler { onHoveredChanged: if (hovered) row.rowHovered() }
+  HoverHandler { cursorShape: Qt.PointingHandCursor }
   TapHandler {
     onTapped: row.rowSelected()
     onDoubleTapped: row.openRequested()

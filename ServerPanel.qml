@@ -692,7 +692,6 @@ Item {
           height: implicitHeight
           selected: index === root.selectedIndex
           foreground: root.foreground
-          onRowHovered: root.selectedIndex = index
           onRowSelected: { root.selectedIndex = index; root.focusNavigation() }
           onOpenRequested: { root.selectedIndex = index; root.activateAction(0, server) }
         }
