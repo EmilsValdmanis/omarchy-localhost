@@ -20,6 +20,7 @@ test("manifest contains publishable marketplace metadata", () => {
   assert.match(manifest.id, /^(?!omarchy\.)[a-z0-9]+(?:[.-][a-z0-9]+)+$/)
   assert.ok(typeof manifest.name === "string" && manifest.name.trim())
   assert.ok(typeof manifest.version === "string" && manifest.version.length <= 64)
+  assert.match(manifest.version, /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/)
   assert.ok(typeof manifest.author === "string" && manifest.author.trim())
   assert.ok(typeof manifest.description === "string" && manifest.description.trim())
   assert.ok(Array.isArray(manifest.kinds) && manifest.kinds.length > 0)

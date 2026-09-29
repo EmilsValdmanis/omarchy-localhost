@@ -4,7 +4,6 @@ cd -- "$(dirname -- "${BASH_SOURCE[0]}")"
 
 node --test --test-isolation=none tests/*.mjs
 python3 -m unittest discover -s tests -p 'test_*.py' -v
-python3 scripts/release.py
 omarchy plugin validate .
 python3 tests/lint_qml.py
 qml_args=()

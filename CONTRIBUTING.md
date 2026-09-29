@@ -76,17 +76,15 @@ isolated Quickshell instance and does not change your desktop theme.
 
 ## Releases
 
-To ship a stable version, update `manifest.json` and add a matching entry at the
-top of `CHANGELOG.md` in the same PR. Use a `major.minor.patch` version and a
-heading such as `## 0.5.1 — 2026-09-06`, followed by the user-facing changes.
-`./check` and CI require matching, nonempty notes.
+To ship a stable version, bump `manifest.json` using `major.minor.patch`.
+After the PR merges and both CI jobs pass on `main`, the workflow runs
+`gh release create --generate-notes`. The release title is just the version,
+such as `v0.5.1`. GitHub generates "What's Changed", PR links, contributor
+credits, and a full changelog comparison from the merged pull requests.
 
-After the PR merges, CI runs on `main`. Once both test jobs pass, it creates
-the version tag and publishes a GitHub Release with that changelog entry.
-Commits with an already published version leave its release unchanged. No
-personal token or manual tag push is required. Publishing is restricted to
-the tested commit while it is still the current `main` commit. Rerun the CI
-workflow after a transient publication failure; existing releases are preserved.
+No manual changelog or release notes are required. Already published versions
+are skipped. The release targets the tested commit, and publishing is skipped
+if `main` has advanced. Rerun CI after a transient publication failure.
 
 Marketplace verification is a separate step after release: submit the full
 merged commit SHA through the [verification form](https://github.com/omacom/omarchy-plugin-marketplace/issues/new?template=verify-plugin.yml),
