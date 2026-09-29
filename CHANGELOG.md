@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.5.1 — 2026-09-29
+
+- Select servers by clicking a row instead of hovering, so moving to the shared
+  action toolbar keeps the intended server selected.
+- Preserve keyboard navigation and direct port opening; add native mouse
+  regression tests for selection and the Stop confirmation target.
+
 ## 0.5.0 — 2026-09-05
 
 - Publish versioned GitHub Releases automatically after main-branch CI passes,

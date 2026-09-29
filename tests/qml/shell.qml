@@ -218,6 +218,54 @@ ShellRoot {
         check(!panel.actionEnabled(4, { cwd: "" }))
       }
 
+      function test_mouse_selection_stays_on_target_when_moving_to_toolbar() {
+        RadarModel.syncServerModel(servers, fixtures(5))
+        panel.revision++
+        tryCompare(list, "count", 5)
+        settled()
+
+        var selectedRow = list.itemAtIndex(1)
+        check(selectedRow !== null)
+        mouseClick(selectedRow, selectedRow.width / 2, selectedRow.height / 2)
+        equal(panel.selectedServer().serverId, "server-1")
+        equal(openSpy.count, 0, "a single click selects without opening")
+        for (var i = 2; i < 5; i++) {
+          var crossedRow = list.itemAtIndex(i)
+          check(crossedRow !== null)
+          mouseMove(crossedRow, crossedRow.width / 2, crossedRow.height / 2)
+          equal(panel.selectedServer().serverId, "server-1", "crossing rows must keep the chosen server")
+          check(selectedRow.selected, "the chosen row stays highlighted")
+          check(!crossedRow.selected, "hover does not select another row")
+        }
+
+        var stop = findChild(panel, "serverAction6")
+        mouseMove(stop, stop.width / 2, stop.height / 2)
+        mouseClick(stop, stop.width / 2, stop.height / 2)
+        equal(panel.pendingAction, "stop")
+        equal(panel.pendingServer.serverId, "server-1", "Stop still targets the clicked server")
+        equal(stopSpy.count, 0, "stopping still requires confirmation")
+        keyClick(Qt.Key_Escape)
+        equal(panel.pendingAction, "")
+
+        var hoveredRow = list.itemAtIndex(4)
+        mouseMove(hoveredRow, hoveredRow.width / 2, hoveredRow.height / 2)
+        keyClick(Qt.Key_Down)
+        equal(panel.selectedServer().serverId, "server-2", "keyboard navigation continues from the clicked row")
+        mouseMove(hoveredRow, hoveredRow.width / 2 + 10, hoveredRow.height / 2)
+        equal(panel.selectedServer().serverId, "server-2", "mouse movement preserves keyboard selection")
+      }
+
+      function test_mouse_port_opens_clicked_server() {
+        var row = list.itemAtIndex(1)
+        check(row !== null)
+        var port = findChild(row, "openPort")
+        check(port !== null)
+        mouseClick(port, port.width / 2, port.height / 2)
+        equal(openSpy.count, 1)
+        equal(openSpy.signalArguments[0][0].serverId, "server-1")
+        equal(panel.selectedServer().serverId, "server-1")
+      }
+
       function test_closed_panel_defers_updates() {
         panel.panelActive = false
         RadarModel.syncServerModel(servers, fixtures(3))

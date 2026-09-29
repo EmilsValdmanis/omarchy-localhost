@@ -28,7 +28,8 @@ for version history and release notes.
 
 Servers in the same repository or workspace appear together, with package paths
 under each name. Use the folder button to switch to a flat list sorted by port.
-Select a row to use its shared action toolbar, or click its port to open it.
+Click a row to select it, then use the shared action toolbar. Moving the pointer
+over other rows keeps your selection. Click a port to open the server directly.
 
 LAN-ready servers listen on `0.0.0.0`, `::`, or a LAN interface. Servers bound
 to `127.0.0.1` or `::1` remain available for desktop actions, but QR sharing is
