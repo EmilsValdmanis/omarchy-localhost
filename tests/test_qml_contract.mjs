@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs"
 import test from "node:test"
 
 const service = readFileSync(new URL("../qml/RadarService.qml", import.meta.url), "utf8")
+const discovery = readFileSync(new URL("../qml/RadarDiscovery.qml", import.meta.url), "utf8")
 const widget = readFileSync(new URL("../Widget.qml", import.meta.url), "utf8")
 const panel = readFileSync(new URL("../qml/ServerPanel.qml", import.meta.url), "utf8")
 const readme = readFileSync(new URL("../README.md", import.meta.url), "utf8")
@@ -19,10 +20,10 @@ test("discovery settings are wired from the manifest-facing widget", () => {
   assert.match(widget, /ignoredPorts: String\(root\.setting\("ignoredPorts", ""\)/)
   assert.match(widget, /alwaysIncludePorts: String\(root\.setting\("alwaysIncludePorts", ""\)/)
   assert.match(widget, /selectedLanInterface: String\(root\.setting\("lanInterface", ""\)/)
-  assert.match(service, /RadarModel\.parsePortSet\(ignoredPorts\)/)
-  assert.match(service, /RadarModel\.parsePortSet\(alwaysIncludePorts\)/)
-  assert.match(service, /exec timeout 3s docker \\\"\$@\\\"/)
-  assert.doesNotMatch(service, /shift; exec docker/)
+  assert.match(discovery, /RadarModel\.parsePortSet\(ignoredPorts\)/)
+  assert.match(discovery, /RadarModel\.parsePortSet\(alwaysIncludePorts\)/)
+  assert.match(discovery, /exec timeout 3s docker \\\"\$@\\\"/)
+  assert.doesNotMatch(discovery, /shift; exec docker/)
 })
 
 test("the bar icon and count share Omarchy's themed text label", () => {
@@ -69,7 +70,17 @@ test("every explicit refresh uses the cache-bypassing entry point", () => {
   assert.match(widget, /function refresh\(\): string \{ radar\.refresh\(\)/)
   assert.match(widget, /mouseButton === Qt\.RightButton\) \{\s*radar\.refresh\(\)/)
   assert.match(widget, /onRefreshRequested: \{\s*radar\.refresh\(\)/)
-  assert.match(service, /function refresh\(\) \{ scan\(true\) \}/)
-  assert.match(service, /Date\.now\(\), bypassProbeCache/)
-  assert.match(service, /onTriggered: if \(!root\.scanning\) root\.scan\(\)/)
+  assert.match(service, /function refresh\(\) \{ scan\(true\); sampleResources\(true\)/)
+  assert.match(service, /nativeDiscovery\.scan\(manual\)/)
+  assert.match(service, /dockerDiscovery\.scan\(manual\)/)
+  assert.match(discovery, /Date\.now\(\), bypassProbeCache/)
+  assert.match(discovery, /onTriggered: if \(!root\.scanning\) root\.scan\(\)/)
+})
+
+test("local opening and separate local/LAN copying are wired explicitly", () => {
+  assert.match(widget, /function openServer\(server\) \{\s*var url = RadarModel\.actionUrl\(server, false\)/)
+  assert.match(widget, /onCopyRequested: function\(server\) \{ root\.copyServer\(server, false\)/)
+  assert.match(widget, /onCopyLanRequested: function\(server\) \{ root\.copyServer\(server, true\)/)
+  assert.match(widget, /panelActive: card\.open/)
+  assert.doesNotMatch(widget, /effectiveUrl/)
 })

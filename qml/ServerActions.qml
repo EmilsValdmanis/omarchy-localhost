@@ -17,7 +17,7 @@ RowLayout {
   spacing: Style.space(3)
 
   Repeater {
-    model: ["Open", "Copy", "QR"]
+    model: ["Open", "Copy local", "Copy LAN", "QR"]
     Button {
       required property int index
       required property string modelData
@@ -30,7 +30,9 @@ RowLayout {
       fontSize: Style.font.caption
       horizontalPadding: Style.space(9)
       verticalPadding: Style.space(5)
-      tooltipText: index === 2 ? "Share over LAN" : (index === 1 ? "Copy URL (Ctrl+C)" : "Open in browser (Enter)")
+      tooltipText: index === RadarModel.ACTIONS.qr ? "Share a LAN QR code"
+        : (index === RadarModel.ACTIONS.copyLan ? "Copy LAN URL (Ctrl+Shift+C)"
+        : (index === RadarModel.ACTIONS.copyLocal ? "Copy local URL (Ctrl+C)" : "Open local URL (Enter)"))
       onHovered: function(on) { if (on) root.actionHovered(index) }
       onClicked: root.actionTriggered(index)
     }
@@ -49,17 +51,17 @@ RowLayout {
     PanelActionButton {
       required property int index
       required property var modelData
-      objectName: "serverAction" + (index + 3)
+      objectName: "serverAction" + (index + 4)
       iconText: modelData.icon
-      tooltipText: index === 2 && root.server && !RadarModel.actionEnabled(5, root.server)
+      tooltipText: index === 2 && root.server && !RadarModel.actionEnabled(RadarModel.ACTIONS.restart, root.server)
         ? root.server.restartReason : modelData.tip
       foreground: index === 3 ? Color.urgent : root.foreground
       hoverColor: index === 3 ? Color.urgent : Color.accent
-      enabled: RadarModel.actionEnabled(index + 3, root.server)
-      hasCursor: root.server !== null && root.selectedActionIndex === index + 3
+      enabled: RadarModel.actionEnabled(index + 4, root.server)
+      hasCursor: root.server !== null && root.selectedActionIndex === index + 4
       bordered: hasCursor
-      onHovered: function(on) { if (on) root.actionHovered(index + 3) }
-      onClicked: root.actionTriggered(index + 3)
+      onHovered: function(on) { if (on) root.actionHovered(index + 4) }
+      onClicked: root.actionTriggered(index + 4)
     }
   }
 }

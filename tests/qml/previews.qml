@@ -88,8 +88,8 @@ ShellRoot {
               "Automatic framework & port detection",
               "Related apps grouped by monorepo",
               "Docker & Compose discovery",
-              "Live RAM totals & per-server trends",
-              "Open, copy, restart, and stop",
+              "Compact RAM summary & server trends",
+              "Open locally, share over LAN",
               "Quick search & keyboard navigation"
             ]
             Row {
@@ -104,7 +104,8 @@ ShellRoot {
         Rectangle {
           id: qrCard
           x: 112
-          y: Math.round(card.y + card.height * card.scale - height)
+          y: Math.max(Math.round(card.y + card.height * card.scale - height),
+            features.y + features.height + 42)
           width: 506; height: 209
           color: "#21272c"
           border.color: "#343f44"

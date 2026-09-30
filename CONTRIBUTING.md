@@ -28,8 +28,12 @@ not install the plugin or change your bar configuration.
 The UI suite sends native wheel and keyboard events, checks scrolling after
 model changes, verifies small popups and font scaling, tests QR pixels and
 process cancellation, grouping and shared actions, and discovers/stops a
-disposable process with two loopback HTTP listeners. Model and helper tests
-cover framework arguments, port selection, and repository/workspace metadata.
+disposable process with two loopback HTTP listeners. It also verifies local/LAN
+copy shortcuts, collapsible RAM details, stable colors, independent Docker
+latency, and RAM sampling history. Docker is stubbed in the isolated runner;
+tests do not connect to your Docker daemon. Model and helper tests
+cover framework arguments, port selection, repository/workspace metadata, and
+bounded restart logs after the action helper has exited.
 Only that fixture's verified PID is stopped. Screenshots and logs go to
 `/tmp/localhost-test-artifacts` (override with `LOCALHOST_TEST_ARTIFACTS`).
 
@@ -68,11 +72,16 @@ isolated Quickshell instance and does not change your desktop theme.
 
 ## Pull requests
 
-1. Create a branch from `main`.
+1. Create a branch from `main`, or from the preceding PR's branch for a stack.
 2. Add tests for behavior changes where practical.
 3. Update documentation when user-facing behavior changes.
 4. Open a pull request and complete the checklist.
 5. Resolve review conversations and wait for required checks to pass.
+
+For a stack, target each dependent PR at the preceding PR's branch and link
+both layers in their descriptions. Review the lower PR first, then merge it
+into `main` before retargeting and merging the dependent PR. Keep the lower
+branch until the dependent PR is retargeted, especially after a squash merge.
 
 ## Releases
 

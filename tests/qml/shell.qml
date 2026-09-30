@@ -37,6 +37,8 @@ ShellRoot {
 
       SignalSpy { id: openSpy; signalName: "openRequested" }
       SignalSpy { id: stopSpy; signalName: "stopRequested" }
+      SignalSpy { id: copySpy; signalName: "copyRequested" }
+      SignalSpy { id: copyLanSpy; signalName: "copyLanRequested" }
 
       function check(value, message) {
         if (!value) console.error("ASSERT", qtest_results.functionName, message || "verification failed")
@@ -83,6 +85,10 @@ ShellRoot {
         stopSpy.target = panel
         openSpy.clear()
         stopSpy.clear()
+        copySpy.target = panel
+        copyLanSpy.target = panel
+        copySpy.clear()
+        copyLanSpy.clear()
         mouseMove(tests, 850, 750)
         tryCompare(list, "count", 50)
         waitForRendering(panel)
@@ -95,6 +101,8 @@ ShellRoot {
           qtest_results.failCount === failuresBefore ? "PASS" : "FAIL")
         openSpy.target = null
         stopSpy.target = null
+        copySpy.target = null
+        copyLanSpy.target = null
       }
 
       function settled() {
@@ -227,9 +235,9 @@ ShellRoot {
         panel.selectedIndex = 1
         panel.selectedActionIndex = 1
         panel.selectAction(1)
-        equal(panel.selectedActionIndex, 3, "skip QR for localhost-only servers")
-        check(!panel.actionEnabled(3, { cwd: "" }))
-        check(!panel.actionEnabled(4, { cwd: "" }))
+        equal(panel.selectedActionIndex, RadarModel.ACTIONS.terminal, "skip LAN copy and QR for localhost-only servers")
+        check(!panel.actionEnabled(RadarModel.ACTIONS.terminal, { cwd: "" }))
+        check(!panel.actionEnabled(RadarModel.ACTIONS.project, { cwd: "" }))
       }
 
       function test_mouse_selection_stays_on_target_when_moving_to_toolbar() {
@@ -252,7 +260,7 @@ ShellRoot {
           check(!crossedRow.selected, "hover does not select another row")
         }
 
-        var stop = findChild(panel, "serverAction6")
+        var stop = findChild(panel, "serverAction7")
         mouseMove(stop, stop.width / 2, stop.height / 2)
         mouseClick(stop, stop.width / 2, stop.height / 2)
         equal(panel.pendingAction, "stop")
@@ -278,6 +286,58 @@ ShellRoot {
         equal(openSpy.count, 1)
         equal(openSpy.signalArguments[0][0].serverId, "server-1")
         equal(panel.selectedServer().serverId, "server-1")
+      }
+
+      function test_local_and_lan_copy_actions_and_shortcuts() {
+        panel.selectedIndex = 0
+        var local = findChild(panel, "serverAction1")
+        var lan = findChild(panel, "serverAction2")
+        equal(local.text, "Copy local")
+        equal(lan.text, "Copy LAN")
+        mouseClick(local, local.width / 2, local.height / 2)
+        equal(copySpy.count, 1)
+        equal(copySpy.signalArguments[0][0].localUrl, "http://localhost:3000")
+        mouseClick(lan, lan.width / 2, lan.height / 2)
+        equal(copyLanSpy.count, 1)
+        equal(copyLanSpy.signalArguments[0][0].lanUrl, "http://192.168.1.2:3000")
+        panel.focusNavigation()
+        keyClick(Qt.Key_C, Qt.ControlModifier)
+        equal(copySpy.count, 2)
+        keyClick(Qt.Key_C, Qt.ControlModifier | Qt.ShiftModifier)
+        equal(copyLanSpy.count, 2)
+        panel.selectedIndex = 1
+        equal(lan.enabled, false)
+        keyClick(Qt.Key_C, Qt.ControlModifier | Qt.ShiftModifier)
+        equal(copyLanSpy.count, 2, "LAN copy is disabled for a loopback-only server")
+      }
+
+      function test_collapsible_memory_preserves_server_colors() {
+        equal(panel.memoryExpanded, false)
+        var overview = findChild(panel, "memoryOverview")
+        var compactHeight = overview.height
+        var viewport = list.height
+        var summary = findChild(panel, "memorySummary")
+        check(summary.visible)
+        var color = String(panel.colorForServer(servers.get(0)))
+        var toggle = findChild(panel, "memoryToggle")
+        mouseClick(toggle, toggle.width / 2, toggle.height / 2)
+        tryCompare(panel, "memoryExpanded", true)
+        wait(100)
+        check(overview.height > compactHeight)
+        check(list.height < viewport)
+        var row = fixtures(1)[0]
+        row.serverId = "inserted"
+        row.pid = 9999
+        servers.insert(0, row)
+        panel.revision++
+        equal(String(panel.colorForServer(servers.get(1))), color)
+        equal(String(panel.colorForSource(RadarModel.memorySourceKey(servers.get(1)))), color)
+        panel.focusNavigation()
+        keyClick(Qt.Key_M, Qt.ControlModifier)
+        equal(panel.memoryExpanded, false)
+        wait(100)
+        equal(overview.height, compactHeight)
+        verifyViewport()
       }
 
       function test_closed_panel_defers_updates() {
@@ -341,31 +401,34 @@ ShellRoot {
         tryCompare(list, "count", 3)
         equal(panel.projectCount, 1)
         panel.selectedIndex = 0
-        equal(findChild(panel, "serverAction2").enabled, false)
+        equal(findChild(panel, "serverAction3").enabled, false)
         settled()
         verifyViewport()
       }
 
       function test_manual_refresh_queue_keeps_cache_bypass() {
-        var service = createTemporaryObject(serviceComponent, tests, { scanning: true, currentUid: 0 })
-        service.refresh()
-        equal(service.manualScanQueued, true)
-        equal(service.scanQueued, true)
-        service.scan()
-        equal(service.manualScanQueued, true, "background requests cannot clear queued manual refresh")
-        service.scanning = false
-        service.scan()
-        equal(service.bypassProbeCache, true)
-        equal(service.manualScanQueued, false)
-        service.refresh()
-        equal(service.manualScanQueued, true, "manual refresh during a forced scan schedules another forced scan")
+        var service = createTemporaryObject(serviceComponent, tests)
+        var discovery = findChild(service, "nativeDiscovery")
+        discovery.scanning = true
+        discovery.scan(true)
+        equal(discovery.manualScanQueued, true)
+        equal(discovery.scanQueued, true)
+        discovery.scan()
+        equal(discovery.manualScanQueued, true, "background requests cannot clear queued manual refresh")
+        discovery.currentUid = 0
+        discovery.scanning = false
+        discovery.scan()
+        equal(discovery.bypassProbeCache, true)
+        equal(discovery.manualScanQueued, false)
+        discovery.scan(true)
+        equal(discovery.manualScanQueued, true, "manual refresh during a forced scan schedules another forced scan")
       }
 
       function test_live_discovery_and_verified_stop() {
         var port = Number(Quickshell.env("LOCALHOST_TEST_PORT"))
         check(port > 0, "runner provides a loopback HTTP fixture")
         var secondPort = Number(Quickshell.env("LOCALHOST_TEST_SECOND_PORT"))
-        var service = createTemporaryObject(serviceComponent, tests, { alwaysIncludePorts: port + "," + secondPort })
+        var service = createTemporaryObject(serviceComponent, tests, { alwaysIncludePorts: port + "," + secondPort, panelActive: true })
         function detected() {
           for (var i = 0; i < service.servers.count; i++) {
             var server = service.servers.get(i)
@@ -384,7 +447,9 @@ ShellRoot {
           return false
         }, 5000, "two HTTP listeners from the same process are retained")
         check(server.startTime > 0)
-        check(server.memoryBytes > 0, "live process RAM was sampled")
+        tryVerify(function() { return detected() && detected().memoryBytes > 0 }, 5000,
+          "live process RAM was sampled independently after discovery")
+        server = detected()
         check(service.systemMemory.totalBytes > service.systemMemory.availableBytes,
           "live system RAM was sampled")
         // Only the disposable fixture is eligible for this integration action.
@@ -400,11 +465,11 @@ ShellRoot {
         tryVerify(function() {
           var refreshed = detected()
           return refreshed && RadarModel.parseMemoryHistory(refreshed.memoryHistoryJson).length >= 2
-        }, 5000, "live RAM history gains samples across scans")
+        }, 5000, "live RAM history gains samples independently of scans")
         tryCompare(service, "scanning", false, 5000)
         var failedCache = {}
         failedCache[server.serverId] = { scheme: "", attempts: 2, expiresAt: Date.now() + 15000 }
-        service.probeCache = failedCache
+        findChild(service, "nativeDiscovery").probeCache = failedCache
         service.servers.clear()
         service.refresh()
         tryVerify(function() { return detected() !== null }, 5000,
@@ -414,19 +479,74 @@ ShellRoot {
         check(service.systemMemory.totalBytes > 0, "system RAM remains available with no servers")
       }
 
-      function test_docker_memory_sample_updates_cache_and_queues_refresh() {
+      function test_docker_latency_does_not_delay_native_discovery() {
+        var port = Number(Quickshell.env("LOCALHOST_TEST_PORT"))
+        var service = createTemporaryObject(serviceComponent, tests, { includeDocker: true, alwaysIncludePorts: String(port) })
+        tryVerify(function() {
+          for (var i = 0; i < service.servers.count; i++)
+            if (service.servers.get(i).port === port && service.servers.get(i).source === "process") return true
+          return false
+        }, 5000, "native listener is published independently")
+        var docker = findChild(service, "dockerDiscovery")
+        equal(docker.warnings.length, 0, "native result arrived before the slow Docker request finished")
+        equal(docker.scanning, true, "Docker is still waiting while native results are usable")
+        tryVerify(function() { return docker.warnings.length > 0 }, 5000)
+        check(service.servers.count > 0, "Docker failure preserves native results")
+      }
+
+      function test_resource_cadence_and_history_follow_samples() {
+        var service = createTemporaryObject(serviceComponent, tests)
+        equal(service.nativeResourceIntervalMs, 15000)
+        equal(service.dockerResourceIntervalMs, 30000)
+        equal(service.dockerDiscoveryIntervalSec, 15)
+        var discovery = findChild(service, "nativeDiscovery")
+        var context = { listener: { pid: 410, port: 3000, process: "node", addresses: ["127.0.0.1"] },
+          process: { cwd: "/work", pid: 410, startTime: 100 }, framework: { name: "Node", id: "node" } }
+        discovery.readyContexts = [{ context: context, scheme: "http" }]
+        service.publishServers()
+        service.finishResourceSample(JSON.stringify({ ok: true, processes: [
+          { pid: 410, uid: service.currentUid, startTime: 100, memoryBytes: 1048576 }
+        ], containers: {}, systemMemory: { totalBytes: 10000000, availableBytes: 5000000 } }), false, 0)
+        equal(RadarModel.parseMemoryHistory(service.servers.get(0).memoryHistoryJson).length, 1)
+        service.publishServers()
+        service.publishServers()
+        equal(RadarModel.parseMemoryHistory(service.servers.get(0).memoryHistoryJson).length, 1,
+          "discovery does not duplicate a stale RAM sample")
+        service.panelActive = true
+        equal(service.nativeResourceIntervalMs, 2000)
+        equal(service.dockerResourceIntervalMs, 8000)
+        equal(service.dockerDiscoveryIntervalSec, 5)
+      }
+
+      function test_independent_ram_results_preserve_identity_and_system_totals() {
         var service = createTemporaryObject(serviceComponent, tests, { includeDocker: true })
-        check(service !== null)
-        var containerId = "abc123def456"
-        service.scanning = true
-        service.dockerMemoryRequestedIds = [containerId]
-        service.dockerMemoryOutput = JSON.stringify({
-          ok: true, processes: [], containers: { "abc123def456": 25165824 }
-        })
-        service.finishDockerMemorySample(0)
-        equal(service.dockerMemoryCache[containerId], 25165824)
-        check(service.dockerMemoryAt[containerId] > 0)
-        equal(service.scanQueued, true)
+        var native = findChild(service, "nativeDiscovery")
+        var docker = findChild(service, "dockerDiscovery")
+        native.readyContexts = [{ scheme: "http", context: {
+          listener: { pid: 410, port: 3000, process: "node", addresses: ["127.0.0.1"] },
+          process: { cwd: "/work", startTime: 100 }, framework: { name: "Node", id: "node" }
+        } }]
+        docker.readyContexts = [{ scheme: "http", context: {
+          source: "docker", containerId: "abc123def456",
+          listener: { port: 8080, process: "docker", addresses: ["0.0.0.0"] },
+          process: { cwd: "" }, framework: { name: "Docker", id: "docker" }
+        } }]
+        service.publishServers()
+        equal(service.servers.count, 2)
+        service.finishResourceSample(JSON.stringify({ ok: true, processes: [
+          { pid: 410, uid: service.currentUid, startTime: 100, memoryBytes: 1048576 }
+        ], systemMemory: { totalBytes: 10000000, availableBytes: 5000000 } }), false, 0)
+        service.finishResourceSample(JSON.stringify({ ok: true, containers: { abc123def456: 2097152 } }), true, 0)
+        equal(service.servers.get(0).memoryBytes, 1048576)
+        equal(service.servers.get(1).memoryBytes, 2097152)
+        equal(service.systemMemory.totalBytes, 10000000, "Docker sampling does not erase system totals")
+        native.readyContexts[0].context.process.startTime = 101
+        service.publishServers()
+        equal(service.servers.get(0).memoryBytes, -1, "PID reuse drops the previous memory sample")
+        service.includeDocker = false
+        service.finishResourceSample(JSON.stringify({ ok: true, containers: { abc123def456: 9999999 } }), true, 0)
+        equal(service.servers.count, 1, "late Docker RAM cannot restore a disabled source")
+        equal(service.resourceByKey["docker:abc123def456"], undefined)
       }
 
       function test_qr_canvas_pixels_and_replacement() {
@@ -471,10 +591,16 @@ ShellRoot {
         panel.revision++
         wait(200)
         var path = Quickshell.env("LOCALHOST_TEST_ARTIFACTS")
-        if (path) grabImage(panel).save(path + "/server-panel.png")
+        if (path) {
+          grabImage(panel).save(path + "/server-panel.png")
+          panel.memoryExpanded = true
+          wait(100)
+          grabImage(panel).save(path + "/server-panel-expanded.png")
+        }
       }
 
       function test_memory_summary_and_row_label() {
+        panel.memoryExpanded = true
         RadarModel.syncServerModel(servers, fixtures(2))
         panel.revision++
         tryCompare(list, "count", 2)
@@ -506,6 +632,7 @@ ShellRoot {
       }
 
       function test_system_memory_remains_when_server_list_is_empty() {
+        panel.memoryExpanded = true
         servers.clear()
         panel.revision++
         tryCompare(list, "count", 0)

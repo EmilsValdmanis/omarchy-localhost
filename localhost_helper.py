@@ -33,6 +33,7 @@ from project_metadata import ProjectInspector
 
 CONTAINER_ID_RE = re.compile(r"^[0-9a-f]{12,64}$")
 MAX_RESTART_LOGS = 10
+MAX_RESTART_LOG_BYTES = 1024 * 1024
 RESTART_READY_TIMEOUT = 10.0
 
 
@@ -83,6 +84,7 @@ def inspect_process(
     pid: int,
     expected_uid: int,
     proc_root: Path = Path("/proc"),
+    include_memory: bool = True,
 ) -> dict[str, Any] | None:
     directory = proc_directory(pid, proc_root)
     try:
@@ -107,14 +109,7 @@ def inspect_process(
     except (FileNotFoundError, PermissionError, ProcessLookupError, OSError):
         executable = ""
 
-    memory_bytes = -1
-    try:
-        for line in (directory / "status").read_text(errors="replace").splitlines():
-            if line.startswith("VmRSS:"):
-                memory_bytes = int(line.split()[1]) * 1024
-                break
-    except (FileNotFoundError, PermissionError, ProcessLookupError, OSError, ValueError, IndexError):
-        pass
+    memory_bytes = read_process_memory(directory) if include_memory else -1
 
     restart_reason = ""
     try:
@@ -134,6 +129,34 @@ def inspect_process(
         "restartAvailable": not restart_reason,
         "restartReason": restart_reason,
     }
+
+
+def read_process_memory(directory: Path) -> int:
+    try:
+        for line in (directory / "status").read_text(errors="replace").splitlines():
+            if line.startswith("VmRSS:"):
+                return int(line.split()[1]) * 1024
+    except (FileNotFoundError, PermissionError, ProcessLookupError, OSError, ValueError, IndexError):
+        pass
+
+    return -1
+
+
+def sample_process_resources(pids: Sequence[int], expected_uid: int) -> list[dict[str, int]]:
+    samples = []
+    for pid in dict.fromkeys(pids):
+        directory = proc_directory(pid)
+        try:
+            if directory.stat().st_uid != expected_uid:
+                continue
+            _state, start_time = read_process_stat(pid)
+            memory = read_process_memory(directory)
+            if directory.stat().st_uid != expected_uid or read_process_stat(pid)[1] != start_time:
+                continue
+        except (OSError, LocalhostError):
+            continue
+        samples.append({"pid": pid, "uid": expected_uid, "startTime": start_time, "memoryBytes": memory})
+    return samples
 
 
 def parse_docker_memory(value: str) -> int:
@@ -196,11 +219,12 @@ def inspect_processes(
     expected_uid: int,
     proc_root: Path = Path("/proc"),
     inspector: ProjectInspector | None = None,
+    include_memory: bool = True,
 ) -> list[dict[str, Any]]:
     inspector = inspector or ProjectInspector()
     processes = []
     for pid in dict.fromkeys(pids):
-        process = inspect_process(pid, expected_uid, proc_root)
+        process = inspect_process(pid, expected_uid, proc_root, include_memory=include_memory)
         if process and process["cwd"] and process["command"]:
             process["project"] = inspector.inspect(process["cwd"])
             processes.append(process)
@@ -423,6 +447,12 @@ def wait_for_restart_ready(
     ready_since = None
     while time.monotonic() < deadline:
         if restarted.poll() is not None:
+            collector = getattr(restarted, "_localhost_log_collector", None)
+            if collector is not None:
+                try:
+                    collector.wait(timeout=2)
+                except subprocess.TimeoutExpired:
+                    pass
             raise LocalhostError(f"The replacement exited with status {restarted.returncode}; see {log_path}")
         ready = False
         if owned_probe_host(proc_directory(restarted.pid), endpoint):
@@ -462,6 +492,88 @@ def prune_restart_logs(state_root: Path, keep: int = MAX_RESTART_LOGS) -> None:
             pass
 
 
+def write_bounded_log(log_fd: int, data: bytes, limit: int = MAX_RESTART_LOG_BYTES) -> None:
+    """Keep recent output in one file without ever extending it beyond the cap."""
+    if limit <= 0:
+        raise ValueError("The log limit must be positive")
+    if os.fstat(log_fd).st_nlink == 0:
+        os.ftruncate(log_fd, 0)
+        return
+    size = os.lseek(log_fd, 0, os.SEEK_END)
+    if len(data) >= limit:
+        data = data[-limit:]
+        os.lseek(log_fd, 0, os.SEEK_SET)
+    elif size + len(data) > limit:
+        # Drop the oldest half when full, amortizing compaction for chatty servers.
+        keep = min(limit // 2, limit - len(data))
+        os.lseek(log_fd, size - keep, os.SEEK_SET)
+        tail = os.read(log_fd, keep)
+        os.lseek(log_fd, 0, os.SEEK_SET)
+        data = tail + data
+    offset = 0
+    while offset < len(data):
+        offset += os.write(log_fd, data[offset:])
+    os.ftruncate(log_fd, os.lseek(log_fd, 0, os.SEEK_CUR))
+
+
+def relay_restart_log(input_fd: int, log_fd: int, ready_fd: int) -> None:
+    """Drain output for the lifetime of a restarted server, then exit on EOF."""
+    os.lseek(log_fd, 0, os.SEEK_END)
+    os.write(log_fd, b"")
+    os.write(ready_fd, b"1")
+    os.close(ready_fd)
+    try:
+        while data := os.read(input_fd, 65536):
+            try:
+                write_bounded_log(log_fd, data)
+            except OSError:
+                # A full/unavailable filesystem must not block or SIGPIPE the server.
+                continue
+    finally:
+        os.close(input_fd)
+        os.close(log_fd)
+
+
+def start_log_relay(log_fd: int) -> tuple[subprocess.Popen[bytes], int]:
+    descriptors = []
+    relay = None
+    output_fd = None
+    prepared = False
+    try:
+        input_fd, output_fd = os.pipe()
+        descriptors.extend([input_fd, output_fd])
+        ready_read, ready_write = os.pipe()
+        descriptors.extend([ready_read, ready_write])
+        relay = subprocess.Popen(
+            [sys.executable, str(Path(__file__).resolve()), "log-relay", "--input-fd", str(input_fd),
+             "--log-fd", str(log_fd), "--ready-fd", str(ready_write)],
+            pass_fds=(input_fd, log_fd, ready_write), stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+            start_new_session=True, close_fds=True,
+        )
+        os.close(ready_write)
+        descriptors.remove(ready_write)
+        readable, _, _ = select.select([ready_read], [], [], 2.0)
+        if not readable or os.read(ready_read, 1) != b"1" or relay.poll() is not None:
+            raise LocalhostError("Could not prepare the bounded restart log collector")
+        prepared = True
+        return relay, output_fd
+    except (OSError, ValueError) as error:
+        raise LocalhostError(f"Could not prepare the bounded restart log collector: {error}") from error
+    finally:
+        for descriptor in descriptors:
+            if not prepared or descriptor != output_fd:
+                os.close(descriptor)
+        if not prepared and relay is not None:
+            if relay.poll() is None:
+                relay.terminate()
+            try:
+                relay.wait(timeout=3)
+            except subprocess.TimeoutExpired:
+                relay.kill()
+                relay.wait(timeout=3)
+
+
 def restart_process(
     pid: int, expected_start_time: int, url: str
 ) -> tuple[subprocess.Popen[bytes], Path]:
@@ -479,31 +591,45 @@ def restart_process(
         log_path = state_root / f"restart-{time.time_ns()}.log"
         try:
             state_root.mkdir(parents=True, exist_ok=True)
-            log_file = os.fdopen(os.open(log_path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600), "wb", buffering=0)
+            log_file = os.fdopen(os.open(log_path, os.O_RDWR | os.O_CREAT | os.O_EXCL, 0o600), "r+b", buffering=0)
         except OSError as error:
             raise LocalhostError(f"Could not prepare the restart log: {error}") from error
         with log_file:
-            verified_process_directory(pid, expected_start_time)
-            if read_restart_context(directory) != context:
-                raise LocalhostError("The server launch context changed; refresh and try again")
-            if not owned_probe_host(directory, endpoint):
-                raise LocalhostError("The original process no longer owns the server's listening port")
-            send_process_signal(handle, pid, signal.SIGTERM)
-            if not wait_for_handle_exit(handle):
-                raise LocalhostError("The server did not stop cleanly; use Force stop if needed")
+            relay, output_fd = start_log_relay(log_file.fileno())
+            restarted = None
             try:
+                verified_process_directory(pid, expected_start_time)
+                if read_restart_context(directory) != context:
+                    raise LocalhostError("The server launch context changed; refresh and try again")
+                if not owned_probe_host(directory, endpoint):
+                    raise LocalhostError("The original process no longer owns the server's listening port")
+                if relay.poll() is not None:
+                    raise LocalhostError("The restart log collector exited before launch")
+                send_process_signal(handle, pid, signal.SIGTERM)
+                if not wait_for_handle_exit(handle):
+                    raise LocalhostError("The server did not stop cleanly; use Force stop if needed")
                 restarted = subprocess.Popen(
                     argv,
                     cwd=cwd,
                     env=environment,
                     stdin=subprocess.DEVNULL,
-                    stdout=log_file,
+                    stdout=output_fd,
                     stderr=subprocess.STDOUT,
                     start_new_session=True,
                     close_fds=True,
                 )
+                restarted._localhost_log_collector = relay
             except (OSError, ValueError) as error:
                 raise LocalhostError(f"Could not restart the server: {error}; see {log_path}") from error
+            finally:
+                os.close(output_fd)
+                # Closing the pipe also ends the collector when preflight/launch fails.
+                if restarted is None:
+                    try:
+                        relay.wait(timeout=3)
+                    except subprocess.TimeoutExpired:
+                        relay.kill()
+                        relay.wait(timeout=3)
     prune_restart_logs(state_root)
     wait_for_restart_ready(restarted, endpoint, log_path)
     return restarted, log_path
@@ -563,6 +689,13 @@ def build_parser() -> argparse.ArgumentParser:
     inspect_parser.add_argument("--uid", required=True, type=int)
     inspect_parser.add_argument("--paths", default="[]", help="JSON array of Compose working directories")
     inspect_parser.add_argument("--containers", default="", help="Comma-separated container IDs to sample")
+    inspect_parser.add_argument("--no-resources", action="store_true", help="Discover metadata without sampling RAM or Docker stats")
+
+    resource_parser = subparsers.add_parser("resources", help="Sample RAM independently of discovery")
+    resource_parser.add_argument("--pids", required=True)
+    resource_parser.add_argument("--uid", required=True, type=int)
+    resource_parser.add_argument("--containers", default="")
+    resource_parser.add_argument("--no-system", action="store_true")
 
     action_parser = subparsers.add_parser("process-action", help="Stop or restart a process")
     action_parser.add_argument("--action", choices=["stop", "force-stop", "restart"], required=True)
@@ -573,6 +706,11 @@ def build_parser() -> argparse.ArgumentParser:
     docker_parser = subparsers.add_parser("docker-action", help="Stop or restart a container")
     docker_parser.add_argument("--action", choices=["stop", "restart"], required=True)
     docker_parser.add_argument("--id", required=True)
+
+    relay_parser = subparsers.add_parser("log-relay", help="Collect bounded output from a restarted server")
+    relay_parser.add_argument("--input-fd", required=True, type=int)
+    relay_parser.add_argument("--log-fd", required=True, type=int)
+    relay_parser.add_argument("--ready-fd", required=True, type=int)
     return parser
 
 
@@ -588,12 +726,18 @@ def main(argv: Sequence[str] | None = None) -> int:
             if not isinstance(paths, list) or len(paths) > 256 or not all(isinstance(path, str) for path in paths):
                 raise LocalhostError("Invalid project paths")
             processes = inspect_processes(
-                comma_separated_pids(arguments.pids), arguments.uid, inspector=inspector
+                comma_separated_pids(arguments.pids), arguments.uid, inspector=inspector,
+                include_memory=not arguments.no_resources,
             )
             json_print({"ok": True, "processes": processes,
                         "projects": {path: inspector.inspect(path) for path in dict.fromkeys(paths)},
+                        "containers": {} if arguments.no_resources else inspect_container_memory(arguments.containers.split(",")),
+                        "systemMemory": {} if arguments.no_resources else read_system_memory()})
+        elif arguments.command == "resources":
+            json_print({"ok": True,
+                        "processes": sample_process_resources(comma_separated_pids(arguments.pids), arguments.uid),
                         "containers": inspect_container_memory(arguments.containers.split(",")),
-                        "systemMemory": read_system_memory()})
+                        "systemMemory": {} if arguments.no_system else read_system_memory()})
         elif arguments.command == "process-action":
             if arguments.action == "restart":
                 restarted, log_path = restart_process(arguments.pid, arguments.start_time, arguments.url)
@@ -621,6 +765,8 @@ def main(argv: Sequence[str] | None = None) -> int:
                 if arguments.action == "stop"
                 else "Docker container restarted",
             })
+        elif arguments.command == "log-relay":
+            relay_restart_log(arguments.input_fd, arguments.log_fd, arguments.ready_fd)
         return 0
     except LocalhostError as error:
         json_print({"ok": False, "error": str(error)})

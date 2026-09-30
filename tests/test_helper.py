@@ -1,4 +1,7 @@
 import os
+import io
+import json
+from contextlib import redirect_stdout
 import shutil
 import signal
 import socket
@@ -27,6 +30,28 @@ class ProcessInspectionTests(unittest.TestCase):
                     self.assertEqual(Path(recovered[0]).parent, Path(directory))
                     self.assertTrue(Path(recovered[0]).is_symlink())
                     self.assertEqual(recovered[1:], ["-c", "pass"])
+
+    def test_discovery_can_skip_all_resource_sampling(self):
+        with mock.patch.object(helper, "read_process_memory") as memory, \
+                mock.patch.object(helper, "read_system_memory") as system, \
+                mock.patch.object(helper, "inspect_container_memory") as containers, redirect_stdout(io.StringIO()) as output:
+            self.assertEqual(helper.main(["inspect", "--pids", str(os.getpid()), "--uid", str(os.geteuid()), "--no-resources"]), 0)
+        memory.assert_not_called()
+        system.assert_not_called()
+        containers.assert_not_called()
+        self.assertEqual(json.loads(output.getvalue())["processes"][0]["memoryBytes"], -1)
+
+    def test_resource_samples_do_not_recover_commands_or_projects(self):
+        with mock.patch.object(helper, "read_restart_context", side_effect=AssertionError("expensive discovery")):
+            samples = helper.sample_process_resources([os.getpid(), os.getpid()], os.geteuid())
+        self.assertEqual(len(samples), 1)
+        self.assertGreater(samples[0]["memoryBytes"], 0)
+        self.assertGreater(samples[0]["startTime"], 0)
+        self.assertEqual(helper.sample_process_resources([os.getpid()], os.geteuid() + 1), [])
+
+    def test_resource_samples_discard_identity_changes_during_read(self):
+        with mock.patch.object(helper, "read_process_stat", side_effect=[("S", 1), ("S", 2)]):
+            self.assertEqual(helper.sample_process_resources([os.getpid()], os.geteuid()), [])
 
     def test_inspects_owned_process_metadata_and_identity(self):
         process = helper.inspect_process(os.getpid(), os.geteuid())
@@ -151,6 +176,9 @@ class ProcessActionTests(unittest.TestCase):
             self.restarted.kill()
         if self.restarted:
             self.restarted.wait(timeout=2)
+            collector = getattr(self.restarted, "_localhost_log_collector", None)
+            if collector:
+                collector.wait(timeout=2)
         self.state_directory.cleanup()
 
     def test_rejects_stale_process_identity(self):
@@ -220,6 +248,66 @@ class ProcessActionTests(unittest.TestCase):
                 with self.assertRaisesRegex(helper.LocalhostError, "prepare the restart log"):
                     helper.restart_process(self.child.pid, self.start_time, self.url)
         self.assertIsNone(self.child.poll())
+
+    def test_collector_preflight_failure_preserves_original_server(self):
+        self.start_http_server()
+        with mock.patch.dict(os.environ, {"XDG_STATE_HOME": self.state_directory.name}), \
+                mock.patch.object(helper, "start_log_relay", side_effect=helper.LocalhostError("collector startup failed")):
+            with self.assertRaisesRegex(helper.LocalhostError, "collector startup failed"):
+                helper.restart_process(self.child.pid, self.start_time, self.url)
+        self.assertIsNone(self.child.poll())
+
+    def test_logs_stay_bounded_after_the_action_helper_exits(self):
+        self.start_http_server()
+        noise = (
+            "import threading,time\n"
+            "def noisy():\n"
+            " i = 0\n while True:\n"
+            "  print('entry-' + str(i) + ' ' + 'x'*32700, flush=True)\n"
+            "  i += 1\n  time.sleep(0.01)\n"
+            "threading.Thread(target=noisy, daemon=True).start()\n"
+        )
+        self.script.write_text(noise + self.script.read_text())
+        environment = dict(os.environ, XDG_STATE_HOME=self.state_directory.name)
+        result = subprocess.run([sys.executable, helper.__file__, "process-action", "--action", "restart",
+                                 "--pid", str(self.child.pid), "--start-time", str(self.start_time), "--url", self.url],
+                                env=environment, capture_output=True, text=True, timeout=15)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        payload = json.loads(result.stdout)
+        self.assertTrue(payload["ok"])
+        replacement_pid = payload["pid"]
+        identity = helper.read_process_stat(replacement_pid)[1]
+        try:
+            log_path = Path(payload["log"])
+            initial = log_path.stat().st_mtime_ns
+            deadline = time.monotonic() + 1.2
+            while time.monotonic() < deadline:
+                self.assertLessEqual(log_path.stat().st_size, helper.MAX_RESTART_LOG_BYTES)
+                time.sleep(0.02)
+            self.assertGreater(log_path.stat().st_mtime_ns, initial)
+            self.assertIn("entry-", log_path.read_text())
+        finally:
+            helper.signal_process(replacement_pid, identity, force=True)
+
+    def test_changed_launch_context_preserves_server_and_closes_collector(self):
+        self.start_http_server()
+        context = helper.read_restart_context(Path(f"/proc/{self.child.pid}"))
+        collectors = []
+        prepare = helper.start_log_relay
+
+        def prepared(log_fd):
+            collector, output_fd = prepare(log_fd)
+            collectors.append(collector)
+            return collector, output_fd
+
+        with mock.patch.dict(os.environ, {"XDG_STATE_HOME": self.state_directory.name}), \
+                mock.patch.object(helper, "start_log_relay", side_effect=prepared), \
+                mock.patch.object(helper, "read_restart_context", side_effect=[context, helper.LocalhostError("launch context changed")]):
+            with self.assertRaisesRegex(helper.LocalhostError, "launch context changed"):
+                helper.restart_process(self.child.pid, self.start_time, self.url)
+        self.assertIsNone(self.child.poll())
+        self.assertEqual(len(collectors), 1)
+        self.assertIsNotNone(collectors[0].poll())
 
     def test_missing_entry_point_disables_restart_and_preserves_original(self):
         self.start_http_server()
@@ -341,6 +429,27 @@ class ProcessActionTests(unittest.TestCase):
 
 
 class RestartLogTests(unittest.TestCase):
+    def test_caps_each_write_and_retains_recent_output(self):
+        with tempfile.NamedTemporaryFile(buffering=0) as log:
+            for index in range(100):
+                chunk = f"entry-{index:03d} ".encode() * 8
+                helper.write_bounded_log(log.fileno(), chunk, limit=128)
+                self.assertLessEqual(os.fstat(log.fileno()).st_size, 128)
+                log.seek(0)
+                self.assertTrue(log.read().endswith(chunk))
+            helper.write_bounded_log(log.fileno(), b"z" * 500, limit=128)
+            log.seek(0)
+            self.assertEqual(log.read(), b"z" * 128)
+
+    def test_pruned_active_logs_are_drained_without_filling_deleted_files(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "restart.log"
+            with path.open("w+b") as log:
+                helper.write_bounded_log(log.fileno(), b"previous output")
+                path.unlink()
+                helper.write_bounded_log(log.fileno(), b"new output")
+                self.assertEqual(os.fstat(log.fileno()).st_size, 0)
+
     def test_prunes_old_restart_logs_keeping_the_newest(self):
         with tempfile.TemporaryDirectory() as directory:
             state_root = Path(directory)
