@@ -11,12 +11,12 @@ for version history and release notes.
 
 > `pnpm dev` → Localhost appears → click **QR** → scan with your phone
 
-![Localhost for Omarchy in Everforest: compact RAM summary, memory trends, project groups, and explicit LAN sharing](preview.png)
+![Localhost for Omarchy in Everforest: compact RAM summary, memory trends, collapsible project groups, and explicit LAN sharing](preview.png)
 
 ## Features
 
 - Automatic process, framework, Docker, and Compose discovery
-- Repository and monorepo grouping with package-aware framework detection
+- Collapsible repository and monorepo groups with package-aware framework detection
 - Localhost and LAN URLs with bind-address-aware availability
 - Open locally, copy local or LAN URLs, QR, terminal, editor, restart, and stop actions
 - Search and complete arrow-key or Vim-style navigation
@@ -30,7 +30,11 @@ for version history and release notes.
 - Restart logs capped at 1 MiB each, keeping recent output
 
 Servers in the same repository or workspace appear together, with package paths
-under each name. Use the folder button to switch to a flat list sorted by port.
+under each name. Click a project header to collapse or expand its servers; its
+count stays visible when collapsed. Fold choices survive scans, closing the
+panel, and switching to the flat list for the current shell session. Search and
+port filters reveal matching servers, then restore your folds when cleared.
+Use the folder button to switch to a flat list sorted by port.
 Click a row to select it, then use the shared action toolbar. Moving the pointer
 over other rows keeps your selection. **Open** and clicking a port use the local
 URL. **Copy local** copies that same URL; **Copy LAN** and **QR** explicitly
@@ -65,9 +69,14 @@ optional and only runs when Docker is available.
 | Key                                  | Action                                                 |
 | ------------------------------------ | ------------------------------------------------------ |
 | `/` or click search                  | Search by project, framework, port, path, or container |
-| `up/down`, `j/k`, `ctrl+p/ctrl+n`    | Select a server                                        |
-| `left/right`, `h/l`                  | Select an action in the footer                         |
-| `enter`                              | Run the selected action                                |
+| `up/down`, `j/k`, `ctrl+p/ctrl+n`    | Select a visible server or project header              |
+| `left/right`, `h/l`                  | Select a footer action; on a header, collapse/expand   |
+| `enter`                              | Run the selected action, or toggle a project header   |
+| `space` on a project header          | Collapse or expand the project                        |
+| `ctrl+left/right`                    | Collapse/expand the selected server's project          |
+| `ctrl+shift+left/right`              | Collapse/expand all projects                           |
+| `ctrl+up/down`, `tab/shift+tab`      | Jump to the previous/next project header               |
+| `home/end`                           | Select the first/last visible entry                    |
 | `ctrl+c`                             | Copy the selected local URL                            |
 | `ctrl+shift+c`                       | Copy the selected LAN URL, when available              |
 | `ctrl+m`                             | Expand or collapse RAM details                         |
@@ -75,6 +84,12 @@ optional and only runs when Docker is available.
 | `alt+r`                              | Restart the selected server                            |
 | `delete`, or `ctrl+k` with no filter | Confirm stopping the selected server                   |
 | `esc`                                | Leave search, clear the filter, then close             |
+
+On an expanded header, `right` or `l` moves into its first server. Collapsing a
+selected server's project moves selection to its header; hidden servers are
+skipped by navigation and server actions are disabled on headers. Folding,
+Tab, and Home/End shortcuts leave text editing alone while search has focus.
+Use `ctrl+up/down` to jump between projects from search.
 
 ### Optional global shortcut
 
@@ -204,6 +219,7 @@ components live in `qml/`:
 | `qml/RadarDiscovery.qml`                                            | Independently discover and probe native or Docker servers |
 | `qml/RadarModel.js`                                                 | Parse, normalize, filter, and summarize server data    |
 | `qml/ServerPanel.qml`, `qml/ServerRow.qml`, `qml/ServerActions.qml` | Render the server list and controls                    |
+| `qml/ProjectHeader.qml`, `qml/ProjectList.js`                       | Fold project groups and navigate visible entries       |
 | `qml/MemorySparkline.qml`, `qml/PanelScrollArea.qml`                | Shared panel pieces                                    |
 | `qml/QrService.qml`, `qml/QrContent.qml`, `qml/QrCode.qml`          | QR state and display                                   |
 | `localhost_helper.py`, `project_metadata.py`                        | Read Linux and Docker metadata; verify process actions |

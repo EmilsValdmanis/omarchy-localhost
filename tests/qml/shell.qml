@@ -77,7 +77,7 @@ ShellRoot {
         failuresBefore = qtest_results.failCount
         servers = createTemporaryObject(modelComponent, tests)
         RadarModel.syncServerModel(servers, fixtures(50))
-        panel = createTemporaryObject(panelComponent, tests, { servers: servers })
+        panel = createTemporaryObject(panelComponent, tests, { servers: servers, groupByProject: false })
         check(panel !== null)
         list = findChild(panel, "serverList")
         check(list !== null)
@@ -374,6 +374,7 @@ ShellRoot {
       }
 
       function test_project_grouping_filtering_and_shared_actions() {
+        panel.groupByProject = true
         var rows = fixtures(6)
         for (var i = 0; i < rows.length; i++) {
           rows[i].projectRoot = i % 2 ? "/work/console" : "/work/atlas"
@@ -381,7 +382,7 @@ ShellRoot {
         }
         RadarModel.syncServerModel(servers, rows)
         panel.revision++
-        tryCompare(list, "count", 6)
+        tryCompare(list, "count", 8)
         settled()
         equal(panel.projectCount, 2)
         panel.selectedIndex = 2
@@ -398,12 +399,232 @@ ShellRoot {
         equal(openSpy.signalArguments[0][0].serverId, "server-4")
         panel.groupByProject = true
         panel.query = "console"
-        tryCompare(list, "count", 3)
+        tryCompare(list, "count", 4)
         equal(panel.projectCount, 1)
         panel.selectedIndex = 0
         equal(findChild(panel, "serverAction3").enabled, false)
         settled()
         verifyViewport()
+      }
+
+      function groupedFixtures(count) {
+        var rows = fixtures(count)
+        for (var i = 0; i < count; i++) {
+          rows[i].projectRoot = ["/work/atlas", "/work/console", "/work/tools"][i % 3]
+          rows[i].projectPath = "apps/" + rows[i].name
+        }
+        panel.groupByProject = true
+        RadarModel.syncServerModel(servers, rows)
+        panel.revision++
+        tryCompare(list, "count", count + 3)
+        settled()
+      }
+
+      function test_project_keyboard_fold_and_jump() {
+        groupedFixtures(9)
+        panel.focusNavigation()
+        wait(50)
+        keyClick(Qt.Key_Home)
+        equal(panel.selectedProjectRoot, "/work/atlas")
+        equal(panel.selectedServer(), null)
+        equal(findChild(panel, "serverAction0").enabled, false)
+        keyClick(Qt.Key_Delete)
+        keyClick(Qt.Key_C, Qt.ControlModifier)
+        equal(panel.pendingAction, "")
+        equal(stopSpy.count, 0)
+        equal(copySpy.count, 0)
+        keyClick(Qt.Key_Space)
+        tryCompare(list, "count", 9)
+        equal(panel.resultCount, 9, "folding keeps result totals")
+        equal(panel.projectCount, 3)
+        keyClick(Qt.Key_J)
+        equal(panel.selectedProjectRoot, "/work/console", "down skips hidden servers")
+        keyClick(Qt.Key_H)
+        tryCompare(list, "count", 6)
+        keyClick(Qt.Key_Left)
+        equal(list.count, 6, "left is idempotent")
+        keyClick(Qt.Key_L)
+        tryCompare(list, "count", 9)
+        equal(panel.selectedProjectRoot, "/work/console", "right expands before entering")
+        keyClick(Qt.Key_Right)
+        equal(panel.selectedServer().serverId, "server-1")
+        keyClick(Qt.Key_Right)
+        equal(panel.selectedActionIndex, RadarModel.ACTIONS.copyLocal, "server arrows still select actions")
+        keyClick(Qt.Key_Left, Qt.ControlModifier)
+        equal(panel.selectedProjectRoot, "/work/console", "folding a selected child selects its header")
+        tryCompare(list, "count", 6)
+        keyClick(Qt.Key_Right, Qt.ControlModifier)
+        tryCompare(list, "count", 9)
+        keyClick(Qt.Key_Tab)
+        equal(panel.selectedProjectRoot, "/work/tools")
+        keyClick(Qt.Key_Backtab, Qt.ShiftModifier)
+        equal(panel.selectedProjectRoot, "/work/console")
+        keyClick(Qt.Key_Up, Qt.ControlModifier)
+        equal(panel.selectedProjectRoot, "/work/atlas")
+        keyClick(Qt.Key_Up, Qt.ControlModifier)
+        equal(panel.selectedProjectRoot, "/work/tools", "project jumps wrap")
+        keyClick(Qt.Key_Down, Qt.ControlModifier)
+        equal(panel.selectedProjectRoot, "/work/atlas")
+        keyClick(Qt.Key_Return)
+        tryCompare(list, "count", 12)
+        equal(openSpy.count, 0, "Enter on a header never opens a server")
+        keyClick(Qt.Key_End)
+        equal(panel.selectedServer().serverId, "server-8")
+        settled()
+        check(list.atYEnd)
+        keyClick(Qt.Key_Home)
+        settled()
+        check(list.atYBeginning)
+      }
+
+      function test_project_fold_all_and_auxiliary_pages() {
+        groupedFixtures(9)
+        panel.focusNavigation()
+        wait(50)
+        keyClick(Qt.Key_Left, Qt.ControlModifier | Qt.ShiftModifier)
+        tryCompare(list, "count", 3)
+        equal(panel.selectedProjectRoot, "/work/atlas")
+        keyClick(Qt.Key_K)
+        equal(panel.selectedProjectRoot, "/work/tools")
+        keyClick(Qt.Key_J)
+        equal(panel.selectedProjectRoot, "/work/atlas")
+        keyClick(Qt.Key_Right, Qt.ControlModifier | Qt.ShiftModifier)
+        tryCompare(list, "count", 12)
+        panel.showDiagnostics = true
+        keyClick(Qt.Key_Left, Qt.ControlModifier)
+        keyClick(Qt.Key_Left, Qt.ControlModifier | Qt.ShiftModifier)
+        equal(list.count, 12, "diagnostics cannot fold the hidden list")
+        panel.showDiagnostics = false
+        panel.showFirewallRules = true
+        keyClick(Qt.Key_Left, Qt.ControlModifier)
+        equal(list.count, 12)
+        panel.showFirewallRules = false
+        panel.selectedIndex = 0
+        keyClick(Qt.Key_Delete)
+        keyClick(Qt.Key_Left, Qt.ControlModifier | Qt.ShiftModifier)
+        equal(list.count, 12, "confirmation owns keyboard input")
+        keyClick(Qt.Key_Escape)
+        equal(panel.pendingAction, "")
+      }
+
+      function test_project_mouse_toggle_and_live_row_updates() {
+        groupedFixtures(9)
+        var header = list.itemAtIndex(0).item
+        equal(header.objectName, "projectHeader")
+        equal(header.count, 3)
+        panel.selectedIndex = 2
+        equal(panel.selectedServer().serverId, "server-6")
+        mouseClick(header, header.width / 2, header.height / 2)
+        tryCompare(list, "count", 9)
+        equal(panel.selectedProjectRoot, "/work/atlas")
+        check(header.collapsed)
+        check(header.selected)
+        mouseClick(header, header.width / 2, header.height / 2)
+        tryCompare(list, "count", 12)
+        var row = list.itemAtIndex(1).item
+        servers.setProperty(0, "name", "Renamed server")
+        servers.setProperty(0, "memoryBytes", 123 * 1048576)
+        panel.revision++
+        tryVerify(function() { return row.server.name === "Renamed server" })
+        equal(findChild(row, "serverMemory").text, "123 MiB")
+        mouseClick(row, row.width / 2, row.height / 2)
+        equal(panel.selectedServer().serverId, "server-0")
+        panel.focusNavigation()
+        wait(50)
+        keyClick(Qt.Key_Return)
+        equal(openSpy.signalArguments[0][0].serverId, "server-0")
+      }
+
+      function test_project_search_reveals_matches_and_restores_folds() {
+        groupedFixtures(9)
+        panel.setProjectCollapsed("/work/atlas", true)
+        tryCompare(list, "count", 9)
+        panel.query = "Project 3"
+        tryCompare(list, "count", 2)
+        check(!panel.isProjectCollapsed("/work/atlas"), "search reveals hidden matches")
+        panel.focusNavigation()
+        wait(50)
+        keyClick(Qt.Key_Down)
+        equal(panel.selectedServer().serverId, "server-3")
+        keyClick(Qt.Key_Return)
+        equal(openSpy.signalArguments[0][0].serverId, "server-3")
+        panel.setProjectCollapsed("/work/atlas", true)
+        equal(list.count, 1, "search results can also be folded")
+        panel.query = "Project 6"
+        equal(list.count, 2, "a new search reveals results again")
+        panel.query = ""
+        tryCompare(list, "count", 9)
+        check(panel.isProjectCollapsed("/work/atlas"), "clearing search restores the original folds")
+        panel.portFilter = "lan"
+        tryCompare(list, "count", 8)
+        check(!panel.isProjectCollapsed("/work/atlas"), "port filters reveal matching rows")
+        panel.portFilter = "all"
+        tryCompare(list, "count", 9)
+        panel.beginSearch()
+        wait(50)
+        check(panel.searchMode)
+        keyClick(Qt.Key_Right, Qt.ControlModifier)
+        equal(list.count, 9, "text editing does not expand projects")
+        keyClick(Qt.Key_Escape)
+        wait(50)
+        panel.query = "no matches"
+        tryCompare(list, "count", 0)
+        equal(panel.selectedServer(), null)
+        equal(panel.selectedProjectRoot, "")
+        panel.query = ""
+        tryCompare(list, "count", 9)
+        equal(panel.selectedProjectRoot, "/work/atlas", "selection never points into a folded project")
+      }
+
+      function test_project_fold_state_survives_flat_mode_and_scans() {
+        groupedFixtures(9)
+        panel.setProjectCollapsed("/work/atlas", true)
+        panel.groupByProject = false
+        tryCompare(list, "count", 9)
+        equal(panel.selectedServer().serverId, "server-0")
+        panel.selectedIndex = 3
+        panel.groupByProject = true
+        tryCompare(list, "count", 9)
+        equal(panel.selectedProjectRoot, "/work/atlas")
+        panel.panelActive = false
+        servers.append(RadarModel.normalizeServer({ serverId: "new", projectRoot: "/work/atlas", port: 3010 }))
+        panel.revision++
+        wait(50)
+        equal(panel.resultCount, 9)
+        panel.panelActive = true
+        tryCompare(panel, "resultCount", 10)
+        equal(list.count, 9)
+        equal(list.itemAtIndex(0).item.count, 4)
+        equal(panel.selectedProjectRoot, "/work/atlas")
+        for (var i = servers.count - 1; i >= 0; i--)
+          if (servers.get(i).projectRoot === "/work/atlas") servers.remove(i)
+        panel.revision++
+        tryCompare(list, "count", 8)
+        equal(panel.selectedServer().serverId, "server-1", "removed headers choose a surviving entry")
+        verifyViewport()
+      }
+
+      function test_project_folds_preserve_manual_scroll_on_background_scan() {
+        groupedFixtures(60)
+        panel.setProjectCollapsed("/work/atlas", true)
+        list.positionViewAtIndex(30, ListView.Beginning)
+        settled()
+        var before = list.contentY
+        servers.setProperty(30, "memoryBytes", 987 * 1048576)
+        panel.revision++
+        settled()
+        fuzzyCompare(list.contentY, before, 1)
+        equal(panel.selectedProjectRoot, "/work/atlas")
+        equal(list.count, 43)
+        verifyViewport()
+        panel.focusNavigation()
+        wait(50)
+        keyClick(Qt.Key_Down, Qt.ControlModifier)
+        settled()
+        equal(panel.selectedProjectRoot, "/work/console")
+        verifyViewport()
+        var path = Quickshell.env("LOCALHOST_TEST_ARTIFACTS")
+        if (path) grabImage(panel).save(path + "/project-folds.png")
       }
 
       function test_manual_refresh_queue_keeps_cache_bypass() {
@@ -696,6 +917,7 @@ ShellRoot {
         tryCompare(list, "count", 0)
         tryCompare(findChild(panel, "totalMemory"), "text", "16.00 GiB")
         tryCompare(findChild(panel, "trackedMemory"), "text", "—")
+        waitForRendering(panel)
         check(findChild(panel, "otherMemorySegment").width > 0)
         check(findChild(panel, "freeMemorySegment").width > 0)
       }

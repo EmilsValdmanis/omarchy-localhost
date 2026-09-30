@@ -86,7 +86,7 @@ ShellRoot {
           Repeater {
             model: [
               "Automatic framework & port detection",
-              "Related apps grouped by monorepo",
+              "Collapsible project & monorepo groups",
               "Docker & Compose discovery",
               "Compact RAM summary & server trends",
               "Open locally, share over LAN",

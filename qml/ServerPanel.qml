@@ -6,6 +6,7 @@ import QtQuick.Layouts
 import qs.Commons
 import qs.Ui
 import "RadarModel.js" as RadarModel
+import "ProjectList.js" as ProjectList
 
 Item {
   id: root
@@ -29,6 +30,12 @@ Item {
   property string query: ""
   property bool groupByProject: true
   property var groups: ({})
+  property var collapsedProjects: ({})
+  property var filteredCollapsedProjects: ({})
+  property string selectedProjectRoot: ""
+  property int entryRevision: 0
+  property int filteredRevision: 0
+  readonly property int selectedEntryIndex: selectionEntryIndex()
   property string portFilter: "all"
   readonly property var portFilterOptions: [
     { value: "all", label: "All ports" },
@@ -74,7 +81,7 @@ Item {
   readonly property real cardInset: Style.space(2)
   readonly property int listHeight: Math.min(serverList.contentHeight, Style.space(450))
   readonly property bool hasDiagnostics: scanError !== "" || warnings.length > 0
-  readonly property bool resultsFiltered: query.trim() !== "" || portFilter !== "all"
+  readonly property bool resultsFiltered: hasResultFilter()
   readonly property bool compactMemory: height < Style.space(400)
   readonly property var memoryStats: summarizeMemory()
   readonly property color otherMemoryColor: Qt.rgba(foreground.r, foreground.g, foreground.b, 0.32)
@@ -118,6 +125,8 @@ Item {
     if (!panelActive) return
     var previous = selectedServer()
     var previousId = previous ? previous.serverId : ""
+    var previousRoot = selectedProjectRoot || (previous ? previous.projectRoot : "")
+    var previousHeader = selectedProjectRoot !== ""
     var needle = query.trim().toLowerCase()
     var filtered = []
     if (servers) {
@@ -128,21 +137,137 @@ Item {
     }
     filtered.sort(function(a, b) { return RadarModel.compareServers(a, b, root.groupByProject) })
     groups = RadarModel.projectGroups(filtered)
-    RadarModel.syncServerModel(filteredModel, filtered)
+    if (RadarModel.syncServerModel(filteredModel, filtered)) filteredRevision++
+    if (ProjectList.syncEntries(projectModel, ProjectList.entriesFor(filtered, groups, groupByProject, projectCollapseState())))
+      entryRevision++
     var nextIndex = Math.min(selectedIndex, Math.max(0, filteredModel.count - 1))
+    if (nextIndex < 0) nextIndex = 0
     for (var i = 0; i < filteredModel.count; i++) {
-      if (filteredModel.get(i).serverId === previousId) {
+      if (filteredModel.get(i).serverId === previousId
+          || (!groupByProject && previousHeader && filteredModel.get(i).projectRoot === previousRoot)) {
         nextIndex = i
         break
       }
     }
-    selectedIndex = nextIndex
+    if (!filteredModel.count) {
+      selectedIndex = -1
+      selectedProjectRoot = ""
+    } else if (groupByProject && groups[previousRoot] && (previousHeader || isProjectCollapsed(previousRoot))) {
+      selectedIndex = -1
+      selectedProjectRoot = previousRoot
+    } else {
+      selectedProjectRoot = ""
+      selectedIndex = nextIndex
+      var next = filteredModel.get(nextIndex)
+      if (groupByProject && isProjectCollapsed(next.projectRoot)) selectProject(next.projectRoot)
+    }
     normalizeSelectedAction(1)
   }
 
   function selectedServer() {
+    if (selectedProjectRoot) return null
     if (selectedIndex < 0 || selectedIndex >= filteredModel.count) return null
     return RadarModel.normalizeServer(filteredModel.get(selectedIndex))
+  }
+
+  function selectionEntryIndex() {
+    var currentEntries = entryRevision
+    var server = selectedServer()
+    var id = selectedProjectRoot ? "project:" + selectedProjectRoot : (server ? "server:" + server.serverId : "")
+    for (var i = 0; i < projectModel.count; i++)
+      if (projectModel.get(i).entryId === id) return i
+    return -1
+  }
+
+  function hasResultFilter() {
+    return query.trim() !== "" || portFilter !== "all"
+  }
+
+  // Read the filter inputs directly: their change handlers can run before
+  // derived property bindings update. New searches must reveal their matches.
+  function projectCollapseState() {
+    return hasResultFilter() ? filteredCollapsedProjects : collapsedProjects
+  }
+
+  function isProjectCollapsed(projectRoot) {
+    return projectCollapseState()[projectRoot] === true
+  }
+
+  function selectProject(projectRoot) {
+    if (!groupByProject || !groups[projectRoot]) return
+    selectedIndex = -1
+    selectedProjectRoot = projectRoot
+    normalizeSelectedAction(1)
+    ensureSelectedVisible()
+  }
+
+  function selectEntry(index) {
+    if (index < 0 || index >= projectModel.count) return
+    var entry = projectModel.get(index)
+    if (entry.projectHeader) selectProject(entry.projectRoot)
+    else {
+      selectedProjectRoot = ""
+      selectedIndex = entry.serverIndex
+      normalizeSelectedAction(1)
+      ensureSelectedVisible()
+    }
+  }
+
+  function selectedProject() {
+    var server = selectedServer()
+    return selectedProjectRoot || (server ? server.projectRoot : "")
+  }
+
+  function setProjectCollapsed(projectRoot, collapsed) {
+    if (!groupByProject || !groups[projectRoot] || showDiagnostics || showFirewallRules) return
+    selectProject(projectRoot)
+    var next = Object.assign(Object.create(null), projectCollapseState())
+    if (collapsed) next[projectRoot] = true
+    else delete next[projectRoot]
+    if (hasResultFilter()) filteredCollapsedProjects = next
+    else collapsedProjects = next
+    rebuildFilteredModel()
+    ensureSelectedVisible()
+  }
+
+  function toggleProject(projectRoot) {
+    setProjectCollapsed(projectRoot, !isProjectCollapsed(projectRoot))
+    focusNavigation()
+  }
+
+  function setAllProjectsCollapsed(collapsed) {
+    if (!groupByProject || !projectModel.count || showDiagnostics || showFirewallRules) return
+    var current = selectedProject()
+    var next = Object.assign(Object.create(null), projectCollapseState())
+    for (var projectRoot in groups) {
+      if (collapsed) next[projectRoot] = true
+      else delete next[projectRoot]
+    }
+    selectProject(current)
+    if (hasResultFilter()) filteredCollapsedProjects = next
+    else collapsedProjects = next
+    rebuildFilteredModel()
+    ensureSelectedVisible()
+  }
+
+  function selectAdjacentProject(delta) {
+    if (!groupByProject || showDiagnostics || showFirewallRules) return
+    var roots = []
+    for (var i = 0; i < projectModel.count; i++)
+      if (projectModel.get(i).projectHeader) roots.push(projectModel.get(i).projectRoot)
+    if (!roots.length) return
+    var current = roots.indexOf(selectedProject())
+    if (current < 0) current = delta < 0 ? 0 : -1
+    selectProject(roots[(current + delta + roots.length) % roots.length])
+  }
+
+  function navigateHorizontal(delta) {
+    if (!selectedProjectRoot) { selectAction(delta); return }
+    if (showDiagnostics || showFirewallRules) return
+    if (delta < 0) setProjectCollapsed(selectedProjectRoot, true)
+    else if (isProjectCollapsed(selectedProjectRoot)) setProjectCollapsed(selectedProjectRoot, false)
+    else if (selectedEntryIndex + 1 < projectModel.count && !projectModel.get(selectedEntryIndex + 1).projectHeader)
+      selectEntry(selectedEntryIndex + 1)
   }
 
   function ensureSelectedVisible() {
@@ -150,13 +275,13 @@ Item {
   }
 
   function positionSelection() {
-    if (filteredModel.count > 0 && panelActive)
-      serverList.positionViewAtIndex(selectedIndex, ListView.Contain)
+    if (selectedEntryIndex >= 0 && panelActive)
+      serverList.positionViewAtIndex(selectedEntryIndex, ListView.Contain)
   }
 
   function select(delta) {
-    if (!filteredModel.count || showDiagnostics || showFirewallRules) return
-    selectedIndex = (selectedIndex + delta + filteredModel.count) % filteredModel.count
+    if (!projectModel.count || showDiagnostics || showFirewallRules) return
+    selectEntry((selectedEntryIndex + delta + projectModel.count) % projectModel.count)
     normalizeSelectedAction(delta < 0 ? -1 : 1)
     ensureSelectedVisible()
   }
@@ -212,6 +337,7 @@ Item {
 
   function activateSelected() {
     if (showDiagnostics || showFirewallRules) return
+    if (selectedProjectRoot) { toggleProject(selectedProjectRoot); return }
     activateAction(selectedActionIndex, selectedServer())
   }
 
@@ -312,13 +438,32 @@ Item {
     }
     var control = (event.modifiers & Qt.ControlModifier) !== 0
     var alternate = (event.modifiers & Qt.AltModifier) !== 0
+    var shift = (event.modifiers & Qt.ShiftModifier) !== 0
     var plainNavigation = !searchMode && event.modifiers === Qt.NoModifier
     if (event.key === Qt.Key_Escape) {
       navigateBack()
       event.accepted = true
+    } else if (!searchMode && control && groupByProject
+               && (event.key === Qt.Key_Left || event.key === Qt.Key_Right)) {
+      if (shift) setAllProjectsCollapsed(event.key === Qt.Key_Left)
+      else setProjectCollapsed(selectedProject(), event.key === Qt.Key_Left)
+      event.accepted = true
+    } else if (control && groupByProject && (event.key === Qt.Key_Up || event.key === Qt.Key_Down)) {
+      selectAdjacentProject(event.key === Qt.Key_Up ? -1 : 1)
+      event.accepted = true
+    } else if (!searchMode && !control && !alternate && groupByProject
+               && (event.key === Qt.Key_Tab || event.key === Qt.Key_Backtab)) {
+      selectAdjacentProject(event.key === Qt.Key_Backtab || shift ? -1 : 1)
+      event.accepted = true
+    } else if (plainNavigation && (event.key === Qt.Key_Home || event.key === Qt.Key_End)) {
+      selectEntry(event.key === Qt.Key_Home ? 0 : projectModel.count - 1)
+      event.accepted = true
+    } else if (plainNavigation && event.key === Qt.Key_Space && selectedProjectRoot) {
+      toggleProject(selectedProjectRoot)
+      event.accepted = true
     } else if (plainNavigation
                && (event.key === Qt.Key_Left || event.key === Qt.Key_H)) {
-      selectAction(-1)
+      navigateHorizontal(-1)
       event.accepted = true
     } else if (event.key === Qt.Key_Up || (control && event.key === Qt.Key_P)
                || (plainNavigation && event.key === Qt.Key_K)) {
@@ -330,7 +475,7 @@ Item {
       event.accepted = true
     } else if (plainNavigation
                && (event.key === Qt.Key_Right || event.key === Qt.Key_L)) {
-      selectAction(1)
+      navigateHorizontal(1)
       event.accepted = true
     } else if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter) {
       activateSelected()
@@ -367,11 +512,13 @@ Item {
   onServersChanged: Qt.callLater(rebuildFilteredModel)
   onPanelActiveChanged: if (panelActive) Qt.callLater(rebuildFilteredModel)
   onGroupByProjectChanged: { rebuildFilteredModel(); ensureSelectedVisible() }
-  onQueryChanged: { rebuildFilteredModel(); ensureSelectedVisible() }
-  onPortFilterChanged: { rebuildFilteredModel(); ensureSelectedVisible() }
+  onSelectedIndexChanged: if (selectedIndex >= 0) selectedProjectRoot = ""
+  onQueryChanged: { filteredCollapsedProjects = ({}); rebuildFilteredModel(); ensureSelectedVisible() }
+  onPortFilterChanged: { filteredCollapsedProjects = ({}); rebuildFilteredModel(); ensureSelectedVisible() }
   Component.onCompleted: rebuildFilteredModel()
 
   ListModel { id: filteredModel }
+  ListModel { id: projectModel }
 
   Item {
     id: keyCatcher
@@ -909,13 +1056,13 @@ Item {
         objectName: "serverList"
         anchors.fill: parent
         visible: root.resultCount > 0
-        model: filteredModel
+        model: projectModel
         clip: true
         spacing: Style.space(2)
         boundsBehavior: Flickable.StopAtBounds
         flickableDirection: Flickable.VerticalFlick
         interactive: contentHeight > height
-        currentIndex: root.selectedIndex
+        currentIndex: root.selectedEntryIndex
         highlightFollowsCurrentItem: false
         reuseItems: true
 
@@ -924,47 +1071,48 @@ Item {
           policy: ScrollBar.AsNeeded
         }
 
-        section.property: root.groupByProject ? "projectRoot" : ""
-        section.criteria: ViewSection.FullString
-        section.delegate: Item {
-          id: groupHeader
-          required property string section
-          readonly property var group: root.groups[section] || { name: "Project", count: 0 }
-          width: serverList.width
-          height: Style.space(28)
-          RowLayout {
-            anchors.fill: parent
-            anchors.leftMargin: Style.space(8)
-            anchors.rightMargin: Style.space(10)
-            spacing: Style.space(8)
-            PanelSectionHeader {
-              Layout.fillWidth: true
-              text: groupHeader.group.name
-              foreground: root.foreground
-              elide: Text.ElideMiddle
-            }
-            Text {
-              textFormat: Text.PlainText
-              text: groupHeader.group.count
-              color: root.dim
-              font.family: Style.font.family
-              font.pixelSize: Style.font.caption
-            }
-          }
-        }
-
-        delegate: ServerRow {
+        delegate: Loader {
+          id: entryDelegate
+          required property int index
           required property var model
-          server: RadarModel.normalizeServer(model)
+          readonly property int serverIndex: model.serverIndex
+          readonly property bool selected: index === root.selectedEntryIndex
           x: root.cardInset
           width: serverList.width - root.cardInset * 2
             - (serverScrollBar.visible ? serverScrollBar.width + Style.space(4) : 0)
-          height: implicitHeight
-          selected: index === root.selectedIndex
-          foreground: root.foreground
-          memoryColor: root.colorForServer(server)
-          onRowSelected: { root.selectedIndex = index; root.focusNavigation() }
-          onOpenRequested: { root.selectedIndex = index; root.activateAction(0, server) }
+          height: item ? (item as Item).implicitHeight : 0
+          sourceComponent: model.projectHeader ? projectHeaderComponent : serverRowComponent
+
+          Component {
+            id: projectHeaderComponent
+            ProjectHeader {
+              projectRoot: entryDelegate.model.projectRoot
+              name: entryDelegate.model.name
+              count: entryDelegate.model.count
+              collapsed: entryDelegate.model.collapsed
+              selected: entryDelegate.selected
+              foreground: root.foreground
+              onToggled: root.toggleProject(projectRoot)
+              onFocused: root.selectProject(projectRoot)
+              onNavigationKey: function(event) { root.handleSearchKey(event) }
+            }
+          }
+          Component {
+            id: serverRowComponent
+            ServerRow {
+              index: entryDelegate.serverIndex
+              server: {
+                var currentRevision = root.filteredRevision
+                return index >= 0 && index < filteredModel.count
+                  ? RadarModel.normalizeServer(filteredModel.get(index)) : RadarModel.normalizeServer({})
+              }
+              selected: entryDelegate.selected
+              foreground: root.foreground
+              memoryColor: root.colorForServer(server)
+              onRowSelected: { root.selectedIndex = index; root.selectedProjectRoot = ""; root.focusNavigation() }
+              onOpenRequested: { root.selectedIndex = index; root.selectedProjectRoot = ""; root.activateAction(0, server) }
+            }
+          }
         }
       }
 
@@ -1038,7 +1186,11 @@ Item {
     Text {
       textFormat: Text.PlainText
       Layout.fillWidth: true
-      text: "↑↓ select · ←→ action · enter run · / search"
+      text: root.selectedProjectRoot
+        ? "↑↓ select · ←→ fold · enter / space toggle · ctrl+↑↓ project"
+        : (root.groupByProject
+          ? "↑↓ select · ←→ action · ctrl+← fold · ctrl+↑↓ project"
+          : "↑↓ select · ←→ action · enter run · / search")
       color: root.dim
       opacity: 0.66
       font.family: Style.font.family
