@@ -25,6 +25,7 @@
       "includeDocker": true,
       "ignoredPorts": "",
       "alwaysIncludePorts": "",
+      "lanInterface": "",
       "authorizeFirewallForQr": true
     },
     "schema": [
@@ -70,6 +71,13 @@
         "type": "string",
         "label": "Always include ports",
         "description": "Probe these ports even when the process is not recognized as a development server.",
+        "defaultValue": ""
+      },
+      {
+        "key": "lanInterface",
+        "type": "string",
+        "label": "LAN interface",
+        "description": "Leave empty to use the default route, or choose an interface such as wlan0 or enp5s0.",
         "defaultValue": ""
       },
       {

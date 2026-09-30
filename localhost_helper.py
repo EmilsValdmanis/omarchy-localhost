@@ -9,22 +9,31 @@ place and always returns a small JSON response.
 from __future__ import annotations
 
 import argparse
+from contextlib import contextmanager
+import http.client
+import ipaddress
 import json
 import os
 import re
+import select
 import shlex
+import shutil
 import signal
+import socket
+import ssl
 import subprocess
 import sys
 import time
 from pathlib import Path
 from typing import Any, Sequence
+from urllib.parse import urlsplit
 
 from project_metadata import ProjectInspector
 
 
 CONTAINER_ID_RE = re.compile(r"^[0-9a-f]{12,64}$")
 MAX_RESTART_LOGS = 10
+RESTART_READY_TIMEOUT = 10.0
 
 
 class LocalhostError(RuntimeError):
@@ -59,12 +68,15 @@ def read_process_stat(pid: int, proc_root: Path = Path("/proc")) -> tuple[str, i
         raise LocalhostError(f"Could not verify PID {pid}") from error
 
 
-def read_null_separated(path: Path) -> list[str]:
+def read_null_separated(path: Path, *, errors: str = "replace") -> list[str]:
     try:
         values = path.read_bytes().split(b"\0")
     except (FileNotFoundError, PermissionError, ProcessLookupError, OSError):
         return []
-    return [value.decode(errors="replace") for value in values if value]
+    # Empty argv entries are real arguments; only remove the final terminator.
+    if values and values[-1] == b"":
+        values.pop()
+    return [value.decode(errors=errors) for value in values]
 
 
 def inspect_process(
@@ -104,6 +116,12 @@ def inspect_process(
     except (FileNotFoundError, PermissionError, ProcessLookupError, OSError, ValueError, IndexError):
         pass
 
+    restart_reason = ""
+    try:
+        read_restart_context(directory)
+    except LocalhostError as error:
+        restart_reason = str(error)
+
     return {
         "pid": pid,
         "uid": uid,
@@ -113,6 +131,8 @@ def inspect_process(
         "executable": executable,
         "startTime": start_time,
         "memoryBytes": memory_bytes,
+        "restartAvailable": not restart_reason,
+        "restartReason": restart_reason,
     }
 
 
@@ -211,39 +231,53 @@ def verified_process_directory(
     return directory
 
 
-def signal_process(pid: int, expected_start_time: int, force: bool = False) -> None:
-    verified_process_directory(pid, expected_start_time)
-    selected_signal = signal.SIGKILL if force else signal.SIGTERM
+@contextmanager
+def verified_process_handle(pid: int, expected_start_time: int):
+    """Pin the process before checking /proc; never signal a bare, reusable PID."""
+    if not hasattr(os, "pidfd_open") or not hasattr(signal, "pidfd_send_signal"):
+        raise LocalhostError("Process actions require Linux pidfd support")
     try:
-        os.kill(pid, selected_signal)
+        handle = os.pidfd_open(pid)
     except ProcessLookupError as error:
         raise LocalhostError(f"PID {pid} is no longer running") from error
-    except PermissionError as error:
-        raise LocalhostError(f"Permission denied while signaling PID {pid}") from error
-    if not force and not wait_for_exit(pid, expected_start_time):
-        raise LocalhostError("The server did not stop cleanly; use Force stop if needed")
+    except OSError as error:
+        raise LocalhostError(f"Could not acquire a process handle for PID {pid}: {error}") from error
+    try:
+        directory = verified_process_directory(pid, expected_start_time)
+        yield handle, directory
+    finally:
+        os.close(handle)
 
 
-def wait_for_exit(pid: int, expected_start_time: int, timeout: float = 1.5) -> bool:
-    deadline = time.monotonic() + timeout
-    while time.monotonic() < deadline:
-        try:
-            state, start_time = read_process_stat(pid)
-        except LocalhostError:
-            return True
-        if start_time != expected_start_time or state == "Z":
-            return True
-        time.sleep(0.05)
-    return False
+def send_process_signal(handle: int, pid: int, selected_signal: int) -> None:
+    try:
+        signal.pidfd_send_signal(handle, selected_signal)
+    except ProcessLookupError as error:
+        raise LocalhostError(f"PID {pid} is no longer running") from error
+    except OSError as error:
+        raise LocalhostError(f"Could not signal PID {pid}: {error}") from error
+
+
+def wait_for_handle_exit(handle: int, timeout: float = 1.5) -> bool:
+    poller = select.poll()
+    poller.register(handle, select.POLLIN)
+    return bool(poller.poll(round(timeout * 1000)))
+
+
+def signal_process(pid: int, expected_start_time: int, force: bool = False) -> None:
+    with verified_process_handle(pid, expected_start_time) as (handle, _directory):
+        send_process_signal(handle, pid, signal.SIGKILL if force else signal.SIGTERM)
+        if not force and not wait_for_handle_exit(handle):
+            raise LocalhostError("The server did not stop cleanly; use Force stop if needed")
 
 
 def read_restart_context(directory: Path) -> tuple[list[str], dict[str, str], str, str]:
-    argv = read_null_separated(directory / "cmdline")
+    argv = read_null_separated(directory / "cmdline", errors="surrogateescape")
     if not argv:
         raise LocalhostError("Could not recover the server command")
 
     environment: dict[str, str] = {}
-    for value in read_null_separated(directory / "environ"):
+    for value in read_null_separated(directory / "environ", errors="surrogateescape"):
         if "=" in value:
             key, content = value.split("=", 1)
             if key:
@@ -257,9 +291,159 @@ def read_restart_context(directory: Path) -> tuple[list[str], dict[str, str], st
         raise LocalhostError("Could not recover the server directory") from error
     try:
         executable = os.readlink(directory / "exe")
-    except (FileNotFoundError, PermissionError, ProcessLookupError, OSError):
-        executable = ""
+    except OSError as error:
+        raise LocalhostError("Could not recover the server executable") from error
+    argv = validate_restart_command(argv, environment, cwd, executable)
     return argv, environment, cwd, executable
+
+
+def validate_restart_command(
+    argv: list[str], environment: dict[str, str], cwd: str, executable: str,
+) -> list[str]:
+    """Reject rewritten titles instead of substituting an executable for argv[0]."""
+    if not Path(cwd).is_dir() or not os.access(cwd, os.X_OK):
+        raise LocalhostError("The server directory is no longer accessible")
+    if not argv:
+        raise LocalhostError("Could not recover the server command")
+    command = argv[0]
+    if "/" in command:
+        resolved = command if os.path.isabs(command) else os.path.join(cwd, command)
+    else:
+        # Resolve relative PATH entries against the server's working directory.
+        search_path = os.pathsep.join(
+            entry if os.path.isabs(entry) else os.path.join(cwd, entry)
+            for entry in environment.get("PATH", os.defpath).split(os.pathsep)
+        )
+        resolved = shutil.which(command, path=search_path) or ""
+    try:
+        matches = bool(resolved) and os.path.samefile(resolved, executable)
+    except OSError:
+        matches = False
+    if not matches or not os.access(executable, os.X_OK):
+        raise LocalhostError("Restart unavailable: the launch command cannot be recovered reliably (possibly a rewritten process title)")
+
+    runtime = Path(executable).name
+    python_runtime = bool(re.fullmatch(r"python(?:\d+(?:\.\d+)?)?", runtime))
+    if runtime in {"node", "nodejs", "bun", "deno"} or python_runtime:
+        arguments = argv[1:]
+        # Only recover explicit entry points. Unknown runtime option layouts and
+        # runtime-only titles are deliberately disabled rather than guessed.
+        if not arguments:
+            raise LocalhostError("Restart unavailable: the runtime entry point is missing")
+        inline_modes = {"-c", "-m"} if python_runtime else {"-e", "--eval"}
+        if arguments[0] in inline_modes:
+            if len(arguments) < 2 or not arguments[1]:
+                raise LocalhostError("Restart unavailable: the runtime entry point is missing")
+        else:
+            entry_point = arguments[1] if runtime == "deno" and arguments[0] == "run" and len(arguments) > 1 else arguments[0]
+            path = Path(cwd) / entry_point
+            if entry_point.startswith("-") or not path.is_file() or not os.access(path, os.R_OK):
+                raise LocalhostError("Restart unavailable: the runtime entry point cannot be verified")
+    return [executable, *argv[1:]]
+
+
+def listening_endpoints(directory: Path) -> set[tuple[str, int]]:
+    """Find TCP listening sockets owned by this process, not another port user."""
+    inodes = set()
+    try:
+        for descriptor in (directory / "fd").iterdir():
+            try:
+                target = os.readlink(descriptor)
+            except OSError:
+                continue
+            match = re.fullmatch(r"socket:\[(\d+)\]", target)
+            if match:
+                inodes.add(match.group(1))
+    except OSError:
+        return set()
+    endpoints = set()
+    for protocol in ("tcp", "tcp6"):
+        try:
+            lines = (directory / "net" / protocol).read_text().splitlines()[1:]
+        except OSError:
+            continue
+        for line in lines:
+            fields = line.split()
+            if len(fields) > 9 and fields[3] == "0A" and fields[9] in inodes:
+                raw_address, raw_port = fields[1].split(":")
+                encoded = bytes.fromhex(raw_address)
+                if sys.byteorder == "little":
+                    encoded = b"".join(encoded[offset:offset + 4][::-1] for offset in range(0, len(encoded), 4))
+                address = socket.inet_ntop(socket.AF_INET if protocol == "tcp" else socket.AF_INET6, encoded)
+                endpoints.add((address, int(raw_port, 16)))
+    return endpoints
+
+
+def listening_ports(directory: Path) -> set[int]:
+    return {port for _host, port in listening_endpoints(directory)}
+
+
+def owned_probe_host(directory: Path, endpoint: tuple[str, str, int]) -> str | None:
+    _scheme, host, port = endpoint
+    addresses = sorted(address for address, bound_port in listening_endpoints(directory) if bound_port == port)
+    for address in addresses:
+        bound = ipaddress.ip_address(address)
+        if host == "localhost":
+            if bound.is_unspecified:
+                return "127.0.0.1" if bound.version == 4 else "::1"
+            if bound.is_loopback:
+                return address
+        else:
+            requested = ipaddress.ip_address(host)
+            if bound == requested:
+                return host
+            if bound.is_unspecified and bound.version == requested.version:
+                return "127.0.0.1" if bound.version == 4 else "::1"
+    return None
+
+
+def restart_endpoint(url: str) -> tuple[str, str, int]:
+    try:
+        parsed = urlsplit(url)
+        if (parsed.scheme not in {"http", "https"} or not parsed.hostname
+                or parsed.username is not None or parsed.password is not None
+                or parsed.path not in {"", "/"} or parsed.query or parsed.fragment
+                or parsed.port is None or parsed.port < 1):
+            raise ValueError("invalid URL")
+        if parsed.hostname != "localhost":
+            ipaddress.ip_address(parsed.hostname)
+        return parsed.scheme, parsed.hostname, parsed.port
+    except ValueError as error:
+        raise LocalhostError("Restart requires the server's HTTP or HTTPS URL") from error
+
+
+def wait_for_restart_ready(
+    restarted: subprocess.Popen[bytes], endpoint: tuple[str, str, int], log_path: Path,
+    timeout: float = RESTART_READY_TIMEOUT,
+) -> None:
+    scheme, host, port = endpoint
+    deadline = time.monotonic() + timeout
+    ready_since = None
+    while time.monotonic() < deadline:
+        if restarted.poll() is not None:
+            raise LocalhostError(f"The replacement exited with status {restarted.returncode}; see {log_path}")
+        ready = False
+        if owned_probe_host(proc_directory(restarted.pid), endpoint):
+            connection = (
+                http.client.HTTPSConnection(host, port, timeout=0.3, context=ssl._create_unverified_context())
+                if scheme == "https" else http.client.HTTPConnection(host, port, timeout=0.3)
+            )
+            try:
+                connection.request("HEAD", "/")
+                ready = 100 <= connection.getresponse().status <= 599
+            except (OSError, http.client.HTTPException):
+                pass
+            finally:
+                connection.close()
+        if ready and restarted.poll() is None:
+            if ready_since is None:
+                ready_since = time.monotonic()
+            elif time.monotonic() - ready_since >= 0.2:
+                return
+        else:
+            ready_since = None
+        time.sleep(0.05)
+    raise LocalhostError(f"The replacement did not become HTTP-ready within {timeout:g}s; see {log_path}")
 
 
 def prune_restart_logs(state_root: Path, keep: int = MAX_RESTART_LOGS) -> None:
@@ -277,43 +461,49 @@ def prune_restart_logs(state_root: Path, keep: int = MAX_RESTART_LOGS) -> None:
 
 
 def restart_process(
-    pid: int, expected_start_time: int
+    pid: int, expected_start_time: int, url: str
 ) -> tuple[subprocess.Popen[bytes], Path]:
-    directory = verified_process_directory(pid, expected_start_time)
-    argv, environment, cwd, executable = read_restart_context(directory)
-
-    try:
-        os.kill(pid, signal.SIGTERM)
-    except ProcessLookupError as error:
-        raise LocalhostError(f"PID {pid} is no longer running") from error
-    except PermissionError as error:
-        raise LocalhostError(f"Permission denied while signaling PID {pid}") from error
-    if not wait_for_exit(pid, expected_start_time):
-        raise LocalhostError("The server did not stop cleanly; use Force stop if needed")
-
-    state_root = Path(
-        os.environ.get("XDG_STATE_HOME", str(Path.home() / ".local" / "state"))
-    ) / "omarchy" / "localhost"
-    state_root.mkdir(parents=True, exist_ok=True)
-    log_path = state_root / f"restart-{time.time_ns()}.log"
-
-    if not os.path.isabs(argv[0]) and executable and os.access(executable, os.X_OK):
-        argv[0] = executable
-    try:
-        with log_path.open("ab", buffering=0) as log_file:
-            restarted = subprocess.Popen(
-                argv,
-                cwd=cwd,
-                env=environment,
-                stdin=subprocess.DEVNULL,
-                stdout=log_file,
-                stderr=subprocess.STDOUT,
-                start_new_session=True,
-                close_fds=True,
-            )
-    except (OSError, ValueError) as error:
-        raise LocalhostError(f"Could not restart the server: {error}") from error
+    endpoint = restart_endpoint(url)
+    with verified_process_handle(pid, expected_start_time) as (handle, directory):
+        context = read_restart_context(directory)
+        argv, environment, cwd, _executable = context
+        probe_host = owned_probe_host(directory, endpoint)
+        if not probe_host:
+            raise LocalhostError("The original process no longer owns the server's listening port")
+        endpoint = endpoint[0], probe_host, endpoint[2]
+        state_root = Path(
+            os.environ.get("XDG_STATE_HOME", str(Path.home() / ".local" / "state"))
+        ) / "omarchy" / "localhost"
+        log_path = state_root / f"restart-{time.time_ns()}.log"
+        try:
+            state_root.mkdir(parents=True, exist_ok=True)
+            log_file = os.fdopen(os.open(log_path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600), "wb", buffering=0)
+        except OSError as error:
+            raise LocalhostError(f"Could not prepare the restart log: {error}") from error
+        with log_file:
+            verified_process_directory(pid, expected_start_time)
+            if read_restart_context(directory) != context:
+                raise LocalhostError("The server launch context changed; refresh and try again")
+            if not owned_probe_host(directory, endpoint):
+                raise LocalhostError("The original process no longer owns the server's listening port")
+            send_process_signal(handle, pid, signal.SIGTERM)
+            if not wait_for_handle_exit(handle):
+                raise LocalhostError("The server did not stop cleanly; use Force stop if needed")
+            try:
+                restarted = subprocess.Popen(
+                    argv,
+                    cwd=cwd,
+                    env=environment,
+                    stdin=subprocess.DEVNULL,
+                    stdout=log_file,
+                    stderr=subprocess.STDOUT,
+                    start_new_session=True,
+                    close_fds=True,
+                )
+            except (OSError, ValueError) as error:
+                raise LocalhostError(f"Could not restart the server: {error}; see {log_path}") from error
     prune_restart_logs(state_root)
+    wait_for_restart_ready(restarted, endpoint, log_path)
     return restarted, log_path
 
 
@@ -376,6 +566,7 @@ def build_parser() -> argparse.ArgumentParser:
     action_parser.add_argument("--action", choices=["stop", "force-stop", "restart"], required=True)
     action_parser.add_argument("--pid", required=True, type=int)
     action_parser.add_argument("--start-time", required=True, type=int)
+    action_parser.add_argument("--url", default="", help="Original server URL for restart readiness")
 
     docker_parser = subparsers.add_parser("docker-action", help="Stop or restart a container")
     docker_parser.add_argument("--action", choices=["stop", "restart"], required=True)
@@ -403,7 +594,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                         "systemMemory": read_system_memory()})
         elif arguments.command == "process-action":
             if arguments.action == "restart":
-                restarted, log_path = restart_process(arguments.pid, arguments.start_time)
+                restarted, log_path = restart_process(arguments.pid, arguments.start_time, arguments.url)
                 json_print({
                     "ok": True,
                     "message": "Server restarted",

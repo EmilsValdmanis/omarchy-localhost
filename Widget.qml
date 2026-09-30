@@ -89,7 +89,7 @@ BarWidget {
 
     pendingQrServer = server
     if (!setting("authorizeFirewallForQr", true)
-        || radar.lanInterface === "" || radar.lanSubnet === "") {
+        || server.lanInterface === "" || server.lanSubnet === "") {
       var directServer = pendingQrServer
       pendingQrServer = null
       showQr(directServer)
@@ -108,8 +108,8 @@ BarWidget {
     firewallError = ""
     showNotice("Authorizing LAN access for :" + server.port + "…", false)
     firewallAllowProcess.command = [
-      "pkexec", "/usr/bin/ufw", "allow", "in", "on", radar.lanInterface,
-      "from", radar.lanSubnet, "to", "any", "port", String(server.port),
+      "pkexec", "/usr/bin/ufw", "allow", "in", "on", server.lanInterface,
+      "from", server.lanSubnet, "to", "any", "port", String(server.port),
       "proto", "tcp", "comment", "omarchy-localhost"
     ]
     firewallAllowProcess.running = true
@@ -163,6 +163,7 @@ BarWidget {
     includeDocker: root.setting("includeDocker", true)
     ignoredPorts: String(root.setting("ignoredPorts", "") || "")
     alwaysIncludePorts: String(root.setting("alwaysIncludePorts", "") || "")
+    selectedLanInterface: String(root.setting("lanInterface", "") || "")
     onActionFinished: function(action, successful, detail, serverId) {
       if (action === "stop" && !successful && detail.indexOf("did not stop cleanly") !== -1)
         root.forceStopServerId = serverId
@@ -189,7 +190,7 @@ BarWidget {
     function open(): string { root.openPanel(); return "ok" }
     function close(): string { root.closePanel(); return "ok" }
     function toggle(): string { root.togglePanel(); return "ok" }
-    function refresh(): string { radar.scan(); root.refreshFirewallRules(); return "ok" }
+    function refresh(): string { radar.refresh(); root.refreshFirewallRules(); return "ok" }
     function status(): string {
       var detectedServers = []
       for (var index = 0; index < radar.servers.count; index++) {
@@ -200,6 +201,11 @@ BarWidget {
           framework: server.framework,
           port: server.port,
           localUrl: server.localUrl,
+          lanUrl: server.lanUrl,
+          lanInterface: server.lanInterface,
+          lanSubnet: server.lanSubnet,
+          restartAvailable: server.restartAvailable,
+          restartReason: server.restartReason,
           source: server.source
         })
       }
@@ -238,7 +244,7 @@ BarWidget {
       var rules = active ? root.firewallCheckOutput.slice(7) : ""
       var unreadable = rules.split(/\r?\n/).indexOf("unreadable") !== -1
       if (!active || (!unreadable && exitCode === 0 && RadarModel.ufwAllowsPort(
-          rules, radar.lanInterface, radar.lanSubnet, server.port))) {
+          rules, server.lanInterface, server.lanSubnet, server.port))) {
         root.pendingQrServer = null
         root.showQr(server)
         return
@@ -318,7 +324,7 @@ BarWidget {
       : "Localhost · no servers"
     onPressed: function(mouseButton) {
       if (mouseButton === Qt.RightButton) {
-        radar.scan()
+        radar.refresh()
         root.refreshFirewallRules()
       } else root.togglePanel()
     }
@@ -381,7 +387,7 @@ BarWidget {
 
       onCloseRequested: root.closePanel()
       onRefreshRequested: {
-        radar.scan()
+        radar.refresh()
         root.refreshFirewallRules()
       }
       onOpenRequested: function(server) { root.openServer(server) }

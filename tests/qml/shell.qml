@@ -346,6 +346,21 @@ ShellRoot {
         verifyViewport()
       }
 
+      function test_manual_refresh_queue_keeps_cache_bypass() {
+        var service = createTemporaryObject(serviceComponent, tests, { scanning: true, currentUid: 0 })
+        service.refresh()
+        equal(service.manualScanQueued, true)
+        equal(service.scanQueued, true)
+        service.scan()
+        equal(service.manualScanQueued, true, "background requests cannot clear queued manual refresh")
+        service.scanning = false
+        service.scan()
+        equal(service.bypassProbeCache, true)
+        equal(service.manualScanQueued, false)
+        service.refresh()
+        equal(service.manualScanQueued, true, "manual refresh during a forced scan schedules another forced scan")
+      }
+
       function test_live_discovery_and_verified_stop() {
         var port = Number(Quickshell.env("LOCALHOST_TEST_PORT"))
         check(port > 0, "runner provides a loopback HTTP fixture")
@@ -386,6 +401,14 @@ ShellRoot {
           var refreshed = detected()
           return refreshed && RadarModel.parseMemoryHistory(refreshed.memoryHistoryJson).length >= 2
         }, 5000, "live RAM history gains samples across scans")
+        tryCompare(service, "scanning", false, 5000)
+        var failedCache = {}
+        failedCache[server.serverId] = { scheme: "", attempts: 2, expiresAt: Date.now() + 15000 }
+        service.probeCache = failedCache
+        service.servers.clear()
+        service.refresh()
+        tryVerify(function() { return detected() !== null }, 5000,
+          "manual refresh discovers a ready server despite a cached failed probe")
         service.stop(server)
         tryVerify(function() { return detected() === null }, 10000, "verified stop removes the server")
         check(service.systemMemory.totalBytes > 0, "system RAM remains available with no servers")

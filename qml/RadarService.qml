@@ -10,15 +10,19 @@ Item {
   property bool includeDocker: true
   property string ignoredPorts: ""
   property string alwaysIncludePorts: ""
+  property string selectedLanInterface: ""
   property alias servers: serverModel
   readonly property int serverCount: serverModel.count
   property int revision: 0
   property string lanIp: ""
   property string lanInterface: ""
   property string lanSubnet: ""
+  property var lanInterfaces: []
   property bool scanning: false
   property string scanError: ""
   property bool scanQueued: false
+  property bool manualScanQueued: false
+  property bool bypassProbeCache: false
   property string actionName: ""
   property string actionError: ""
   property string actionOutput: ""
@@ -94,12 +98,17 @@ Item {
     return JSON.stringify(left || []) === JSON.stringify(right || [])
   }
 
-  function scan() {
+  function refresh() { scan(true) }
+
+  function scan(manual) {
+    if (manual === true) manualScanQueued = true
     if (scanning || currentUid < 0) {
       scanQueued = true
       return
     }
     scanQueued = false
+    bypassProbeCache = manualScanQueued
+    manualScanQueued = false
     scanning = true
     pendingWarnings = []
     for (var warningIndex = 0; warningIndex < dependencyWarnings.length; warningIndex++)
@@ -242,7 +251,7 @@ Item {
       pendingListeners, processCache, nativeContexts, ignored, alwaysInclude).slice(0, 30)
     pendingContexts = nativeContexts.concat(pendingDockerContexts)
     pruneProbeCache(pendingContexts)
-    var plan = RadarModel.probePlan(pendingContexts, probeCache, Date.now())
+    var plan = RadarModel.probePlan(pendingContexts, probeCache, Date.now(), bypassProbeCache)
     pendingSchemes = plan.schemes
     var toProbe = plan.pending
     if (!toProbe.length) {
@@ -310,7 +319,8 @@ Item {
       var context = pendingContexts[index]
       var id = RadarModel.contextId(context)
       var scheme = pendingSchemes[id] || ""
-      if (scheme) servers.push(RadarModel.serverFromContext(context, scheme, lanIp))
+      if (scheme) servers.push(RadarModel.serverFromContext(context, scheme,
+        { ip: lanIp, interfaceName: lanInterface, subnet: lanSubnet }, lanInterfaces))
       else details.push({
         port: context.listener.port,
         process: String(context.listener.process || context.displayName || "unknown"),
@@ -341,6 +351,7 @@ Item {
 
   function runAction(action, server) {
     if (!server || actionProcess.running) return
+    if (action === "restart" && !RadarModel.actionEnabled(5, server)) return
     actionName = action
     actionError = ""
     actionOutput = ""
@@ -356,7 +367,8 @@ Item {
     }
     actionProcess.command = [
       "python3", helperPath, "process-action", "--action", action,
-      "--pid", String(server.pid), "--start-time", String(server.startTime)
+      "--pid", String(server.pid), "--start-time", String(server.startTime),
+      "--url", String(server.localUrl)
     ]
     actionProcess.running = true
   }
@@ -364,6 +376,8 @@ Item {
   function stop(server) { runAction("stop", server) }
   function forceStop(server) { runAction("force-stop", server) }
   function restart(server) { runAction("restart", server) }
+
+  onSelectedLanInterfaceChanged: if (!ipProcess.running) ipProcess.running = true
 
   Component.onCompleted: {
     dependencyProcess.running = true
@@ -425,21 +439,31 @@ Item {
 
   Process {
     id: ipProcess
-    command: ["ip", "-j", "-4", "route", "show"]
+    command: ["bash", "-c", "ip -j -4 route show && ip -j -4 address show up"]
     stdout: StdioCollector {
       waitForEnd: true
       onStreamFinished: root.ipOutput = String(text || "")
     }
     onExited: function(exitCode) {
       if (exitCode !== 0) {
+        root.lanIp = ""
+        root.lanInterface = ""
+        root.lanSubnet = ""
+        root.lanInterfaces = []
         root.routeWarning = "LAN route information is unavailable"
+        root.scan()
         return
       }
-      var route = RadarModel.parseLanRoute(root.ipOutput)
+      var parts = root.ipOutput.trim().split(/\r?\n/)
+      var route = RadarModel.parseLanRoute(parts[0], parts[1], root.selectedLanInterface)
+      root.lanInterfaces = RadarModel.parseLanInterfaces(parts[0], parts[1])
       root.lanIp = route.ip
       root.lanInterface = route.interfaceName
       root.lanSubnet = route.subnet
-      root.routeWarning = route.ip ? "" : "No active IPv4 LAN route was found"
+      root.routeWarning = route.ip ? "" : (root.selectedLanInterface
+        ? "No active IPv4 address on LAN interface " + root.selectedLanInterface
+        : "No active IPv4 LAN route was found")
+      root.scan()
     }
   }
 
