@@ -38,7 +38,7 @@ CursorSurface {
   PanelToolTip {
     visible: hover.hovered
     text: (header.collapsed ? "Expand" : "Collapse") + " " + header.projectRoot
-      + " · Enter / Space · Ctrl+↑↓ switch project"
+      + " · Enter / Space · h/l fold · J/K switch project"
   }
 
   RowLayout {

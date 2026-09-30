@@ -77,6 +77,10 @@ optional and only runs when Docker is available.
 | `ctrl+shift+left/right`              | Collapse/expand all projects                           |
 | `ctrl+up/down`, `tab/shift+tab`      | Jump to the previous/next project header               |
 | `home/end`                           | Select the first/last visible entry                    |
+| `zc/zo`, `za`                        | Collapse/expand or toggle the current project (Vim)    |
+| `zM/zR`                              | Collapse/expand all projects (Vim)                     |
+| `J/K`                                | Jump to the next/previous project header (Vim)         |
+| `gg/G`                               | Select the first/last visible entry (Vim)              |
 | `ctrl+c`                             | Copy the selected local URL                            |
 | `ctrl+shift+c`                       | Copy the selected LAN URL, when available              |
 | `ctrl+m`                             | Expand or collapse RAM details                         |
@@ -90,6 +94,9 @@ selected server's project moves selection to its header; hidden servers are
 skipped by navigation and server actions are disabled on headers. Folding,
 Tab, and Home/End shortcuts leave text editing alone while search has focus.
 Use `ctrl+up/down` to jump between projects from search.
+Vim commands also work from a selected server: `zc` folds its project and
+selects the header. Uppercase commands use Shift. Escape cancels a pending
+`z` or `g` prefix, and Vim commands do not intercept search input.
 
 ### Optional global shortcut
 

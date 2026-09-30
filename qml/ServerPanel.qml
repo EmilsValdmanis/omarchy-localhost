@@ -33,6 +33,7 @@ Item {
   property var collapsedProjects: ({})
   property var filteredCollapsedProjects: ({})
   property string selectedProjectRoot: ""
+  property string pendingVimPrefix: ""
   property int entryRevision: 0
   property int filteredRevision: 0
   readonly property int selectedEntryIndex: selectionEntryIndex()
@@ -195,6 +196,7 @@ Item {
 
   function selectProject(projectRoot) {
     if (!groupByProject || !groups[projectRoot]) return
+    pendingVimPrefix = ""
     selectedIndex = -1
     selectedProjectRoot = projectRoot
     normalizeSelectedAction(1)
@@ -203,6 +205,7 @@ Item {
 
   function selectEntry(index) {
     if (index < 0 || index >= projectModel.count) return
+    pendingVimPrefix = ""
     var entry = projectModel.get(index)
     if (entry.projectHeader) selectProject(entry.projectRoot)
     else {
@@ -356,10 +359,12 @@ Item {
 
   function beginSearch() {
     if (showDiagnostics || showFirewallRules) return
+    pendingVimPrefix = ""
     Qt.callLater(function() { searchField.forceActiveFocus() })
   }
 
   function focusNavigation() {
+    pendingVimPrefix = ""
     Qt.callLater(function() { keyCatcher.forceActiveFocus() })
   }
 
@@ -431,9 +436,58 @@ Item {
     else if (action === "remove-firewall") firewallRemovalConfirmed(rule)
   }
 
+  function handleVimKey(event) {
+    // Pressing Shift between z and M/R is part of the command, not its suffix.
+    if (event.key === Qt.Key_Shift || event.key === Qt.Key_Control
+        || event.key === Qt.Key_Alt || event.key === Qt.Key_Meta || event.key === Qt.Key_AltGr)
+      return false
+    var prefix = pendingVimPrefix
+    pendingVimPrefix = ""
+    if (searchMode || showDiagnostics || showFirewallRules) return false
+    var plain = event.modifiers === Qt.NoModifier
+    var shifted = event.modifiers === Qt.ShiftModifier
+    if (prefix && event.key === Qt.Key_Escape) return true
+    if (prefix === "z" && groupByProject) {
+      if (plain && (event.key === Qt.Key_C || event.key === Qt.Key_O)) {
+        setProjectCollapsed(selectedProject(), event.key === Qt.Key_C)
+        return true
+      }
+      if (plain && event.key === Qt.Key_A) {
+        toggleProject(selectedProject())
+        return true
+      }
+      if (shifted && (event.key === Qt.Key_M || event.key === Qt.Key_R)) {
+        setAllProjectsCollapsed(event.key === Qt.Key_M)
+        return true
+      }
+    }
+    if (prefix === "g" && plain && event.key === Qt.Key_G) {
+      selectEntry(0)
+      return true
+    }
+    if (plain && (event.key === Qt.Key_G || (groupByProject && event.key === Qt.Key_Z))) {
+      pendingVimPrefix = event.key === Qt.Key_G ? "g" : "z"
+      return true
+    }
+    if (shifted && event.key === Qt.Key_G) {
+      selectEntry(projectModel.count - 1)
+      return true
+    }
+    if (groupByProject && shifted && (event.key === Qt.Key_J || event.key === Qt.Key_K)) {
+      selectAdjacentProject(event.key === Qt.Key_K ? -1 : 1)
+      return true
+    }
+    return false
+  }
+
   function handleSearchKey(event) {
     if (confirmDialog.opened) {
+      pendingVimPrefix = ""
       if (confirmDialog.handleKey(event)) event.accepted = true
+      return
+    }
+    if (handleVimKey(event)) {
+      event.accepted = true
       return
     }
     var control = (event.modifiers & Qt.ControlModifier) !== 0
@@ -510,7 +564,8 @@ Item {
 
   onRevisionChanged: Qt.callLater(rebuildFilteredModel)
   onServersChanged: Qt.callLater(rebuildFilteredModel)
-  onPanelActiveChanged: if (panelActive) Qt.callLater(rebuildFilteredModel)
+  onPanelActiveChanged: { pendingVimPrefix = ""; if (panelActive) Qt.callLater(rebuildFilteredModel) }
+  onSearchModeChanged: pendingVimPrefix = ""
   onGroupByProjectChanged: { rebuildFilteredModel(); ensureSelectedVisible() }
   onSelectedIndexChanged: if (selectedIndex >= 0) selectedProjectRoot = ""
   onQueryChanged: { filteredCollapsedProjects = ({}); rebuildFilteredModel(); ensureSelectedVisible() }
@@ -1187,9 +1242,9 @@ Item {
       textFormat: Text.PlainText
       Layout.fillWidth: true
       text: root.selectedProjectRoot
-        ? "↑↓ select · ←→ fold · enter / space toggle · ctrl+↑↓ project"
+        ? "j/k select · h/l fold · enter toggle · J/K project"
         : (root.groupByProject
-          ? "↑↓ select · ←→ action · ctrl+← fold · ctrl+↑↓ project"
+          ? "↑↓ / j/k select · zc/zo fold · J/K project · / search"
           : "↑↓ select · ←→ action · enter run · / search")
       color: root.dim
       opacity: 0.66
