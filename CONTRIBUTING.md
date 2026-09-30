@@ -78,10 +78,14 @@ isolated Quickshell instance and does not change your desktop theme.
 4. Open a pull request and complete the checklist.
 5. Resolve review conversations and wait for required checks to pass.
 
-For a stack, target each dependent PR at the preceding PR's branch and link
-both layers in their descriptions. Review the lower PR first, then merge it
-into `main` before retargeting and merging the dependent PR. Keep the lower
-branch until the dependent PR is retargeted, especially after a squash merge.
+For a native GitHub stack, target each dependent PR at the preceding PR's
+branch, then register the chain using GitHub's **Create stack** option,
+`gh stack`, or the stacks REST API. Matching base branches alone does not
+register a native stack. Link both layers in their descriptions and verify
+that GitHub shows the stack map. Review from bottom to top. Merging the top
+PR can merge the entire stack; merging only a lower layer automatically
+rebases and retargets the remaining layers. GitHub supports merge, squash,
+and rebase methods for native stacks.
 
 ## Releases
 
