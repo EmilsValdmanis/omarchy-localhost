@@ -58,11 +58,16 @@ CursorSurface {
     }
     PanelSectionHeader {
       Layout.fillWidth: true
+      Layout.alignment: Qt.AlignBaseline
+      // Section labels reserve extra top padding for clipped list headings.
+      // This row already has vertical space; keep its label on the count's baseline.
+      topPadding: 0
       text: header.name
       foreground: header.selected ? Color.accent : header.foreground
       elide: Text.ElideMiddle
     }
     Text {
+      Layout.alignment: Qt.AlignBaseline
       textFormat: Text.PlainText
       text: header.count
       color: Qt.darker(header.foreground, 1.4)

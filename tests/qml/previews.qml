@@ -186,10 +186,14 @@ ShellRoot {
           [0.96, 0.98, 1.01, 1.00, 0.98, 1.02, 1.01, 1],
           [1.10, 1.07, 1.08, 1.04, 1.03, 1.02, 1.01, 1]
         ]
+        // Fixed process identities spread the demo hues around the theme accent.
+        // Sequential fallback IDs hash into almost identical teal/pink pairs.
+        var processIds = [4124, 4203, 4268, 4102, 4249, 4289]
         for (var i = 0; i < demo.length; i++) {
           var row = demo[i]
           servers.append(RadarModel.normalizeServer({
             serverId: "demo-" + i, name: row[0], framework: row[1], frameworkId: row[2],
+            pid: processIds[i], startTime: 100,
             port: row[3], projectRoot: "/work/" + row[4], projectPath: row[5],
             memoryBytes: [445, 186, 92, 612, 205, 150][i] * 1048576,
             memoryHistory: trends[i].map(function(factor) {
@@ -211,6 +215,15 @@ ShellRoot {
         tryCompare(wallpaper, "status", Image.Ready)
         compare(panel.resultCount, 6)
         compare(panel.projectCount, 2)
+        var hues = []
+        for (var index = 0; index < servers.count; index++) {
+          var hue = panel.colorForServer(servers.get(index)).hslHue
+          for (var previous = 0; previous < hues.length; previous++) {
+            var distance = Math.abs(hue - hues[previous])
+            verify(Math.min(distance, 1 - distance) > 0.12, "demo server colors are distinct")
+          }
+          hues.push(hue)
+        }
         tryVerify(function() { return qr.showingQr }, 5000)
         verify(card.x + card.width * card.scale <= poster.width - 60)
         verify(card.y + card.height * card.scale < 800)
