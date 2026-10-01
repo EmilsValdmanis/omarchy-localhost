@@ -265,7 +265,7 @@ Item {
     pendingFirewallRule = null
     pendingAction = "authorize-firewall"
     confirmDialog.message = "Allow devices on the local network to reach :" + server.port
-      + "? This creates a persistent UFW rule limited to " + root.lanIp + "'s subnet."
+      + "? This creates a persistent UFW rule limited to " + server.lanSubnet + " on " + server.lanInterface + "."
     confirmDialog.confirmText = "Allow"
     confirmDialog.selectedIndex = 0
     confirmDialog.opened = true
@@ -344,7 +344,7 @@ Item {
       event.accepted = true
     } else if (alternate && event.key === Qt.Key_R) {
       var restart = selectedServer()
-      if (restart) restartRequested(restart)
+      if (actionEnabled(5, restart)) restartRequested(restart)
       event.accepted = true
     } else if (event.key === Qt.Key_Delete || (control && event.key === Qt.Key_K && query === "")) {
       var stopped = selectedServer()

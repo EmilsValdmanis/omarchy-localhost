@@ -142,6 +142,8 @@ function parseProcessPayload(raw, currentUid) {
         executable: String(row.executable || ""),
         startTime: startTime,
         memoryBytes: validMemory(row.memoryBytes),
+        restartAvailable: row.restartAvailable === true,
+        restartReason: String(row.restartReason || ""),
         argv: Array.isArray(row.argv) ? row.argv.map(String) : commandTokens(command),
         project: row.project && typeof row.project === "object" ? row.project : {}
       }
@@ -254,7 +256,12 @@ function normalizeServer(server) {
     cwd: String(source.cwd || ""),
     localUrl: String(source.localUrl || ""),
     lanUrl: String(source.lanUrl || ""),
+    lanHost: String(source.lanHost || ""),
+    lanInterface: String(source.lanInterface || ""),
+    lanSubnet: String(source.lanSubnet || ""),
     lanAvailable: source.lanAvailable === true,
+    restartAvailable: source.source === "docker" || source.restartAvailable === true,
+    restartReason: String(source.restartReason || "Restart command could not be verified"),
     hint: String(source.hint || ""),
     projectRoot: String(source.projectRoot || source.cwd || source.serverId || source.id || "Other servers"),
     projectPath: String(source.projectPath || ""),
@@ -276,7 +283,12 @@ function serversEqual(left, right) {
     && left.cwd === right.cwd
     && left.localUrl === right.localUrl
     && left.lanUrl === right.lanUrl
+    && left.lanHost === right.lanHost
+    && left.lanInterface === right.lanInterface
+    && left.lanSubnet === right.lanSubnet
     && left.lanAvailable === right.lanAvailable
+    && left.restartAvailable === right.restartAvailable
+    && left.restartReason === right.restartReason
     && left.hint === right.hint
     && left.projectRoot === right.projectRoot
     && left.projectPath === right.projectPath
@@ -327,14 +339,14 @@ function matchesSearch(server, query, filterId) {
     .join(" ").toLowerCase().indexOf(query) !== -1
 }
 
-function probePlan(contexts, cache, now) {
+function probePlan(contexts, cache, now, bypassCache) {
   var schemes = {}
   var pending = []
   for (var i = 0; i < contexts.length; i++) {
     var context = contexts[i]
     var id = contextId(context)
     var cached = cache[id]
-    if (!cached || Number(cached.expiresAt || 0) <= now) pending.push(context)
+    if (bypassCache || !cached || Number(cached.expiresAt || 0) <= now) pending.push(context)
     else if (cached.scheme) schemes[id] = cached.scheme
   }
   return { schemes: schemes, pending: pending }
@@ -362,6 +374,7 @@ function projectGroups(servers) {
 
 function actionEnabled(index, server) {
   return !!server && (index !== 2 || server.lanAvailable)
+    && (index !== 5 || server.source === "docker" || server.restartAvailable === true)
     && ((index !== 3 && index !== 4) || server.cwd !== "")
 }
 
@@ -393,37 +406,80 @@ function parsePortSet(specification) {
   return ports
 }
 
-function parseLanRoute(raw) {
-  var empty = { ip: "", interfaceName: "", subnet: "" }
+function parseLanInterfaces(raw, addressRaw) {
+  var interfaces = []
   try {
     var routes = JSON.parse(String(raw || "[]"))
-    var preferred = null
+    var addresses = JSON.parse(String(addressRaw || "[]"))
+    if (!Array.isArray(routes) || !Array.isArray(addresses)) return interfaces
+    function addAddress(ip, device, subnet) {
+      if (ipv4Number(ip) < 0 || isLoopback(ip) || isUnspecified(ip) || isLinkLocal(ip) || device === "lo" || !device) return
+      for (var i = 0; i < interfaces.length; i++)
+        if (interfaces[i].ip === ip && interfaces[i].interfaceName === device) return
+      interfaces.push({ ip: ip, interfaceName: device, subnet: subnet })
+    }
+    for (var addressIndex = 0; addressIndex < addresses.length; addressIndex++) {
+      var entry = addresses[addressIndex]
+      var info = entry.addr_info || []
+      for (var infoIndex = 0; infoIndex < info.length; infoIndex++) {
+        var address = info[infoIndex]
+        if (address.family !== "inet" || address.scope !== "global") continue
+        var prefix = Number(address.prefixlen)
+        var ip = String(address.local || "")
+        var size = Math.pow(2, 32 - prefix)
+        var network = Math.floor(ipv4Number(ip) / size) * size
+        var octets = []
+        for (var octet = 3; octet >= 0; octet--)
+          octets.push(Math.floor(network / Math.pow(256, octet)) % 256)
+        addAddress(ip, String(entry.ifname || ""),
+          Number.isInteger(prefix) && prefix >= 1 && prefix <= 32 ? octets.join(".") + "/" + prefix : "")
+      }
+    }
+    if (addressRaw !== undefined && addressRaw !== null && String(addressRaw).trim() !== "")
+      return interfaces
+    // Connected-route sources also support older callers without address data.
     for (var index = 0; index < routes.length; index++) {
       var route = routes[index]
-      var candidate = String(route.prefsrc || route.src || "")
-      var interfaceName = String(route.dev || "")
-      if (!candidate || candidate.indexOf("127.") === 0 || interfaceName === "lo") continue
-      if (String(route.dst || "") === "default") {
-        preferred = route
-        break
+      var ip = String(route.prefsrc || route.src || "")
+      var subnet = ""
+      for (var routeIndex = 0; routeIndex < routes.length; routeIndex++) {
+        var connected = routes[routeIndex]
+        if (connected.dev === route.dev && connected.scope !== "host"
+            && String(connected.dst || "").indexOf("/") !== -1
+            && cidrContainsAddress(connected.dst, ip)) {
+          subnet = String(connected.dst)
+          break
+        }
       }
-      if (!preferred) preferred = route
+      addAddress(ip, String(route.dev || ""), subnet)
     }
-    if (!preferred) return empty
+  } catch (exception) {}
+  return interfaces
+}
 
-    var ip = String(preferred.prefsrc || preferred.src || "")
-    var device = String(preferred.dev || "")
-    var subnet = ""
-    for (var routeIndex = 0; routeIndex < routes.length; routeIndex++) {
-      var connected = routes[routeIndex]
-      var destination = String(connected.dst || "")
-      if (String(connected.dev || "") !== device || destination.indexOf("/") === -1) continue
-      if (cidrContainsAddress(destination, ip)) {
-        subnet = destination
-        break
+function parseLanRoute(raw, addressRaw, selectedInterface) {
+  var empty = { ip: "", interfaceName: "", subnet: "" }
+  var interfaces = parseLanInterfaces(raw, addressRaw)
+  var selected = String(selectedInterface || "").trim()
+  try {
+    var routes = JSON.parse(String(raw || "[]"))
+    if (!Array.isArray(routes)) return empty
+    var defaults = routes.filter(function(route) { return route.dst === "default" })
+    defaults.sort(function(a, b) { return Number(a.metric || 0) - Number(b.metric || 0) })
+    if (selected) defaults = [{ dev: selected }]
+    for (var index = 0; index < defaults.length; index++) {
+      var route = defaults[index]
+      var source = String(route.prefsrc || route.src || "")
+      for (var i = 0; i < interfaces.length; i++) {
+        if (interfaces[i].interfaceName === route.dev && (!source || interfaces[i].ip === source))
+          return interfaces[i]
       }
     }
-    return { ip: ip, interfaceName: device, subnet: subnet }
+    // An explicit selection or an unresolved default never falls back to Docker.
+    if (selected || defaults.length) return empty
+    for (var fallback = 0; fallback < interfaces.length; fallback++)
+      if (!/^(?:docker|br-|veth|virbr|cni|flannel|podman)/.test(interfaces[fallback].interfaceName))
+        return interfaces[fallback]
   } catch (exception) {}
   return empty
 }
@@ -825,16 +881,23 @@ function dockerPublishedContexts(raw, ignoredPorts, alwaysIncludePorts) {
     var grouped = {}
     var mappings = publishedPorts.split(/,\s*/)
     for (var mappingIndex = 0; mappingIndex < mappings.length; mappingIndex++) {
-      var match = mappings[mappingIndex].match(/^(?:(\[[^\]]+\]|[^:]+):)?(\d+)->(\d+)(?:\/tcp)?$/)
+      var match = mappings[mappingIndex].match(/^(?:(\[[^\]]+\]|.+):)?(\d+)(?:-(\d+))?->(\d+)(?:-(\d+))?(?:\/tcp)?$/)
       if (!match) continue
       var address = String(match[1] || "0.0.0.0").replace(/^\[|\]$/g, "")
       var port = Number(match[2])
-      var containerPort = Number(match[3])
-      if (!Number.isInteger(port) || port < 1 || port > 65535) continue
-      if (ignored[port]) continue
-      if (NON_HTTP_CONTAINER_PORTS[containerPort] && !alwaysInclude[port]) continue
-      if (!grouped[port]) grouped[port] = []
-      if (grouped[port].indexOf(address) === -1) grouped[port].push(address)
+      var lastPort = Number(match[3] || match[2])
+      var containerPort = Number(match[4])
+      var lastContainerPort = Number(match[5] || match[4])
+      if (port < 1 || lastPort > 65535 || containerPort < 1 || lastContainerPort > 65535
+          || lastPort < port || lastContainerPort < containerPort
+          || lastPort - port !== lastContainerPort - containerPort) continue
+      for (var offset = 0; offset <= lastPort - port; offset++) {
+        var expandedPort = port + offset
+        if (ignored[expandedPort]) continue
+        if (NON_HTTP_CONTAINER_PORTS[containerPort + offset] && !alwaysInclude[expandedPort]) continue
+        if (!grouped[expandedPort]) grouped[expandedPort] = []
+        if (grouped[expandedPort].indexOf(address) === -1) grouped[expandedPort].push(address)
+      }
     }
 
     for (var rawPort in grouped) {
@@ -939,10 +1002,17 @@ function basename(path) {
   return slash === -1 ? value : value.slice(slash + 1)
 }
 
-function serverFromContext(context, scheme, lanIp) {
+function serverFromContext(context, scheme, lanRoute, lanInterfaces) {
   var listener = context.listener
   var process = context.process
-  var lanHost = lanHostFor(listener.addresses, lanIp)
+  var route = typeof lanRoute === "string" ? { ip: lanRoute, interfaceName: "", subnet: "" } : (lanRoute || {})
+  var lanHost = lanHostFor(listener.addresses, route.ip)
+  if (lanHost !== route.ip) {
+    route = {}
+    var interfaces = lanInterfaces || []
+    for (var index = 0; index < interfaces.length; index++)
+      if (interfaces[index].ip === lanHost) { route = interfaces[index]; break }
+  }
   var lanAvailable = lanHost !== ""
   var loopbackBound = listener.addresses.some(isLoopback)
   var wildcardBound = listener.addresses.some(isUnspecified)
@@ -965,7 +1035,11 @@ function serverFromContext(context, scheme, lanIp) {
     localUrl: scheme + "://" + urlHost(localHost) + ":" + listener.port,
     lanUrl: lanAvailable ? scheme + "://" + urlHost(lanHost) + ":" + listener.port : "",
     lanHost: lanHost,
+    lanInterface: String(route.interfaceName || ""),
+    lanSubnet: String(route.subnet || ""),
     lanAvailable: lanAvailable,
+    restartAvailable: context.source === "docker" || process.restartAvailable === true,
+    restartReason: String(process.restartReason || ""),
     status: lanAvailable ? "Available on LAN" : "Not available on LAN",
     hint: lanAvailable
       ? "Same Wi-Fi network required"

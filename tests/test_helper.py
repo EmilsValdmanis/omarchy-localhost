@@ -1,9 +1,13 @@
 import os
+import shutil
+import signal
+import socket
 import subprocess
 import sys
 import tempfile
 import time
 import unittest
+import venv
 from pathlib import Path
 from unittest import mock
 
@@ -11,6 +15,19 @@ import localhost_helper as helper
 
 
 class ProcessInspectionTests(unittest.TestCase):
+    def test_command_recovery_preserves_verified_interpreter_symlinks(self):
+        with tempfile.TemporaryDirectory() as directory:
+            interpreter = Path(directory) / "python"
+            interpreter.symlink_to(sys.executable)
+            for command, search_path in ((str(interpreter), os.defpath), ("./python", os.defpath), ("python", ".")):
+                with self.subTest(command=command):
+                    recovered = helper.validate_restart_command(
+                        [command, "-c", "pass"], {"PATH": search_path}, directory, os.path.realpath(sys.executable)
+                    )
+                    self.assertEqual(Path(recovered[0]).parent, Path(directory))
+                    self.assertTrue(Path(recovered[0]).is_symlink())
+                    self.assertEqual(recovered[1:], ["-c", "pass"])
+
     def test_inspects_owned_process_metadata_and_identity(self):
         process = helper.inspect_process(os.getpid(), os.geteuid())
 
@@ -29,6 +46,21 @@ class ProcessInspectionTests(unittest.TestCase):
         self.assertEqual(helper.comma_separated_pids("12,bad,0,12,34"), [12, 12, 34])
         inspected = helper.inspect_processes([os.getpid(), os.getpid()], os.geteuid())
         self.assertEqual(len(inspected), 1)
+
+    def test_recovery_preserves_empty_arguments_and_non_utf8_bytes(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "cmdline"
+            raw = b"node\0server.js\0\0last\xff\0"
+            path.write_bytes(raw)
+            arguments = helper.read_null_separated(path, errors="surrogateescape")
+            self.assertEqual(arguments[:3], ["node", "server.js", ""])
+            self.assertEqual(b"\0".join(value.encode(errors="surrogateescape") for value in arguments) + b"\0", raw)
+
+    def test_wildcard_readiness_uses_loopback_instead_of_an_unowned_url_host(self):
+        with mock.patch.object(helper, "listening_endpoints", return_value={("0.0.0.0", 3000)}):
+            self.assertEqual(helper.owned_probe_host(Path("/proc/fixture"), ("http", "192.0.2.123", 3000)), "127.0.0.1")
+        with mock.patch.object(helper, "listening_endpoints", return_value={("::", 3000)}):
+            self.assertEqual(helper.owned_probe_host(Path("/proc/fixture"), ("https", "2001:db8::123", 3000)), "::1")
 
     def test_parses_docker_memory_units(self):
         self.assertEqual(helper.parse_docker_memory("1.5GiB / 4GiB"), 1610612736)
@@ -85,6 +117,30 @@ class ProcessActionTests(unittest.TestCase):
         self.restarted = None
         self.state_directory = tempfile.TemporaryDirectory()
 
+    def start_http_server(self, *, interpreter=sys.executable, prelude=""):
+        self.child.kill()
+        self.child.wait(timeout=2)
+        with socket.socket() as reservation:
+            reservation.bind(("127.0.0.1", 0))
+            self.port = reservation.getsockname()[1]
+        self.script = Path(self.state_directory.name) / "server.py"
+        self.script.write_text(
+            prelude +
+            "import sys\nfrom http.server import HTTPServer, BaseHTTPRequestHandler\n"
+            "class Handler(BaseHTTPRequestHandler):\n"
+            " def do_HEAD(self):\n  self.send_response(404)\n  self.end_headers()\n"
+            "server = HTTPServer(('127.0.0.1', int(sys.argv[1])), Handler)\n"
+            "print('ready', flush=True)\nserver.serve_forever()\n"
+        )
+        self.child = subprocess.Popen(
+            [interpreter, str(self.script), str(self.port)],
+            stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+            text=True,
+        )
+        self.assertEqual(self.child.stdout.readline().strip(), "ready")
+        self.start_time = helper.read_process_stat(self.child.pid)[1]
+        self.url = f"http://127.0.0.1:{self.port}"
+
     def tearDown(self):
         if self.child.poll() is None:
             self.child.kill()
@@ -108,6 +164,7 @@ class ProcessActionTests(unittest.TestCase):
         self.assertIsNotNone(self.child.returncode)
 
     def test_restarts_with_recovered_process_context(self):
+        self.start_http_server()
         state_root = Path(self.state_directory.name) / "omarchy" / "localhost"
         state_root.mkdir(parents=True)
         for stamp in range(helper.MAX_RESTART_LOGS):
@@ -115,7 +172,7 @@ class ProcessActionTests(unittest.TestCase):
 
         with mock.patch.dict(os.environ, {"XDG_STATE_HOME": self.state_directory.name}):
             self.restarted, log_path = helper.restart_process(
-                self.child.pid, self.start_time
+                self.child.pid, self.start_time, self.url
             )
         self.child.wait(timeout=2)
 
@@ -124,6 +181,138 @@ class ProcessActionTests(unittest.TestCase):
         self.assertTrue(log_path.parent.is_dir())
         self.assertEqual(len(list(state_root.glob("restart-*.log"))), helper.MAX_RESTART_LOGS)
         self.assertFalse((state_root / f"restart-{0:019d}.log").exists())
+        self.assertEqual(log_path.stat().st_mode & 0o777, 0o600)
+        self.assertIn(self.port, helper.listening_ports(Path(f"/proc/{self.restarted.pid}")))
+
+    def test_restart_preserves_virtualenv_dependencies(self):
+        environment = Path(self.state_directory.name) / "venv"
+        venv.EnvBuilder(with_pip=False, symlinks=True).create(environment)
+        interpreter = environment / "bin" / "python"
+        site_packages = Path(subprocess.check_output(
+            [str(interpreter), "-c", 'import sysconfig; print(sysconfig.get_path("purelib"))'], text=True
+        ).strip())
+        (site_packages / "restart_fixture_dependency.py").write_text("VALUE = 42\n")
+        self.start_http_server(interpreter=str(interpreter), prelude="import restart_fixture_dependency\n")
+        self.assertTrue(helper.inspect_process(self.child.pid, os.geteuid())["restartAvailable"])
+
+        with mock.patch.dict(os.environ, {"XDG_STATE_HOME": self.state_directory.name}):
+            self.restarted, _log = helper.restart_process(self.child.pid, self.start_time, self.url)
+
+        self.child.wait(timeout=2)
+        self.assertIsNone(self.restarted.poll())
+        self.assertEqual(helper.read_null_separated(Path(f"/proc/{self.restarted.pid}/cmdline"))[0], str(interpreter))
+        self.assertIn(self.port, helper.listening_ports(Path(f"/proc/{self.restarted.pid}")))
+
+    def test_log_directory_failure_preserves_original_server(self):
+        self.start_http_server()
+        blocked = Path(self.state_directory.name) / "blocked"
+        blocked.write_text("a file cannot be a state directory")
+        with mock.patch.dict(os.environ, {"XDG_STATE_HOME": str(blocked)}):
+            with self.assertRaisesRegex(helper.LocalhostError, "prepare the restart log"):
+                helper.restart_process(self.child.pid, self.start_time, self.url)
+        self.assertIsNone(self.child.poll())
+        self.assertIn(self.port, helper.listening_ports(Path(f"/proc/{self.child.pid}")))
+
+    def test_log_open_failure_preserves_original_server(self):
+        self.start_http_server()
+        with mock.patch.dict(os.environ, {"XDG_STATE_HOME": self.state_directory.name}):
+            with mock.patch.object(helper.os, "open", side_effect=PermissionError("unwritable log")):
+                with self.assertRaisesRegex(helper.LocalhostError, "prepare the restart log"):
+                    helper.restart_process(self.child.pid, self.start_time, self.url)
+        self.assertIsNone(self.child.poll())
+
+    def test_missing_entry_point_disables_restart_and_preserves_original(self):
+        self.start_http_server()
+        self.script.unlink()
+        process = helper.inspect_process(self.child.pid, os.geteuid())
+        self.assertFalse(process["restartAvailable"])
+        with self.assertRaisesRegex(helper.LocalhostError, "entry point cannot be verified"):
+            helper.restart_process(self.child.pid, self.start_time, self.url)
+        self.assertIsNone(self.child.poll())
+
+    @unittest.skipUnless(shutil.which("node"), "requires Node for the rewritten-title fixture")
+    def test_rewritten_node_title_disables_restart_without_stopping_server(self):
+        self.child.kill()
+        self.child.wait(timeout=2)
+        self.child = subprocess.Popen(
+            ["node", "-e", "process.title = 'next-server (v15.0.0)'; console.log('ready'); setInterval(() => {}, 1000)"],
+            stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True,
+        )
+        self.assertEqual(self.child.stdout.readline().strip(), "ready")
+        self.start_time = helper.read_process_stat(self.child.pid)[1]
+        process = helper.inspect_process(self.child.pid, os.geteuid())
+        self.assertIn("next-server", process["command"])
+        self.assertFalse(process["restartAvailable"])
+        with self.assertRaisesRegex(helper.LocalhostError, "rewritten process title"):
+            helper.restart_process(self.child.pid, self.start_time, "http://localhost:3000")
+        self.assertIsNone(self.child.poll())
+
+    def test_replacement_exit_is_reported_as_failure_with_log(self):
+        self.start_http_server()
+        self.script.write_text("import sys\nprint('startup failed', flush=True)\nsys.exit(7)\n")
+        with mock.patch.dict(os.environ, {"XDG_STATE_HOME": self.state_directory.name}):
+            with self.assertRaisesRegex(helper.LocalhostError, "replacement exited with status 7; see"):
+                helper.restart_process(self.child.pid, self.start_time, self.url)
+        self.child.wait(timeout=2)
+        logs = list((Path(self.state_directory.name) / "omarchy" / "localhost").glob("restart-*.log"))
+        self.assertEqual(len(logs), 1)
+        self.assertIn("startup failed", logs[0].read_text())
+
+    def test_invalid_readiness_url_preserves_original(self):
+        for url in ("", "ftp://localhost:3000", "http://user:pass@localhost:3000", "http://localhost:3000/path", "http://localhost:0", "http://example.com:3000"):
+            with self.assertRaisesRegex(helper.LocalhostError, "HTTP or HTTPS URL"):
+                helper.restart_process(self.child.pid, self.start_time, url)
+        self.assertIsNone(self.child.poll())
+
+    def test_wrong_listening_address_preserves_original(self):
+        self.start_http_server()
+        with self.assertRaisesRegex(helper.LocalhostError, "original process no longer owns"):
+            helper.restart_process(self.child.pid, self.start_time, f"http://127.0.0.2:{self.port}")
+        self.assertIsNone(self.child.poll())
+
+    def test_delayed_replacement_waits_for_http_readiness(self):
+        self.start_http_server()
+        self.script.write_text("import time\ntime.sleep(0.3)\n" + self.script.read_text())
+        started_at = time.monotonic()
+        with mock.patch.dict(os.environ, {"XDG_STATE_HOME": self.state_directory.name}):
+            self.restarted, _log = helper.restart_process(self.child.pid, self.start_time, self.url)
+        self.assertGreaterEqual(time.monotonic() - started_at, 0.5)
+
+    def test_other_process_http_response_cannot_make_replacement_ready(self):
+        self.start_http_server()
+        self.restarted = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(60)"])
+        with self.assertRaisesRegex(helper.LocalhostError, "did not become HTTP-ready"):
+            helper.wait_for_restart_ready(self.restarted, helper.restart_endpoint(self.url), Path("fixture.log"), timeout=0.2)
+
+    def test_handle_is_acquired_before_verification_and_used_for_signal(self):
+        events = []
+        with mock.patch.object(helper.os, "pidfd_open", side_effect=lambda pid: events.append("open") or 1234), \
+                mock.patch.object(helper, "verified_process_directory", side_effect=lambda *args: events.append("verify") or Path("/proc/fixture")), \
+                mock.patch.object(helper.signal, "pidfd_send_signal", side_effect=lambda *args: events.append("signal")) as send, \
+                mock.patch.object(helper.os, "kill") as kill, \
+                mock.patch.object(helper.os, "close") as close:
+            helper.signal_process(self.child.pid, self.start_time, force=True)
+        self.assertEqual(events, ["open", "verify", "signal"])
+        send.assert_called_once_with(1234, signal.SIGKILL)
+        close.assert_called_once_with(1234)
+        kill.assert_not_called()
+
+    def test_handle_is_closed_when_identity_verification_fails(self):
+        with mock.patch.object(helper.os, "pidfd_open", return_value=1234), \
+                mock.patch.object(helper.os, "close") as close, \
+                mock.patch.object(helper.signal, "pidfd_send_signal") as send:
+            with self.assertRaisesRegex(helper.LocalhostError, "process changed"):
+                helper.signal_process(self.child.pid, self.start_time + 1)
+        close.assert_called_once_with(1234)
+        send.assert_not_called()
+
+    def test_unavailable_pidfd_fails_without_falling_back_to_pid_signal(self):
+        with mock.patch.object(helper.os, "pidfd_open", side_effect=OSError("not supported")), \
+                mock.patch.object(helper.os, "kill") as kill:
+            with self.assertRaisesRegex(helper.LocalhostError, "process handle"):
+                helper.signal_process(self.child.pid, self.start_time)
+        kill.assert_not_called()
+        self.assertIsNone(self.child.poll())
 
     def test_offers_force_stop_only_after_graceful_stop_fails(self):
         self.child.kill()

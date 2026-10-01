@@ -51,7 +51,8 @@ RowLayout {
       required property var modelData
       objectName: "serverAction" + (index + 3)
       iconText: modelData.icon
-      tooltipText: modelData.tip
+      tooltipText: index === 2 && root.server && !RadarModel.actionEnabled(5, root.server)
+        ? root.server.restartReason : modelData.tip
       foreground: index === 3 ? Color.urgent : root.foreground
       hoverColor: index === 3 ? Color.urgent : Color.accent
       enabled: RadarModel.actionEnabled(index + 3, root.server)

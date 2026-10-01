@@ -60,6 +60,8 @@ test("parses verified process metadata from the helper", () => {
         executable: "/usr/bin/node",
         startTime: 991,
         memoryBytes: 104857600,
+        restartAvailable: false,
+        restartReason: "",
       },
     },
   })
@@ -292,6 +294,11 @@ test("normalizes servers from discovery and model rows", () => {
     localUrl: "http://localhost:5173",
     lanUrl: "http://192.168.0.119:5173",
     lanAvailable: true,
+    lanHost: "",
+    lanInterface: "",
+    lanSubnet: "",
+    restartAvailable: false,
+    restartReason: "Restart command could not be verified",
     hint: "",
     projectRoot: "/work/app",
     projectPath: "",
@@ -318,6 +325,11 @@ test("normalizes servers from discovery and model rows", () => {
     localUrl: "",
     lanUrl: "",
     lanAvailable: false,
+    lanHost: "",
+    lanInterface: "",
+    lanSubnet: "",
+    restartAvailable: false,
+    restartReason: "Restart command could not be verified",
     hint: "",
     projectRoot: "Other servers",
     projectPath: "",
@@ -461,6 +473,100 @@ test("finds the active interface and connected LAN subnet", () => {
     interfaceName: "enp5s0",
     subnet: "192.168.0.0/24",
   })
+})
+
+const multiRoutes = JSON.stringify([
+  { dst: "default", dev: "wlan0", gateway: "192.168.1.1", metric: 600 },
+  { dst: "172.17.0.0/16", dev: "docker0", scope: "link", prefsrc: "172.17.0.1" },
+  { dst: "192.168.1.0/24", dev: "wlan0", scope: "link", prefsrc: "192.168.1.42" },
+  { dst: "10.0.0.0/24", dev: "enp5s0", scope: "link", prefsrc: "10.0.0.8" },
+])
+const multiAddresses = JSON.stringify([
+  { ifname: "docker0", addr_info: [{ family: "inet", scope: "global", local: "172.17.0.1", prefixlen: 16 }] },
+  { ifname: "wlan0", addr_info: [{ family: "inet", scope: "global", local: "192.168.1.42", prefixlen: 24 }] },
+  { ifname: "enp5s0", addr_info: [{ family: "inet", scope: "global", local: "10.0.0.8", prefixlen: 24 }] },
+])
+
+test("default route without prefsrc resolves its interface address instead of Docker", () => {
+  const expected = { ip: "192.168.1.42", interfaceName: "wlan0", subnet: "192.168.1.0/24" }
+  assert.deepEqual(plain(radar.parseLanRoute(multiRoutes, multiAddresses)), expected)
+  assert.deepEqual(plain(radar.parseLanRoute(multiRoutes)), expected)
+  const defaultOnly = JSON.stringify([{ dst: "default", dev: "wlan0" }])
+  assert.deepEqual(plain(radar.parseLanRoute(defaultOnly, multiAddresses)), expected)
+  assert.equal(radar.parseLanRoute(defaultOnly).ip, "")
+  assert.equal(radar.parseLanRoute(multiRoutes, "[]").ip, "", "inactive interface addresses override stale route sources")
+})
+
+test("LAN interface selection is explicit and missing interfaces never fall back", () => {
+  assert.deepEqual(plain(radar.parseLanRoute(multiRoutes, multiAddresses, "enp5s0")), {
+    ip: "10.0.0.8", interfaceName: "enp5s0", subnet: "10.0.0.0/24",
+  })
+  assert.equal(radar.parseLanRoute(multiRoutes, multiAddresses, "absent").ip, "")
+  assert.equal(radar.parseLanRoute("[]", multiAddresses).interfaceName, "wlan0")
+  assert.equal(radar.parseLanRoute("[]", multiAddresses, "docker0").interfaceName, "docker0")
+})
+
+test("lowest metric default is preferred and malformed network data is ignored", () => {
+  const routes = JSON.stringify([
+    { dst: "default", dev: "wlan0", metric: 600 }, { dst: "default", dev: "enp5s0", metric: 100 },
+  ])
+  assert.equal(radar.parseLanRoute(routes, multiAddresses).ip, "10.0.0.8")
+  for (const raw of ["invalid", "{}", "null"])
+    assert.equal(radar.parseLanRoute(raw, multiAddresses).ip, "")
+})
+
+test("each server retains the interface and subnet belonging to its LAN URL", () => {
+  const interfaces = radar.parseLanInterfaces(multiRoutes, multiAddresses)
+  const route = radar.parseLanRoute(multiRoutes, multiAddresses)
+  const context = { listener: listener(3000), process: { cwd: "/work", startTime: 1 }, framework: { name: "Node" } }
+  context.listener.addresses = ["10.0.0.8"]
+  const server = radar.normalizeServer(radar.serverFromContext(context, "http", route, interfaces))
+  assert.equal(server.lanUrl, "http://10.0.0.8:3000")
+  assert.equal(server.lanInterface, "enp5s0")
+  assert.equal(server.lanSubnet, "10.0.0.0/24")
+  context.listener.addresses = ["0.0.0.0"]
+  const wildcard = radar.serverFromContext(context, "http", route, interfaces)
+  assert.equal(wildcard.lanInterface, "wlan0")
+  assert.equal(wildcard.lanSubnet, "192.168.1.0/24")
+  context.listener.addresses = ["10.99.0.8"]
+  assert.equal(radar.serverFromContext(context, "http", route, interfaces).lanInterface, "")
+})
+
+test("restart requires verified recovery for native servers and remains available for Docker", () => {
+  assert.equal(radar.actionEnabled(5, { source: "process", restartAvailable: false }), false)
+  assert.equal(radar.actionEnabled(5, { source: "process", restartAvailable: true }), true)
+  assert.equal(radar.actionEnabled(5, { source: "docker" }), true)
+  assert.equal(radar.actionEnabled(6, { source: "process", restartAvailable: false }), true)
+})
+
+test("expands Docker published ranges across IPv4 and IPv6 and filters each port", () => {
+  const raw = JSON.stringify(["abc123def456", "web", "node", "0.0.0.0:8080-8082->8080-8082/tcp, [::]:8080-8082->8080-8082/tcp", "", "", ""])
+  const contexts = plain(radar.dockerPublishedContexts(raw))
+  assert.deepEqual(contexts.map(context => context.listener.port), [8080, 8081, 8082])
+  assert.ok(contexts.every(context => JSON.stringify(context.listener.addresses) === JSON.stringify(["0.0.0.0", "::"])))
+  assert.deepEqual(plain(radar.dockerPublishedContexts(raw, { 8081: true })).map(context => context.listener.port), [8080, 8082])
+  const database = JSON.stringify(["abc123def456", "web", "node", "0.0.0.0:16000-16002->5431-5433/tcp", "", "", ""])
+  assert.deepEqual(plain(radar.dockerPublishedContexts(database)).map(context => context.listener.port), [16000, 16002])
+  assert.equal(radar.dockerPublishedContexts(database, {}, { 16001: true }).length, 3)
+})
+
+test("Docker ranges reject malformed bounds, UDP, and unpublished ports", () => {
+  for (const mapping of ["0.0.0.0:8080-8082->8080-8081/tcp", "0.0.0.0:8082-8080->8080-8082/tcp", "0.0.0.0:0-2->80-82/tcp", "0.0.0.0:65535-65536->80-81/tcp", "0.0.0.0:8080-8082->8080-8082/udp", "8080-8082/tcp"]) {
+    const raw = JSON.stringify(["abc123def456", "web", "node", mapping, "", "", ""])
+    assert.deepEqual(plain(radar.dockerPublishedContexts(raw)), [], mapping)
+  }
+  const ipv6 = JSON.stringify(["abc123def456", "web", "node", ":::8080-8082->8080-8082/tcp", "", "", ""])
+  assert.equal(radar.dockerPublishedContexts(ipv6).length, 3)
+})
+
+test("manual probe plans bypass both failed and successful caches", () => {
+  const contexts = [3000, 3001].map(port => ({ listener: listener(port), process: { startTime: 1 } }))
+  const cache = {
+    [radar.contextId(contexts[0])]: { scheme: "", expiresAt: 15000 },
+    [radar.contextId(contexts[1])]: { scheme: "http", expiresAt: 60000 },
+  }
+  assert.equal(radar.probePlan(contexts, cache, 100).pending.length, 0)
+  assert.deepEqual(plain(radar.probePlan(contexts, cache, 100, true).pending), plain(contexts))
 })
 
 test("recognizes exact and broader UFW LAN rules", () => {

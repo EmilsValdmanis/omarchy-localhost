@@ -47,7 +47,7 @@ plugin_enabled=""
 for _attempt in {1..40}; do
   plugin_enabled="$(
     omarchy plugin list --json 2>/dev/null |
-      jq -r --arg id "$plugin_id" 'first(.[] | select(.id == $id) | .enabled) // empty'
+      jq -r --arg id "$plugin_id" '.[] | select(.id == $id) | .enabled | select(type == "boolean")'
   )" || true
   [[ -n "$plugin_enabled" ]] && break
   sleep 0.05

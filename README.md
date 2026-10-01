@@ -89,8 +89,13 @@ python -m http.server 8000 --bind 0.0.0.0
 
 Open Localhost and choose **QR**. Your phone must be on the same Wi-Fi or LAN.
 If UFW blocks the port, Localhost can add a persistent inbound TCP rule limited
-to the active interface, current subnet, and selected port. Rules created by
+to the server URL's interface, subnet, and selected port. Rules created by
 Localhost can be removed from the shield menu.
+
+LAN discovery resolves the default route's interface address, including routes
+without a source address. Set **LAN interface** to an interface name to choose
+a different network. A server bound to a specific address uses that address's
+interface and subnet for firewall authorization.
 
 ## Settings
 
@@ -102,6 +107,7 @@ Localhost can be removed from the shield menu.
 | Include Docker       | Discover browser-ready Docker and Compose ports |
 | Ignored ports        | Hide ports or ranges such as `3001,8000-8010`   |
 | Always include ports | Probe unusual or unrecognized servers           |
+| LAN interface        | Use the default route, or choose an interface such as `wlan0` |
 | Authorize LAN access | Offer scoped UFW access before QR sharing       |
 
 ## How it works
@@ -109,7 +115,10 @@ Localhost can be removed from the shield menu.
 Localhost reads listening sockets from `ss`, batches process metadata through a
 small Python helper, and probes likely development servers over HTTP and HTTPS.
 It filters helper sockets, databases, and other non-browser services. Published
-Docker ports are discovered separately because they do not expose a host PID.
+Docker ports, including published ranges, are discovered separately because
+they do not expose a host PID. Manual refresh (Ctrl+R, the refresh button,
+right-clicking the bar icon, or IPC refresh) bypasses HTTP probe caches;
+background scans retain caching.
 RAM readings use resident memory for native listener processes and Docker's
 container memory usage for published services. The total counts a shared
 process or container once even if it serves multiple ports. Unavailable
@@ -132,9 +141,22 @@ repositories. Outside Git, it recognizes pnpm, npm/Yarn workspaces, Lerna,
 Cargo workspaces, and `go.work`. Native processes and Compose services share a
 group when their working directories resolve to the same project root.
 
-Nothing is sent elsewhere. Before stopping or restarting a process, the helper
-verifies its owner and Linux start time so a reused PID cannot target the wrong
-process. See [SECURITY.md](SECURITY.md) for security reporting.
+Discovery and readiness probes stay on the local machine. Before stopping or
+restarting a process, the helper acquires a Linux pidfd, verifies its owner and
+start time, and signals through that handle so PID reuse cannot redirect the
+signal. Process actions require Python and Linux pidfd support.
+
+Restart is disabled when the executable or runtime entry point cannot be
+verified, including rewritten process titles such as `next-server`. Unknown
+runtime option layouts are conservatively disabled; restart those servers
+from their terminal. The helper rechecks the command and environment and opens
+a private restart log before stopping the original. It reports success only
+after the replacement owns the original listening address and port and answers
+HTTP or HTTPS. Startup exits and the 10-second readiness timeout report failure
+with the log path. A replacement still running at the timeout is left running;
+check the log before starting another instance. Restart does not reconstruct
+parent supervisors or roll back a failed launch. See [SECURITY.md](SECURITY.md)
+for security reporting.
 
 ## Remove
 
