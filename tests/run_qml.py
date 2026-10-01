@@ -41,6 +41,13 @@ def main():
                    LOCALHOST_TEST_ARTIFACTS=str(artifacts.resolve()))
         env.pop("WAYLAND_DISPLAY", None)
         env.pop("DISPLAY", None)
+        # Exercise Docker latency without connecting to the user's daemon.
+        fixture_bin = stage / "bin"
+        fixture_bin.mkdir()
+        docker_stub = fixture_bin / "docker"
+        docker_stub.write_text("#!/usr/bin/env bash\nif [[ ${1:-} == ps ]]; then sleep 2.5; echo 'fixture slow Docker daemon' >&2; exit 1; fi\n")
+        docker_stub.chmod(0o755)
+        env["PATH"] = str(fixture_bin) + os.pathsep + env["PATH"]
         if args.previews:
             wallpaper = shell.parent / "themes/everforest/backgrounds/1-tree-tops.jpg"
             if not wallpaper.is_file():

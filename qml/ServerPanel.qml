@@ -41,6 +41,7 @@ Item {
   property int selectedActionIndex: 0
   property bool showFirewallRules: false
   property bool showDiagnostics: false
+  property bool memoryExpanded: false
   property var pendingServer: null
   property var pendingFirewallRule: null
   property string pendingAction: ""
@@ -51,6 +52,7 @@ Item {
   signal refreshRequested()
   signal openRequested(var server)
   signal copyRequested(var server)
+  signal copyLanRequested(var server)
   signal qrRequested(var server)
   signal terminalRequested(var server)
   signal projectRequested(var server)
@@ -66,7 +68,7 @@ Item {
   readonly property int panelWidth: Style.space(460)
   readonly property int serverCount: servers ? servers.count : 0
   readonly property int resultCount: filteredModel.count
-  readonly property int actionCount: 7
+  readonly property int actionCount: 8
   readonly property var currentServer: selectedServer()
   readonly property int projectCount: Object.keys(groups).length
   readonly property real cardInset: Style.space(2)
@@ -88,17 +90,13 @@ Item {
     return RadarModel.memoryBreakdown(rows, systemMemory)
   }
 
-  function colorForSource(index) {
-    if (index === 0) return Color.accent
+  function colorForSource(key) {
     var hue = Color.accent.hslHue
-    return Qt.hsla(((hue < 0 ? 0.48 : hue) + index * 0.137) % 1, 0.52, 0.68, 1)
+    return Qt.hsla(((hue < 0 ? 0.48 : hue) + RadarModel.sourceColorOffset(key)) % 1, 0.52, 0.68, 1)
   }
 
   function colorForServer(server) {
-    var key = RadarModel.memorySourceKey(server)
-    for (var index = 0; index < memoryStats.sources.length; index++)
-      if (memoryStats.sources[index].key === key) return colorForSource(index)
-    return dim
+    return colorForSource(RadarModel.memorySourceKey(server))
   }
 
   function labelForSource(source) {
@@ -219,13 +217,14 @@ Item {
 
   function activateAction(actionIndex, selected) {
     if (!actionEnabled(actionIndex, selected)) return
-    if (actionIndex === 0) openRequested(selected)
-    else if (actionIndex === 1) copyRequested(selected)
-    else if (actionIndex === 2) qrRequested(selected)
-    else if (actionIndex === 3) terminalRequested(selected)
-    else if (actionIndex === 4) projectRequested(selected)
-    else if (actionIndex === 5) restartRequested(selected)
-    else if (actionIndex === 6)
+    if (actionIndex === RadarModel.ACTIONS.open) openRequested(selected)
+    else if (actionIndex === RadarModel.ACTIONS.copyLocal) copyRequested(selected)
+    else if (actionIndex === RadarModel.ACTIONS.copyLan) copyLanRequested(selected)
+    else if (actionIndex === RadarModel.ACTIONS.qr) qrRequested(selected)
+    else if (actionIndex === RadarModel.ACTIONS.terminal) terminalRequested(selected)
+    else if (actionIndex === RadarModel.ACTIONS.project) projectRequested(selected)
+    else if (actionIndex === RadarModel.ACTIONS.restart) restartRequested(selected)
+    else if (actionIndex === RadarModel.ACTIONS.stop)
       requestStop(selected, selected.serverId === forceStopServerId && selected.source !== "docker")
   }
 
@@ -344,7 +343,7 @@ Item {
       event.accepted = true
     } else if (alternate && event.key === Qt.Key_R) {
       var restart = selectedServer()
-      if (actionEnabled(5, restart)) restartRequested(restart)
+      if (actionEnabled(RadarModel.ACTIONS.restart, restart)) restartRequested(restart)
       event.accepted = true
     } else if (event.key === Qt.Key_Delete || (control && event.key === Qt.Key_K && query === "")) {
       var stopped = selectedServer()
@@ -352,7 +351,14 @@ Item {
       event.accepted = true
     } else if (control && event.key === Qt.Key_C && searchField.selectedText.length === 0) {
       var copied = selectedServer()
-      if (copied) copyRequested(copied)
+      var shareOverLan = (event.modifiers & Qt.ShiftModifier) !== 0
+      if (actionEnabled(shareOverLan ? RadarModel.ACTIONS.copyLan : RadarModel.ACTIONS.copyLocal, copied)) {
+        if (shareOverLan) copyLanRequested(copied)
+        else copyRequested(copied)
+      }
+      event.accepted = true
+    } else if (control && event.key === Qt.Key_M) {
+      memoryExpanded = !memoryExpanded
       event.accepted = true
     }
   }
@@ -487,18 +493,20 @@ Item {
     }
 
     BorderSurface {
+      objectName: "memoryOverview"
       visible: !root.showFirewallRules && !root.showDiagnostics
       Layout.fillWidth: true
-      Layout.preferredHeight: root.compactMemory ? Style.space(68)
-        : Style.space(108)
-          + (root.memoryStats.sources.length ? sourceLabels.childrenRect.height + Style.space(7) : 0)
+      Layout.preferredHeight: !root.memoryExpanded ? memoryLayout.implicitHeight + Style.space(14)
+        : (root.compactMemory ? Style.space(68) : Style.space(108)
+          + (root.memoryStats.sources.length ? sourceLabels.childrenRect.height + Style.space(7) : 0))
       color: Style.hoverFillFor(root.foreground, Color.accent)
       borderSpec: Border.controlSpec("normal", root.foreground, Color.accent)
       radius: Style.cornerRadius
 
       ColumnLayout {
+        id: memoryLayout
         anchors.fill: parent
-        anchors.margins: Style.space(root.compactMemory ? 7 : 10)
+        anchors.margins: Style.space(!root.memoryExpanded || root.compactMemory ? 7 : 10)
         spacing: Style.space(root.compactMemory ? 4 : 7)
 
         RowLayout {
@@ -506,6 +514,7 @@ Item {
           spacing: Style.space(8)
 
           ColumnLayout {
+            visible: root.memoryExpanded
             spacing: Style.space(1)
             PanelSectionHeader { text: "SYSTEM RAM"; foreground: root.foreground }
             Text {
@@ -519,9 +528,23 @@ Item {
             }
           }
 
-          Item { Layout.fillWidth: true }
+          Text {
+            objectName: "memorySummary"
+            visible: !root.memoryExpanded
+            Layout.fillWidth: true
+            textFormat: Text.PlainText
+            text: "RAM · " + (root.memoryStats.measured ? RadarModel.formatMemory(root.memoryStats.serverBytes) : "—")
+              + " servers · " + RadarModel.formatMemory(root.memoryStats.availableBytes) + " free"
+            color: root.foreground
+            font.family: Style.font.family
+            font.pixelSize: Style.font.caption
+            elide: Text.ElideRight
+          }
+
+          Item { visible: root.memoryExpanded; Layout.fillWidth: true }
 
           ColumnLayout {
+            visible: root.memoryExpanded
             spacing: Style.space(1)
             PanelSectionHeader {
               text: root.memoryStats.unmeasured
@@ -541,10 +564,22 @@ Item {
               font.bold: true
             }
           }
+
+          Button {
+            objectName: "memoryToggle"
+            text: root.memoryExpanded ? "Less" : "Details"
+            foreground: root.foreground
+            fontSize: Style.font.caption
+            horizontalPadding: Style.space(7)
+            verticalPadding: Style.space(3)
+            tooltipText: (root.memoryExpanded ? "Hide" : "Show") + " RAM details (Ctrl+M)"
+            onClicked: root.memoryExpanded = !root.memoryExpanded
+          }
         }
 
         Rectangle {
           id: memoryBar
+          visible: root.memoryExpanded
           objectName: "memoryBar"
           Layout.fillWidth: true
           Layout.preferredHeight: Style.space(9)
@@ -565,7 +600,7 @@ Item {
                 width: root.memoryStats.totalBytes > 0
                   ? memoryBar.width * modelData.barBytes / root.memoryStats.totalBytes : 0
                 height: memoryBar.height
-                color: root.colorForSource(index)
+                color: root.colorForSource(modelData.key)
                 HoverHandler { id: segmentHover }
                 PanelToolTip {
                   visible: segmentHover.hovered
@@ -602,7 +637,7 @@ Item {
         }
 
         RowLayout {
-          visible: !root.compactMemory
+          visible: root.memoryExpanded && !root.compactMemory
           Layout.fillWidth: true
           spacing: Style.space(7)
           Rectangle {
@@ -645,7 +680,7 @@ Item {
 
         Flow {
           id: sourceLabels
-          visible: !root.compactMemory && root.memoryStats.sources.length > 0
+          visible: root.memoryExpanded && !root.compactMemory && root.memoryStats.sources.length > 0
           Layout.fillWidth: true
           Layout.preferredHeight: childrenRect.height
           spacing: Style.space(6)
@@ -663,7 +698,7 @@ Item {
                 width: Style.space(5)
                 height: Style.space(5)
                 radius: width / 2
-                color: root.colorForSource(sourceLabel.index)
+                color: root.colorForSource(sourceLabel.modelData.key)
               }
               Text {
                 textFormat: Text.PlainText

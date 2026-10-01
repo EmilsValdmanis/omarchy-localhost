@@ -47,17 +47,13 @@ BarWidget {
     noticeTimer.restart()
   }
 
-  function effectiveUrl(server) {
-    return server && server.lanAvailable ? server.lanUrl : (server ? server.localUrl : "")
-  }
-
   function openServer(server) {
-    var url = effectiveUrl(server)
+    var url = RadarModel.actionUrl(server, false)
     if (url) Quickshell.execDetached(["omarchy-launch-browser", url])
   }
 
-  function copyServer(server) {
-    var url = effectiveUrl(server)
+  function copyServer(server, shareOverLan) {
+    var url = RadarModel.actionUrl(server, shareOverLan === true)
     if (!url) return
     Quickshell.execDetached(["wl-copy", url])
     showNotice("Copied " + url, false)
@@ -164,6 +160,7 @@ BarWidget {
     ignoredPorts: String(root.setting("ignoredPorts", "") || "")
     alwaysIncludePorts: String(root.setting("alwaysIncludePorts", "") || "")
     selectedLanInterface: String(root.setting("lanInterface", "") || "")
+    panelActive: card.open
     onActionFinished: function(action, successful, detail, serverId) {
       if (action === "stop" && !successful && detail.indexOf("did not stop cleanly") !== -1)
         root.forceStopServerId = serverId
@@ -391,7 +388,8 @@ BarWidget {
         root.refreshFirewallRules()
       }
       onOpenRequested: function(server) { root.openServer(server) }
-      onCopyRequested: function(server) { root.copyServer(server) }
+      onCopyRequested: function(server) { root.copyServer(server, false) }
+      onCopyLanRequested: function(server) { root.copyServer(server, true) }
       onQrRequested: function(server) { root.openQr(server) }
       onTerminalRequested: function(server) {
         Quickshell.execDetached(["uwsm-app", "--", "xdg-terminal-exec", "--dir=" + server.cwd])

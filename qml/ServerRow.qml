@@ -109,7 +109,7 @@ CursorSurface {
       PanelToolTip {
         visible: memoryHover.hovered
         text: row.server.memoryBytes >= 0
-          ? "Recent server RAM · last " + row.memoryHistory.length + " scans"
+          ? "Recent server RAM · last " + row.memoryHistory.length + " samples"
           : "RAM usage unavailable"
       }
     }

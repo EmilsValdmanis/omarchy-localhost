@@ -533,10 +533,45 @@ test("each server retains the interface and subnet belonging to its LAN URL", ()
 })
 
 test("restart requires verified recovery for native servers and remains available for Docker", () => {
-  assert.equal(radar.actionEnabled(5, { source: "process", restartAvailable: false }), false)
-  assert.equal(radar.actionEnabled(5, { source: "process", restartAvailable: true }), true)
-  assert.equal(radar.actionEnabled(5, { source: "docker" }), true)
-  assert.equal(radar.actionEnabled(6, { source: "process", restartAvailable: false }), true)
+  assert.equal(radar.actionEnabled(radar.ACTIONS.restart, { source: "process", restartAvailable: false }), false)
+  assert.equal(radar.actionEnabled(radar.ACTIONS.restart, { source: "process", restartAvailable: true }), true)
+  assert.equal(radar.actionEnabled(radar.ACTIONS.restart, { source: "docker" }), true)
+  assert.equal(radar.actionEnabled(radar.ACTIONS.stop, { source: "process", restartAvailable: false }), true)
+})
+
+test("local actions stay local and sharing is explicit", () => {
+  const server = { localUrl: "http://localhost:3000", lanUrl: "http://192.0.2.12:3000", lanAvailable: true }
+  assert.equal(radar.actionUrl(server, false), server.localUrl)
+  assert.equal(radar.actionUrl(server, true), server.lanUrl)
+  assert.equal(radar.actionEnabled(radar.ACTIONS.copyLan, server), true)
+  server.lanAvailable = false
+  assert.equal(radar.actionUrl(server, true), "")
+  assert.equal(radar.actionEnabled(radar.ACTIONS.copyLan, server), false)
+  assert.equal(radar.actionEnabled(radar.ACTIONS.qr, server), false)
+  assert.equal(radar.actionEnabled(radar.ACTIONS.copyLocal, server), true)
+})
+
+test("source colors are stable across insertion, removal, and reordering", () => {
+  const a = { source: "process", pid: 100, startTime: 10 }
+  const b = { source: "docker", containerId: "abc123def456" }
+  const colors = rows => Object.fromEntries(rows.map(row => [radar.memorySourceKey(row), radar.sourceColorOffset(radar.memorySourceKey(row))]))
+  const before = colors([a, b])
+  const after = colors([{ source: "process", pid: 5, startTime: 1 }, b, a])
+  for (const key of Object.keys(before)) assert.equal(before[key], after[key])
+  assert.notEqual(before[radar.memorySourceKey(a)], before[radar.memorySourceKey(b)])
+})
+
+test("resource payloads keep process identity and reject other users", () => {
+  const raw = JSON.stringify({ ok: true, processes: [
+    { pid: 100, uid: 1000, startTime: 10, memoryBytes: 1048576 },
+    { pid: 100, uid: 1000, startTime: 11, memoryBytes: 2097152 },
+    { pid: 101, uid: 0, startTime: 12, memoryBytes: 100 },
+    { pid: 102, uid: 1000, startTime: 0, memoryBytes: 100 },
+  ], containers: { abc123def456: 3145728, invalid: 400 }, systemMemory: { totalBytes: 1000, availableBytes: 400 } })
+  assert.deepEqual(plain(radar.parseResourcePayload(raw, 1000)), { ok: true,
+    memory: { "process:100:10": 1048576, "process:100:11": 2097152, "docker:abc123def456": 3145728 },
+    systemMemory: { totalBytes: 1000, availableBytes: 400 } })
+  assert.equal(radar.parseResourcePayload("invalid", 1000).ok, false)
 })
 
 test("expands Docker published ranges across IPv4 and IPv6 and filters each port", () => {

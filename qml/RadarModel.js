@@ -8,6 +8,20 @@ function isCommonDevPort(port) {
   return COMMON_DEV_PORTS[Number(port)] === true
 }
 
+var ACTIONS = { open: 0, copyLocal: 1, copyLan: 2, qr: 3, terminal: 4, project: 5, restart: 6, stop: 7 }
+
+function actionUrl(server, shareOverLan) {
+  if (!server) return ""
+  return shareOverLan ? (server.lanAvailable ? String(server.lanUrl || "") : "") : String(server.localUrl || "")
+}
+
+function sourceColorOffset(key) {
+  var hash = 2166136261
+  var value = String(key || "")
+  for (var i = 0; i < value.length; i++) hash = Math.imul(hash ^ value.charCodeAt(i), 16777619) >>> 0
+  return (hash % 360) / 360
+}
+
 function matchesServerFilter(server, filterId) {
   var normalized = normalizeServer(server)
   var selectedFilter = String(filterId || "all")
@@ -159,6 +173,27 @@ function validMemory(value) {
   if (value === undefined || value === null || value === "") return -1
   var bytes = Number(value)
   return Number.isFinite(bytes) && bytes >= 0 ? Math.round(bytes) : -1
+}
+
+function parseResourcePayload(raw, currentUid) {
+  var memory = {}
+  try {
+    var payload = JSON.parse(String(raw || ""))
+    if (!payload || payload.ok !== true) return { ok: false, memory: memory }
+    var processes = Array.isArray(payload.processes) ? payload.processes : []
+    for (var i = 0; i < processes.length; i++) {
+      var process = processes[i]
+      var pid = Number(process.pid)
+      var startTime = Number(process.startTime)
+      if (Number(process.uid) !== Number(currentUid) || !Number.isInteger(pid) || pid <= 1
+          || !Number.isInteger(startTime) || startTime <= 0) continue
+      memory["process:" + pid + ":" + startTime] = validMemory(process.memoryBytes)
+    }
+    var containers = payload.containers || {}
+    for (var id in containers)
+      if (/^[0-9a-f]{12,64}$/.test(id)) memory["docker:" + id] = validMemory(containers[id])
+    return { ok: true, memory: memory, systemMemory: normalizeSystemMemory(payload.systemMemory) }
+  } catch (exception) { return { ok: false, memory: memory } }
 }
 
 function normalizeSystemMemory(value) {
@@ -373,9 +408,9 @@ function projectGroups(servers) {
 }
 
 function actionEnabled(index, server) {
-  return !!server && (index !== 2 || server.lanAvailable)
-    && (index !== 5 || server.source === "docker" || server.restartAvailable === true)
-    && ((index !== 3 && index !== 4) || server.cwd !== "")
+  return !!server && ((index !== ACTIONS.copyLan && index !== ACTIONS.qr) || actionUrl(server, true) !== "")
+    && (index !== ACTIONS.restart || server.source === "docker" || server.restartAvailable === true)
+    && ((index !== ACTIONS.terminal && index !== ACTIONS.project) || server.cwd !== "")
 }
 
 function parseActionPayload(raw, fallback) {
