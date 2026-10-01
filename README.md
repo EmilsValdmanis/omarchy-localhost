@@ -11,7 +11,7 @@ for version history and release notes.
 
 > `pnpm dev` → Localhost appears → click **QR** → scan with your phone
 
-![Localhost for Omarchy in Everforest: compact RAM summary, memory trends, collapsible project groups, and explicit LAN sharing](preview.png)
+![Localhost for Omarchy in Everforest: compact RAM breakdown, memory trends, collapsible project groups, and explicit LAN sharing](preview.png)
 
 ## Features
 
@@ -24,7 +24,7 @@ for version history and release notes.
 - Discovery diagnostics, port filters, and LAN-rule management
 - Process identity verification before stop or restart
 - Native Omarchy styling with no service to install, database, or account
-- Compact RAM summary with expandable system and server details
+- Always-visible compact system and server RAM breakdown
 - Live RAM sparkline and usage number for each server
 - Independent native and Docker discovery, with slower RAM sampling while closed
 - Restart logs capped at 1 MiB each, keeping recent output
@@ -38,8 +38,8 @@ Use the folder button to switch to a flat list sorted by port.
 Click a row to select it, then use the shared action toolbar. Moving the pointer
 over other rows keeps your selection. **Open** and clicking a port use the local
 URL. **Copy local** copies that same URL; **Copy LAN** and **QR** explicitly
-share the network URL. Click **Details** beside the RAM summary to expand its
-breakdown. Server colors stay tied to process or container identity when the
+share the network URL. The RAM breakdown stays visible; hover its segments
+for usage details. Server colors stay tied to process or container identity when the
 list changes; ports served by the same process share a color.
 
 LAN-ready servers listen on `0.0.0.0`, `::`, or a LAN interface. Servers bound
@@ -83,7 +83,6 @@ optional and only runs when Docker is available.
 | `gg/G`                               | Select the first/last visible entry (Vim)              |
 | `ctrl+c`                             | Copy the selected local URL                            |
 | `ctrl+shift+c`                       | Copy the selected LAN URL, when available              |
-| `ctrl+m`                             | Expand or collapse RAM details                         |
 | `ctrl+r`                             | Refresh discovery                                      |
 | `alt+r`                              | Restart the selected server                            |
 | `delete`, or `ctrl+k` with no filter | Confirm stopping the selected server                   |
@@ -245,8 +244,11 @@ Run the development watcher from the repository root:
 
 It validates the plugin, creates a guarded development install at
 `~/.config/omarchy/plugins/emils.localhost`, enables it when necessary, and
-syncs every saved change into that directory. Omarchy then hot-reloads the
-plugin automatically, so QML changes appear immediately. Press `ctrl+c` to
+syncs every saved change into that directory. It restarts the Omarchy shell
+on startup and after QML, JavaScript, or manifest changes to clear cached
+components; the bar briefly disappears during each restart. Saves are batched
+so a burst of changes causes one restart. Python helper changes take effect
+on the next scan. Press `ctrl+c` to
 stop watching. The development install remains available for the next run;
 remove it with `omarchy plugin remove emils.localhost` when it is no longer
 needed.
@@ -254,6 +256,12 @@ needed.
 `./dev` will not overwrite a normal Git-installed copy. Move or remove that
 copy first if you want to replace it with the development install. Keep a moved
 copy outside the active plugin path if you plan to restore it later.
+
+If the installed files say `0.7.0` but the bar still shows the previous UI,
+run `omarchy restart shell`. A successful `omarchy-shell shell rescanPlugins`
+call or a running watcher alone does not prove that new QML code is live:
+some shell versions recreate the widget using cached components at the same
+file paths. Checking only the installed `manifest.json` can miss this.
 
 Run the checks before opening a pull request:
 

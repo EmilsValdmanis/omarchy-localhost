@@ -211,8 +211,6 @@ ShellRoot {
         tryCompare(wallpaper, "status", Image.Ready)
         compare(panel.resultCount, 6)
         compare(panel.projectCount, 2)
-        compare(panel.labelForSource(panel.memoryStats.sources[2]), "api :8000")
-        compare(panel.labelForSource(panel.memoryStats.sources[5]), "api :8787")
         tryVerify(function() { return qr.showingQr }, 5000)
         verify(card.x + card.width * card.scale <= poster.width - 60)
         verify(card.y + card.height * card.scale < 800)

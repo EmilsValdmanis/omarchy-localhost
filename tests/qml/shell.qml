@@ -311,20 +311,16 @@ ShellRoot {
         equal(copyLanSpy.count, 2, "LAN copy is disabled for a loopback-only server")
       }
 
-      function test_collapsible_memory_preserves_server_colors() {
-        equal(panel.memoryExpanded, false)
+      function test_always_visible_memory_preserves_server_colors() {
         var overview = findChild(panel, "memoryOverview")
-        var compactHeight = overview.height
-        var viewport = list.height
-        var summary = findChild(panel, "memorySummary")
-        check(summary.visible)
+        var originalHeight = overview.height
+        var memoryBar = findChild(panel, "memoryBar")
+        check(memoryBar.visible)
+        check(findChild(panel, "trackedMemory").visible)
+        check(findChild(panel, "totalMemory").visible)
         var color = String(panel.colorForServer(servers.get(0)))
-        var toggle = findChild(panel, "memoryToggle")
-        mouseClick(toggle, toggle.width / 2, toggle.height / 2)
-        tryCompare(panel, "memoryExpanded", true)
-        wait(100)
-        check(overview.height > compactHeight)
-        check(list.height < viewport)
+        mouseClick(overview, overview.width / 2, overview.height / 2)
+        check(memoryBar.visible, "clicking RAM does not hide the breakdown")
         var row = fixtures(1)[0]
         row.serverId = "inserted"
         row.pid = 9999
@@ -334,9 +330,9 @@ ShellRoot {
         equal(String(panel.colorForSource(RadarModel.memorySourceKey(servers.get(1)))), color)
         panel.focusNavigation()
         keyClick(Qt.Key_M, Qt.ControlModifier)
-        equal(panel.memoryExpanded, false)
         wait(100)
-        equal(overview.height, compactHeight)
+        check(memoryBar.visible, "Ctrl+M does not hide the breakdown")
+        equal(overview.height, originalHeight)
         verifyViewport()
       }
 
@@ -985,14 +981,10 @@ ShellRoot {
         var path = Quickshell.env("LOCALHOST_TEST_ARTIFACTS")
         if (path) {
           grabImage(panel).save(path + "/server-panel.png")
-          panel.memoryExpanded = true
-          wait(100)
-          grabImage(panel).save(path + "/server-panel-expanded.png")
         }
       }
 
       function test_memory_summary_and_row_label() {
-        panel.memoryExpanded = true
         RadarModel.syncServerModel(servers, fixtures(2))
         panel.revision++
         tryCompare(list, "count", 2)
@@ -1008,6 +1000,13 @@ ShellRoot {
         check(Math.abs(firstSegment.width + (20 / 10) * firstSegment.width
           + otherSegment.width + freeSegment.width - memoryBar.width) < 2,
           "memory buckets fill the system RAM bar")
+        waitForRendering(memoryBar)
+        var barPixels = grabImage(memoryBar)
+        check(barPixels.red(0, 0) !== barPixels.red(0, Math.floor(barPixels.height / 2)),
+          "the colored left end follows the rounded outline")
+        check(barPixels.red(barPixels.width - 1, 0)
+          !== barPixels.red(barPixels.width - 1, Math.floor(barPixels.height / 2)),
+          "the right end follows the rounded outline")
         var rowMemory = findChild(panel, "serverMemory")
         check(rowMemory !== null)
         equal(rowMemory.text, "10 MiB")
@@ -1024,7 +1023,6 @@ ShellRoot {
       }
 
       function test_system_memory_remains_when_server_list_is_empty() {
-        panel.memoryExpanded = true
         servers.clear()
         panel.revision++
         tryCompare(list, "count", 0)

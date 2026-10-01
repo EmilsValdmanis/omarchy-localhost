@@ -49,7 +49,6 @@ Item {
   property int selectedActionIndex: 0
   property bool showFirewallRules: false
   property bool showDiagnostics: false
-  property bool memoryExpanded: false
   property var pendingServer: null
   property var pendingFirewallRule: null
   property string pendingAction: ""
@@ -83,7 +82,6 @@ Item {
   readonly property int listHeight: Math.min(serverList.contentHeight, Style.space(450))
   readonly property bool hasDiagnostics: scanError !== "" || warnings.length > 0
   readonly property bool resultsFiltered: hasResultFilter()
-  readonly property bool compactMemory: height < Style.space(400)
   readonly property var memoryStats: summarizeMemory()
   readonly property color otherMemoryColor: Qt.rgba(foreground.r, foreground.g, foreground.b, 0.32)
   readonly property color freeMemoryColor: Qt.rgba(foreground.r, foreground.g, foreground.b, 0.12)
@@ -105,14 +103,6 @@ Item {
 
   function colorForServer(server) {
     return colorForSource(RadarModel.memorySourceKey(server))
-  }
-
-  function labelForSource(source) {
-    var name = source.name.replace(/^@[^/]+\//, "")
-    var duplicates = 0
-    for (var index = 0; index < memoryStats.sources.length; index++)
-      if (memoryStats.sources[index].name.replace(/^@[^/]+\//, "") === name) duplicates++
-    return name + (duplicates > 1 ? " :" + source.port : "")
   }
 
   function portFilterLabel() {
@@ -556,9 +546,6 @@ Item {
         else copyRequested(copied)
       }
       event.accepted = true
-    } else if (control && event.key === Qt.Key_M) {
-      memoryExpanded = !memoryExpanded
-      event.accepted = true
     }
   }
 
@@ -698,9 +685,7 @@ Item {
       objectName: "memoryOverview"
       visible: !root.showFirewallRules && !root.showDiagnostics
       Layout.fillWidth: true
-      Layout.preferredHeight: !root.memoryExpanded ? memoryLayout.implicitHeight + Style.space(14)
-        : (root.compactMemory ? Style.space(68) : Style.space(108)
-          + (root.memoryStats.sources.length ? sourceLabels.childrenRect.height + Style.space(7) : 0))
+      Layout.preferredHeight: memoryLayout.implicitHeight + Style.space(14)
       color: Style.hoverFillFor(root.foreground, Color.accent)
       borderSpec: Border.controlSpec("normal", root.foreground, Color.accent)
       radius: Style.cornerRadius
@@ -708,45 +693,14 @@ Item {
       ColumnLayout {
         id: memoryLayout
         anchors.fill: parent
-        anchors.margins: Style.space(!root.memoryExpanded || root.compactMemory ? 7 : 10)
-        spacing: Style.space(root.compactMemory ? 4 : 7)
+        anchors.margins: Style.space(7)
+        spacing: Style.space(7)
 
         RowLayout {
           Layout.fillWidth: true
           spacing: Style.space(8)
 
           ColumnLayout {
-            visible: root.memoryExpanded
-            spacing: Style.space(1)
-            PanelSectionHeader { text: "SYSTEM RAM"; foreground: root.foreground }
-            Text {
-              objectName: "totalMemory"
-              textFormat: Text.PlainText
-              text: RadarModel.formatMemory(root.memoryStats.totalBytes)
-              color: root.foreground
-              font.family: Style.font.family
-              font.pixelSize: Style.font.title
-              font.bold: true
-            }
-          }
-
-          Text {
-            objectName: "memorySummary"
-            visible: !root.memoryExpanded
-            Layout.fillWidth: true
-            textFormat: Text.PlainText
-            text: "RAM · " + (root.memoryStats.measured ? RadarModel.formatMemory(root.memoryStats.serverBytes) : "—")
-              + " servers · " + RadarModel.formatMemory(root.memoryStats.availableBytes) + " free"
-            color: root.foreground
-            font.family: Style.font.family
-            font.pixelSize: Style.font.caption
-            elide: Text.ElideRight
-          }
-
-          Item { visible: root.memoryExpanded; Layout.fillWidth: true }
-
-          ColumnLayout {
-            visible: root.memoryExpanded
             spacing: Style.space(1)
             PanelSectionHeader {
               text: root.memoryStats.unmeasured
@@ -767,21 +721,25 @@ Item {
             }
           }
 
-          Button {
-            objectName: "memoryToggle"
-            text: root.memoryExpanded ? "Less" : "Details"
-            foreground: root.foreground
-            fontSize: Style.font.caption
-            horizontalPadding: Style.space(7)
-            verticalPadding: Style.space(3)
-            tooltipText: (root.memoryExpanded ? "Hide" : "Show") + " RAM details (Ctrl+M)"
-            onClicked: root.memoryExpanded = !root.memoryExpanded
+          Item { Layout.fillWidth: true }
+
+          ColumnLayout {
+            spacing: Style.space(1)
+            PanelSectionHeader { text: "SYSTEM RAM"; foreground: root.foreground }
+            Text {
+              objectName: "totalMemory"
+              textFormat: Text.PlainText
+              text: RadarModel.formatMemory(root.memoryStats.totalBytes)
+              color: root.foreground
+              font.family: Style.font.family
+              font.pixelSize: Style.font.title
+              font.bold: true
+            }
           }
         }
 
         Rectangle {
           id: memoryBar
-          visible: root.memoryExpanded
           objectName: "memoryBar"
           Layout.fillWidth: true
           Layout.preferredHeight: Style.space(9)
@@ -789,6 +747,48 @@ Item {
           color: root.freeMemoryColor
           border.width: Math.max(1, Style.spacing.hairline)
           border.color: root.dim
+
+          Canvas {
+            anchors.fill: parent
+            anchors.margins: memoryBar.border.width
+            antialiasing: true
+            property var segments: {
+              var stats = root.memoryStats
+              var parts = stats.sources.map(function(source) {
+                return { fraction: stats.totalBytes > 0 ? source.barBytes / stats.totalBytes : 0,
+                  color: root.colorForSource(source.key) }
+              })
+              parts.push({ fraction: stats.totalBytes > 0 ? stats.otherBytes / stats.totalBytes : 0,
+                color: root.otherMemoryColor })
+              return parts
+            }
+            onSegmentsChanged: requestPaint()
+            onWidthChanged: requestPaint()
+            onHeightChanged: requestPaint()
+            onPaint: {
+              var context = getContext("2d")
+              context.clearRect(0, 0, width, height)
+              if (width <= 0 || height <= 0) return
+              var radius = Math.min(width, height) / 2
+              context.save()
+              context.beginPath()
+              context.moveTo(radius, 0)
+              context.lineTo(width - radius, 0)
+              context.arc(width - radius, radius, radius, -Math.PI / 2, Math.PI / 2)
+              context.lineTo(radius, height)
+              context.arc(radius, radius, radius, Math.PI / 2, Math.PI * 1.5)
+              context.closePath()
+              context.clip()
+              var offset = 0
+              for (var index = 0; index < segments.length; index++) {
+                var segmentWidth = width * segments[index].fraction
+                context.fillStyle = String(segments[index].color)
+                context.fillRect(offset, 0, segmentWidth, height)
+                offset += segmentWidth
+              }
+              context.restore()
+            }
+          }
 
           Row {
             anchors.fill: parent
@@ -802,7 +802,7 @@ Item {
                 width: root.memoryStats.totalBytes > 0
                   ? memoryBar.width * modelData.barBytes / root.memoryStats.totalBytes : 0
                 height: memoryBar.height
-                color: root.colorForSource(modelData.key)
+                color: "transparent"
                 HoverHandler { id: segmentHover }
                 PanelToolTip {
                   visible: segmentHover.hovered
@@ -816,7 +816,7 @@ Item {
               width: root.memoryStats.totalBytes > 0
                 ? memoryBar.width * root.memoryStats.otherBytes / root.memoryStats.totalBytes : 0
               height: memoryBar.height
-              color: root.otherMemoryColor
+              color: "transparent"
               HoverHandler { id: otherHover }
               PanelToolTip {
                 visible: otherHover.hovered
@@ -828,98 +828,13 @@ Item {
               width: root.memoryStats.totalBytes > 0
                 ? memoryBar.width * root.memoryStats.availableBytes / root.memoryStats.totalBytes : 0
               height: memoryBar.height
-              color: root.freeMemoryColor
+              color: "transparent"
               HoverHandler { id: freeHover }
               PanelToolTip {
                 visible: freeHover.hovered
                 text: "Free / available · " + RadarModel.formatMemory(root.memoryStats.availableBytes)
               }
             }
-          }
-        }
-
-        RowLayout {
-          visible: root.memoryExpanded && !root.compactMemory
-          Layout.fillWidth: true
-          spacing: Style.space(7)
-          Rectangle {
-            Layout.preferredWidth: Style.space(5); Layout.preferredHeight: Style.space(5)
-            radius: width / 2; color: Color.accent
-          }
-          Text {
-            textFormat: Text.PlainText
-            text: "Servers " + (root.memoryStats.measured
-              ? RadarModel.formatMemory(root.memoryStats.serverBytes) : "—")
-            color: root.dim
-            font.family: Style.font.family
-            font.pixelSize: Style.font.caption
-          }
-          Rectangle {
-            Layout.preferredWidth: Style.space(5); Layout.preferredHeight: Style.space(5)
-            radius: width / 2; color: root.otherMemoryColor
-          }
-          Text {
-            textFormat: Text.PlainText
-            text: (root.memoryStats.unmeasured ? "Other + unknown " : "Other apps ")
-              + RadarModel.formatMemory(root.memoryStats.otherBytes)
-            color: root.dim
-            font.family: Style.font.family
-            font.pixelSize: Style.font.caption
-          }
-          Rectangle {
-            Layout.preferredWidth: Style.space(5); Layout.preferredHeight: Style.space(5)
-            radius: width / 2; color: root.freeMemoryColor
-          }
-          Text {
-            textFormat: Text.PlainText
-            text: "Free " + RadarModel.formatMemory(root.memoryStats.availableBytes)
-            color: root.dim
-            font.family: Style.font.family
-            font.pixelSize: Style.font.caption
-          }
-          Item { Layout.fillWidth: true }
-        }
-
-        Flow {
-          id: sourceLabels
-          visible: root.memoryExpanded && !root.compactMemory && root.memoryStats.sources.length > 0
-          Layout.fillWidth: true
-          Layout.preferredHeight: childrenRect.height
-          spacing: Style.space(6)
-
-          Repeater {
-            model: root.memoryStats.sources.slice(0, 8)
-            Row {
-              id: sourceLabel
-              required property var modelData
-              required property int index
-              objectName: "memorySourceChip"
-              spacing: Style.space(3)
-              Rectangle {
-                anchors.verticalCenter: parent.verticalCenter
-                width: Style.space(5)
-                height: Style.space(5)
-                radius: width / 2
-                color: root.colorForSource(sourceLabel.modelData.key)
-              }
-              Text {
-                textFormat: Text.PlainText
-                width: Math.min(implicitWidth, Style.space(95))
-                text: root.labelForSource(sourceLabel.modelData)
-                color: root.dim
-                font.family: Style.font.family
-                font.pixelSize: Style.font.caption
-                elide: Text.ElideRight
-              }
-            }
-          }
-          Text {
-            visible: root.memoryStats.sources.length > 8
-            textFormat: Text.PlainText
-            text: "+" + (root.memoryStats.sources.length - 8) + " more"
-            color: root.dim
-            font.family: Style.font.family
-            font.pixelSize: Style.font.caption
           }
         }
       }
