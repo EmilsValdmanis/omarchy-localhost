@@ -133,7 +133,9 @@ background scans retain caching.
 RAM readings use resident memory for native listener processes and Docker's
 container memory usage for published services. The total counts a shared
 process or container once even if it serves multiple ports. Unavailable
-readings are shown as a dash and excluded from the total. RAM sampling is
+readings are shown as a dash and excluded from the total. Failed or missing
+samples clear that source's previous reading and sparkline; the other sampler's
+readings remain available. RAM sampling is
 independent of discovery: native/system RAM runs every two seconds while open
 and 15 seconds while closed; Docker RAM runs every eight seconds while open
 and 30 seconds while closed. Opening the panel, discovering a new source, and

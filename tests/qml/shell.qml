@@ -549,6 +549,64 @@ ShellRoot {
         equal(service.resourceByKey["docker:abc123def456"], undefined)
       }
 
+      function test_failed_and_partial_ram_samples_invalidate_only_their_source() {
+        var service = createTemporaryObject(serviceComponent, tests, { includeDocker: true })
+        findChild(service, "nativeDiscovery").readyContexts = [{ scheme: "http", context: {
+          listener: { pid: 410, port: 3000, process: "node", addresses: ["127.0.0.1"] },
+          process: { cwd: "/work", startTime: 100 }, framework: { name: "Node", id: "node" }
+        } }]
+        findChild(service, "dockerDiscovery").readyContexts = ["abc123def456", "def456abc123"].map(function(id, index) {
+          return { scheme: "http", context: {
+            source: "docker", containerId: id,
+            listener: { port: 8080 + index, process: "docker", addresses: ["0.0.0.0"] },
+            process: { cwd: "" }, framework: { name: "Docker", id: "docker" }
+          } }
+        })
+        service.publishServers()
+        var nativeSample = JSON.stringify({ ok: true, processes: [
+          { pid: 410, uid: service.currentUid, startTime: 100, memoryBytes: 1048576 }
+        ], systemMemory: { totalBytes: 10000000, availableBytes: 5000000 } })
+        var dockerSample = JSON.stringify({ ok: true, containers: { abc123def456: 2097152, def456abc123: 3145728 } })
+        service.finishResourceSample(nativeSample, false, 0)
+        service.finishResourceSample(dockerSample, true, 0)
+
+        service.finishResourceSample(JSON.stringify({ ok: true, containers: { abc123def456: 4194304 } }), true, 0)
+        equal(service.servers.get(1).memoryBytes, 4194304, "partial samples retain successful readings")
+        equal(service.servers.get(2).memoryBytes, -1, "missing container readings become unavailable")
+        equal(RadarModel.parseMemoryHistory(service.servers.get(2).memoryHistoryJson).length, 0)
+        var rows = [service.servers.get(0), service.servers.get(1), service.servers.get(2)]
+        equal(RadarModel.memoryBreakdown(rows, service.systemMemory).serverBytes, 5242880,
+          "unavailable readings are excluded from the RAM total")
+
+        var failures = [
+          { raw: JSON.stringify({ ok: true, containers: {} }), code: 0 }, // Docker stats timeout.
+          { raw: "invalid JSON", code: 0 },
+          { raw: dockerSample, code: 1 }
+        ]
+        for (var i = 0; i < failures.length; i++) {
+          service.finishResourceSample(dockerSample, true, 0)
+          service.finishResourceSample(failures[i].raw, true, failures[i].code)
+          equal(service.servers.get(1).memoryBytes, -1, "failed Docker samples invalidate previous readings")
+          equal(service.servers.get(2).memoryBytes, -1)
+          equal(service.servers.get(0).memoryBytes, 1048576, "Docker failures preserve native readings")
+          equal(service.systemMemory.totalBytes, 10000000, "Docker failures preserve system totals")
+          equal(RadarModel.parseMemoryHistory(service.servers.get(1).memoryHistoryJson).length, 0)
+        }
+
+        service.finishResourceSample(dockerSample, true, 0)
+        equal(service.servers.get(1).memoryBytes, 2097152, "a later successful sample recovers")
+        equal(RadarModel.parseMemoryHistory(service.servers.get(1).memoryHistoryJson).length, 1)
+        service.finishResourceSample(nativeSample, false, 1)
+        equal(service.servers.get(0).memoryBytes, -1, "native failures also invalidate previous readings")
+        equal(service.systemMemory.totalBytes, -1)
+        equal(service.servers.get(1).memoryBytes, 2097152, "native failures preserve Docker readings")
+        check(service.resourceWarning !== "")
+        service.finishResourceSample(nativeSample, false, 0)
+        equal(service.servers.get(0).memoryBytes, 1048576)
+        equal(service.systemMemory.totalBytes, 10000000)
+        equal(service.resourceWarning, "")
+      }
+
       function test_qr_canvas_pixels_and_replacement() {
         var qr = createTemporaryObject(qrComponent, tests, { x: 600, rows: ["101", "010", "111"], moduleSize: 8 })
         tryCompare(qr, "available", true)

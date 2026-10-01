@@ -151,20 +151,32 @@ Item {
   function finishResourceSample(raw, docker, exitCode) {
     if (docker && !includeDocker) return
     var parsed = RadarModel.parseResourcePayload(raw, currentUid)
-    if (exitCode !== 0 || !parsed.ok) {
-      if (!docker) resourceWarning = "RAM sampling is unavailable"
-    } else {
-      if (!docker) { systemMemory = parsed.systemMemory; resourceWarning = "" }
-      var nextResources = Object.assign({}, resourceByKey)
-      var nextHistory = Object.assign({}, memoryHistoryByKey)
+    var successful = exitCode === 0 && parsed.ok
+    var prefix = docker ? "docker:" : "process:"
+    var nextResources = Object.assign({}, resourceByKey)
+    var nextHistory = Object.assign({}, memoryHistoryByKey)
+    // Each sampler refreshes only its own source. Missing/failed readings must
+    // stop contributing to totals without erasing the other sampler's results.
+    for (var key in nextResources) {
+      if (key.indexOf(prefix) === 0 && (!successful || parsed.memory[key] === undefined)) {
+        nextResources[key] = -1
+        nextHistory[key] = []
+      }
+    }
+    if (!docker) {
+      systemMemory = successful ? parsed.systemMemory : { totalBytes: -1, availableBytes: -1 }
+      resourceWarning = successful ? "" : "RAM sampling is unavailable"
+    }
+    if (successful) {
       for (var key in parsed.memory) {
+        if (key.indexOf(prefix) !== 0) continue
         var bytes = parsed.memory[key]
         nextResources[key] = bytes
         nextHistory[key] = bytes < 0 ? [] : (nextHistory[key] || []).concat([bytes]).slice(-30)
       }
-      resourceByKey = nextResources
-      memoryHistoryByKey = nextHistory
     }
+    resourceByKey = nextResources
+    memoryHistoryByKey = nextHistory
     publishServers()
     if (docker ? dockerResourceRescanQueued : resourceRescanQueued) {
       if (docker) dockerResourceRescanQueued = false
