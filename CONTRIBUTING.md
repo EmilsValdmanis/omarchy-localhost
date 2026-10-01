@@ -29,8 +29,8 @@ The UI suite sends native wheel and keyboard events, checks scrolling after
 model changes, verifies small popups and font scaling, tests QR pixels and
 process cancellation, grouping and shared actions, and discovers/stops a
 disposable process with two loopback HTTP listeners. It also verifies local/LAN
-copy shortcuts, collapsible RAM details, stable colors, independent Docker
-latency, and RAM sampling history. Docker is stubbed in the isolated runner;
+copy shortcuts, collapsible projects and RAM details, stable colors, independent
+Docker latency, and RAM sampling history. Docker is stubbed in the isolated runner;
 tests do not connect to your Docker daemon. Model and helper tests
 cover framework arguments, port selection, repository/workspace metadata, and
 bounded restart logs after the action helper has exited.

@@ -31,17 +31,24 @@ mkdir -p "$target_dir"
 touch "$marker_path"
 
 sync_plugin() {
-  rsync -a --delete --delete-excluded \
+  sync_changes="$(rsync -a --delete --delete-excluded --out-format='%n' \
     --filter='protect /.omarchy-localhost-dev' \
     --exclude '/.*' \
     --exclude '__pycache__/' \
     --exclude '*.py[cod]' \
-    "$repo_dir/" "$target_dir/"
+    "$repo_dir/" "$target_dir/")"
+}
+
+restart_shell() {
+  # rescanPlugins recreates components at the same URLs. On shells that do
+  # not clear the QML engine's component cache, that loads the previous code.
+  omarchy restart shell || fail "could not restart omarchy-shell; the copied plugin may not be live"
 }
 
 sync_plugin
-omarchy-shell shell rescanPlugins >/dev/null ||
+omarchy-shell shell ping >/dev/null ||
   fail "could not reach omarchy-shell; make sure the Omarchy shell is running"
+restart_shell
 
 plugin_enabled=""
 for _attempt in {1..40}; do
@@ -60,14 +67,26 @@ fi
 
 echo "Watching $repo_dir"
 echo "Live plugin: $target_dir"
-echo "Save a file to sync it and hot-reload Localhost. Press Ctrl+C to stop."
+echo "Save a file to sync it. QML, JavaScript, and manifest changes restart the shell to clear cached code."
+echo "Press Ctrl+C to stop."
 
 while IFS= read -r changed_path; do
   relative_path="${changed_path#"$repo_dir"/}"
   case "/$relative_path" in
     */.*|*/__pycache__/*|*/__pycache__) continue ;;
   esac
+  # rsync already includes every saved change; wait for a burst to finish so
+  # saving multiple files causes one restart rather than one per event.
+  while IFS= read -r -t 0.2 _changed_path; do :; done
   sync_plugin
+  while IFS= read -r synced_path; do
+    case "$synced_path" in
+      manifest.json|*.qml|*.js)
+        restart_shell
+        break
+        ;;
+    esac
+  done <<< "$sync_changes"
   echo "Synced $relative_path"
 done < <(
   inotifywait -r -q -m \

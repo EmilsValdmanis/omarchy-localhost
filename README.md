@@ -11,12 +11,12 @@ for version history and release notes.
 
 > `pnpm dev` → Localhost appears → click **QR** → scan with your phone
 
-![Localhost for Omarchy in Everforest: compact RAM summary, memory trends, project groups, and explicit LAN sharing](preview.png)
+![Localhost for Omarchy in Everforest: compact RAM breakdown, memory trends, collapsible project groups, and explicit LAN sharing](preview.png)
 
 ## Features
 
 - Automatic process, framework, Docker, and Compose discovery
-- Repository and monorepo grouping with package-aware framework detection
+- Collapsible repository and monorepo groups with package-aware framework detection
 - Localhost and LAN URLs with bind-address-aware availability
 - Open locally, copy local or LAN URLs, QR, terminal, editor, restart, and stop actions
 - Search and complete arrow-key or Vim-style navigation
@@ -24,18 +24,22 @@ for version history and release notes.
 - Discovery diagnostics, port filters, and LAN-rule management
 - Process identity verification before stop or restart
 - Native Omarchy styling with no service to install, database, or account
-- Compact RAM summary with expandable system and server details
+- Always-visible compact system and server RAM breakdown
 - Live RAM sparkline and usage number for each server
 - Independent native and Docker discovery, with slower RAM sampling while closed
 - Restart logs capped at 1 MiB each, keeping recent output
 
 Servers in the same repository or workspace appear together, with package paths
-under each name. Use the folder button to switch to a flat list sorted by port.
+under each name. Click a project header to collapse or expand its servers; its
+count stays visible when collapsed. Fold choices survive scans, closing the
+panel, and switching to the flat list for the current shell session. Search and
+port filters reveal matching servers, then restore your folds when cleared.
+Use the folder button to switch to a flat list sorted by port.
 Click a row to select it, then use the shared action toolbar. Moving the pointer
 over other rows keeps your selection. **Open** and clicking a port use the local
 URL. **Copy local** copies that same URL; **Copy LAN** and **QR** explicitly
-share the network URL. Click **Details** beside the RAM summary to expand its
-breakdown. Server colors stay tied to process or container identity when the
+share the network URL. The RAM breakdown stays visible; hover its segments
+for usage details. Server colors stay tied to process or container identity when the
 list changes; ports served by the same process share a color.
 
 LAN-ready servers listen on `0.0.0.0`, `::`, or a LAN interface. Servers bound
@@ -65,16 +69,33 @@ optional and only runs when Docker is available.
 | Key                                  | Action                                                 |
 | ------------------------------------ | ------------------------------------------------------ |
 | `/` or click search                  | Search by project, framework, port, path, or container |
-| `up/down`, `j/k`, `ctrl+p/ctrl+n`    | Select a server                                        |
-| `left/right`, `h/l`                  | Select an action in the footer                         |
-| `enter`                              | Run the selected action                                |
+| `up/down`, `j/k`, `ctrl+p/ctrl+n`    | Select a visible server or project header              |
+| `left/right`, `h/l`                  | Select a footer action; on a header, collapse/expand   |
+| `enter`                              | Run the selected action, or toggle a project header   |
+| `space` on a project header          | Collapse or expand the project                        |
+| `ctrl+left/right`                    | Collapse/expand the selected server's project          |
+| `ctrl+shift+left/right`              | Collapse/expand all projects                           |
+| `ctrl+up/down`, `tab/shift+tab`      | Jump to the previous/next project header               |
+| `home/end`                           | Select the first/last visible entry                    |
+| `zc/zo`, `za`                        | Collapse/expand or toggle the current project (Vim)    |
+| `zM/zR`                              | Collapse/expand all projects (Vim)                     |
+| `J/K`                                | Jump to the next/previous project header (Vim)         |
+| `gg/G`                               | Select the first/last visible entry (Vim)              |
 | `ctrl+c`                             | Copy the selected local URL                            |
 | `ctrl+shift+c`                       | Copy the selected LAN URL, when available              |
-| `ctrl+m`                             | Expand or collapse RAM details                         |
 | `ctrl+r`                             | Refresh discovery                                      |
 | `alt+r`                              | Restart the selected server                            |
 | `delete`, or `ctrl+k` with no filter | Confirm stopping the selected server                   |
 | `esc`                                | Leave search, clear the filter, then close             |
+
+On an expanded header, `right` or `l` moves into its first server. Collapsing a
+selected server's project moves selection to its header; hidden servers are
+skipped by navigation and server actions are disabled on headers. Folding,
+Tab, and Home/End shortcuts leave text editing alone while search has focus.
+Use `ctrl+up/down` to jump between projects from search.
+Vim commands also work from a selected server: `zc` folds its project and
+selects the header. Uppercase commands use Shift. Escape cancels a pending
+`z` or `g` prefix, and Vim commands do not intercept search input.
 
 ### Optional global shortcut
 
@@ -204,6 +225,7 @@ components live in `qml/`:
 | `qml/RadarDiscovery.qml`                                            | Independently discover and probe native or Docker servers |
 | `qml/RadarModel.js`                                                 | Parse, normalize, filter, and summarize server data    |
 | `qml/ServerPanel.qml`, `qml/ServerRow.qml`, `qml/ServerActions.qml` | Render the server list and controls                    |
+| `qml/ProjectHeader.qml`, `qml/ProjectList.js`                       | Fold project groups and navigate visible entries       |
 | `qml/MemorySparkline.qml`, `qml/PanelScrollArea.qml`                | Shared panel pieces                                    |
 | `qml/QrService.qml`, `qml/QrContent.qml`, `qml/QrCode.qml`          | QR state and display                                   |
 | `localhost_helper.py`, `project_metadata.py`                        | Read Linux and Docker metadata; verify process actions |
@@ -222,8 +244,11 @@ Run the development watcher from the repository root:
 
 It validates the plugin, creates a guarded development install at
 `~/.config/omarchy/plugins/emils.localhost`, enables it when necessary, and
-syncs every saved change into that directory. Omarchy then hot-reloads the
-plugin automatically, so QML changes appear immediately. Press `ctrl+c` to
+syncs every saved change into that directory. It restarts the Omarchy shell
+on startup and after QML, JavaScript, or manifest changes to clear cached
+components; the bar briefly disappears during each restart. Saves are batched
+so a burst of changes causes one restart. Python helper changes take effect
+on the next scan. Press `ctrl+c` to
 stop watching. The development install remains available for the next run;
 remove it with `omarchy plugin remove emils.localhost` when it is no longer
 needed.
@@ -231,6 +256,12 @@ needed.
 `./dev` will not overwrite a normal Git-installed copy. Move or remove that
 copy first if you want to replace it with the development install. Keep a moved
 copy outside the active plugin path if you plan to restore it later.
+
+If the installed files say `0.7.0` but the bar still shows the previous UI,
+run `omarchy restart shell`. A successful `omarchy-shell shell rescanPlugins`
+call or a running watcher alone does not prove that new QML code is live:
+some shell versions recreate the widget using cached components at the same
+file paths. Checking only the installed `manifest.json` can miss this.
 
 Run the checks before opening a pull request:
 
