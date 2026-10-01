@@ -339,7 +339,9 @@ def validate_restart_command(
             path = Path(cwd) / entry_point
             if entry_point.startswith("-") or not path.is_file() or not os.access(path, os.R_OK):
                 raise LocalhostError("Restart unavailable: the runtime entry point cannot be verified")
-    return [executable, *argv[1:]]
+    # Keep the verified launch path: dereferencing a virtualenv's interpreter
+    # symlink would switch Python to the system environment and lose its packages.
+    return [resolved, *argv[1:]]
 
 
 def listening_endpoints(directory: Path) -> set[tuple[str, int]]:

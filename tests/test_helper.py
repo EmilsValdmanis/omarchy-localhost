@@ -7,6 +7,7 @@ import sys
 import tempfile
 import time
 import unittest
+import venv
 from pathlib import Path
 from unittest import mock
 
@@ -14,6 +15,19 @@ import localhost_helper as helper
 
 
 class ProcessInspectionTests(unittest.TestCase):
+    def test_command_recovery_preserves_verified_interpreter_symlinks(self):
+        with tempfile.TemporaryDirectory() as directory:
+            interpreter = Path(directory) / "python"
+            interpreter.symlink_to(sys.executable)
+            for command, search_path in ((str(interpreter), os.defpath), ("./python", os.defpath), ("python", ".")):
+                with self.subTest(command=command):
+                    recovered = helper.validate_restart_command(
+                        [command, "-c", "pass"], {"PATH": search_path}, directory, os.path.realpath(sys.executable)
+                    )
+                    self.assertEqual(Path(recovered[0]).parent, Path(directory))
+                    self.assertTrue(Path(recovered[0]).is_symlink())
+                    self.assertEqual(recovered[1:], ["-c", "pass"])
+
     def test_inspects_owned_process_metadata_and_identity(self):
         process = helper.inspect_process(os.getpid(), os.geteuid())
 
@@ -103,7 +117,7 @@ class ProcessActionTests(unittest.TestCase):
         self.restarted = None
         self.state_directory = tempfile.TemporaryDirectory()
 
-    def start_http_server(self):
+    def start_http_server(self, *, interpreter=sys.executable, prelude=""):
         self.child.kill()
         self.child.wait(timeout=2)
         with socket.socket() as reservation:
@@ -111,6 +125,7 @@ class ProcessActionTests(unittest.TestCase):
             self.port = reservation.getsockname()[1]
         self.script = Path(self.state_directory.name) / "server.py"
         self.script.write_text(
+            prelude +
             "import sys\nfrom http.server import HTTPServer, BaseHTTPRequestHandler\n"
             "class Handler(BaseHTTPRequestHandler):\n"
             " def do_HEAD(self):\n  self.send_response(404)\n  self.end_headers()\n"
@@ -118,7 +133,7 @@ class ProcessActionTests(unittest.TestCase):
             "print('ready', flush=True)\nserver.serve_forever()\n"
         )
         self.child = subprocess.Popen(
-            [sys.executable, str(self.script), str(self.port)],
+            [interpreter, str(self.script), str(self.port)],
             stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
             text=True,
         )
@@ -167,6 +182,25 @@ class ProcessActionTests(unittest.TestCase):
         self.assertEqual(len(list(state_root.glob("restart-*.log"))), helper.MAX_RESTART_LOGS)
         self.assertFalse((state_root / f"restart-{0:019d}.log").exists())
         self.assertEqual(log_path.stat().st_mode & 0o777, 0o600)
+        self.assertIn(self.port, helper.listening_ports(Path(f"/proc/{self.restarted.pid}")))
+
+    def test_restart_preserves_virtualenv_dependencies(self):
+        environment = Path(self.state_directory.name) / "venv"
+        venv.EnvBuilder(with_pip=False, symlinks=True).create(environment)
+        interpreter = environment / "bin" / "python"
+        site_packages = Path(subprocess.check_output(
+            [str(interpreter), "-c", 'import sysconfig; print(sysconfig.get_path("purelib"))'], text=True
+        ).strip())
+        (site_packages / "restart_fixture_dependency.py").write_text("VALUE = 42\n")
+        self.start_http_server(interpreter=str(interpreter), prelude="import restart_fixture_dependency\n")
+        self.assertTrue(helper.inspect_process(self.child.pid, os.geteuid())["restartAvailable"])
+
+        with mock.patch.dict(os.environ, {"XDG_STATE_HOME": self.state_directory.name}):
+            self.restarted, _log = helper.restart_process(self.child.pid, self.start_time, self.url)
+
+        self.child.wait(timeout=2)
+        self.assertIsNone(self.restarted.poll())
+        self.assertEqual(helper.read_null_separated(Path(f"/proc/{self.restarted.pid}/cmdline"))[0], str(interpreter))
         self.assertIn(self.port, helper.listening_ports(Path(f"/proc/{self.restarted.pid}")))
 
     def test_log_directory_failure_preserves_original_server(self):
