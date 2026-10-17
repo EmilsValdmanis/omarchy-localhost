@@ -40,7 +40,12 @@ jobs:
     timeout-minutes: 10
     steps:
       - name: Install Quickshell and test dependencies
-        run: pacman -Syu --noconfirm git python quickshell qt6-declarative iproute2 curl qrencode ttf-jetbrains-mono-nerd
+        # Omarchy v4.0.2 uses a Color singleton that Qt 6.12 shadows. Keep the
+        # supported Qt 6.11/Quickshell runtime reproducible instead of rolling
+        # it forward independently of the pinned shell components below.
+        run: |
+          printf '%s\n' 'Server = https://archive.archlinux.org/repos/2026/10/01/$repo/os/$arch' > /etc/pacman.d/mirrorlist
+          pacman -Syyuu --noconfirm git python quickshell qt6-declarative iproute2 curl qrencode ttf-jetbrains-mono-nerd
 
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
