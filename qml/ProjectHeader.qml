@@ -12,17 +12,19 @@ CursorSurface {
   required property int count
   property bool collapsed: false
   property bool selected: false
+  property bool stopSelected: false
   property bool actionBusy: false
   property bool stopping: false
 
   signal toggled()
   signal focused()
   signal stopRequested()
+  signal stopFocused()
   signal navigationKey(var event)
 
   objectName: "projectHeader"
   implicitHeight: Style.space(30)
-  hasCursor: selected
+  hasCursor: selected && !stopSelected
   activeFocusOnTab: true
   onActiveFocusChanged: if (activeFocus) focused()
   Keys.onPressed: function(event) { header.navigationKey(event) }
@@ -33,7 +35,7 @@ CursorSurface {
   Accessible.checkable: true
   Accessible.checked: !collapsed
   Accessible.focusable: true
-  Accessible.focused: selected
+  Accessible.focused: selected && !stopSelected
   Accessible.onPressAction: toggled()
 
   HoverHandler { id: hover; cursorShape: Qt.PointingHandCursor }
@@ -41,7 +43,7 @@ CursorSurface {
   PanelToolTip {
     visible: hover.hovered && !stopHover.hovered
     text: (header.collapsed ? "Expand" : "Collapse") + " " + header.projectRoot
-      + " · Enter / Space · h/l fold · J/K switch project"
+      + " · Enter / Space fold · → / l actions · zc/zo fold · J/K switch project"
   }
 
   RowLayout {
@@ -75,12 +77,17 @@ CursorSurface {
       foreground: Color.urgent
       hoverColor: Color.urgent
       enabled: !header.actionBusy
+      hasCursor: header.selected && header.stopSelected
+      bordered: hasCursor
       focusable: true
+      onActiveFocusChanged: if (activeFocus) header.stopFocused()
       tooltipText: header.stopping ? "Stopping all servers in " + header.projectRoot
         : "Stop all servers in " + header.projectRoot
           + " in one click, including folded or filtered servers"
+          + " · → / l then Enter on the project header"
       Accessible.role: Accessible.Button
       Accessible.name: (header.stopping ? "Stopping all servers in " : "Stop all servers in ") + header.name
+      Accessible.focused: header.selected && header.stopSelected
       Accessible.onPressAction: if (enabled) header.stopRequested()
       onClicked: header.stopRequested()
       HoverHandler { id: stopHover }

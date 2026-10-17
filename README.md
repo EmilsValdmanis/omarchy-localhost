@@ -79,9 +79,9 @@ optional and only runs when Docker is available.
 | ------------------------------------ | ------------------------------------------------------ |
 | `/` or click search                  | Search by project, framework, port, path, or container |
 | `up/down`, `j/k`, `ctrl+p/ctrl+n`    | Select a visible server or project header              |
-| `left/right`, `h/l`                  | Select a footer action; on a header, collapse/expand   |
+| `left/right`, `h/l`                  | Select an action; on a header, reach **Stop all**      |
 | `enter`                              | Run the selected action, or toggle a project header   |
-| `space` on a project header          | Collapse or expand the project                        |
+| `space` on a project header          | Toggle folding, or run **Stop all** when highlighted  |
 | `ctrl+left/right`                    | Collapse/expand the selected server's project          |
 | `ctrl+shift+left/right`              | Collapse/expand all projects                           |
 | `ctrl+up/down`, `tab/shift+tab`      | Jump to the previous/next project header               |
@@ -97,10 +97,15 @@ optional and only runs when Docker is available.
 | `delete`, or `ctrl+k` with no filter | Confirm stopping the selected server                   |
 | `esc`                                | Leave search, clear the filter, then close             |
 
-On an expanded header, `right` or `l` moves into its first server. Collapsing a
-selected server's project moves selection to its header; hidden servers are
-skipped by navigation and server actions are disabled on headers. Folding,
-Tab, and Home/End shortcuts leave text editing alone while search has focus.
+Select a project header with `up/down` or `j/k`, then press `right` or `l` to
+highlight its **Stop all** icon. Press `enter` or `space` to stop that entire
+project, including folded or filtered servers. `left` / `h` or `esc` returns
+to the header without stopping. Another `right` / `l` enters the first server,
+expanding the project if needed. Busy stop actions are skipped by navigation.
+Use `enter` or `space` on the header itself, `zc/zo`, or `ctrl+left/right` to
+fold projects. Collapsing a selected server's project moves selection to its
+header; hidden servers are skipped and server actions are disabled on headers.
+Folding, Tab, and Home/End shortcuts leave text editing alone while search has focus.
 Use `ctrl+up/down` to jump between projects from search.
 Vim commands also work from a selected server: `zc` folds its project and
 selects the header. Uppercase commands use Shift. Escape cancels a pending
