@@ -39,7 +39,7 @@ CursorSurface {
   HoverHandler { id: hover; cursorShape: Qt.PointingHandCursor }
   TapHandler { onTapped: header.toggled() }
   PanelToolTip {
-    visible: hover.hovered
+    visible: hover.hovered && !stopHover.hovered
     text: (header.collapsed ? "Expand" : "Collapse") + " " + header.projectRoot
       + " · Enter / Space · h/l fold · J/K switch project"
   }
@@ -77,23 +77,21 @@ CursorSurface {
       font.family: Style.font.family
       font.pixelSize: Style.font.caption
     }
-    Button {
+    PanelActionButton {
       objectName: "projectStopAll"
-      text: header.stopping ? "Stopping…" : "Stop all"
+      iconText: header.stopping ? "\uf251" : "\uf04d"
       foreground: Color.urgent
-      accent: Color.urgent
-      fontSize: Style.font.caption
-      horizontalPadding: Style.space(6)
-      verticalPadding: Style.space(2)
+      hoverColor: Color.urgent
       enabled: !header.actionBusy
       focusable: true
-      opacity: enabled ? 1 : 0.5
-      tooltipText: "Stop all servers in " + header.projectRoot
-        + " in one click, including folded or filtered servers"
+      tooltipText: header.stopping ? "Stopping all servers in " + header.projectRoot
+        : "Stop all servers in " + header.projectRoot
+          + " in one click, including folded or filtered servers"
       Accessible.role: Accessible.Button
-      Accessible.name: "Stop all servers in " + header.name
+      Accessible.name: (header.stopping ? "Stopping all servers in " : "Stop all servers in ") + header.name
       Accessible.onPressAction: if (enabled) header.stopRequested()
       onClicked: header.stopRequested()
+      HoverHandler { id: stopHover }
     }
   }
 }

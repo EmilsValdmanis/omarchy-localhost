@@ -431,6 +431,7 @@ ShellRoot {
         check(header !== null)
         var button = findChild(header, "projectStopAll")
         check(button !== null && button.enabled)
+        equal(button.iconText, "\uf04d")
         mouseClick(button, button.width / 2, button.height / 2)
         equal(projectStopSpy.count, 1)
         equal(projectStopSpy.signalArguments[0][0], "/work/atlas")
@@ -439,7 +440,7 @@ ShellRoot {
         panel.actionBusy = true
         panel.stoppingProjectRoot = "/work/atlas"
         equal(button.enabled, false)
-        equal(button.text, "Stopping…")
+        equal(button.iconText, "\uf251")
         mouseClick(button, button.width / 2, button.height / 2)
         equal(projectStopSpy.count, 1, "a busy stop cannot be started twice")
         panel.actionBusy = false
