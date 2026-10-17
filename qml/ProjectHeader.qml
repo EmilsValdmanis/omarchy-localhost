@@ -42,8 +42,7 @@ CursorSurface {
   TapHandler { onTapped: header.toggled() }
   PanelToolTip {
     visible: hover.hovered && !stopHover.hovered
-    text: (header.collapsed ? "Expand" : "Collapse") + " " + header.projectRoot
-      + " · Enter / Space fold · → / l actions · zc/zo fold · J/K switch project"
+    text: header.collapsed ? "Expand project" : "Collapse project"
   }
 
   RowLayout {
@@ -81,10 +80,7 @@ CursorSurface {
       bordered: hasCursor
       focusable: true
       onActiveFocusChanged: if (activeFocus) header.stopFocused()
-      tooltipText: header.stopping ? "Stopping all servers in " + header.projectRoot
-        : "Stop all servers in " + header.projectRoot
-          + " in one click, including folded or filtered servers"
-          + " · → / l then Enter on the project header"
+      tooltipText: header.stopping ? "Stopping project servers…" : "Stop all servers in this project"
       Accessible.role: Accessible.Button
       Accessible.name: (header.stopping ? "Stopping all servers in " : "Stop all servers in ") + header.name
       Accessible.focused: header.selected && header.stopSelected
