@@ -37,6 +37,8 @@ ShellRoot {
 
       SignalSpy { id: openSpy; signalName: "openRequested" }
       SignalSpy { id: stopSpy; signalName: "stopRequested" }
+      SignalSpy { id: projectStopSpy; signalName: "projectStopRequested" }
+      SignalSpy { id: actionSpy; signalName: "actionFinished" }
       SignalSpy { id: copySpy; signalName: "copyRequested" }
       SignalSpy { id: copyLanSpy; signalName: "copyLanRequested" }
 
@@ -85,6 +87,8 @@ ShellRoot {
         stopSpy.target = panel
         openSpy.clear()
         stopSpy.clear()
+        projectStopSpy.target = panel
+        projectStopSpy.clear()
         copySpy.target = panel
         copyLanSpy.target = panel
         copySpy.clear()
@@ -101,6 +105,9 @@ ShellRoot {
           qtest_results.failCount === failuresBefore ? "PASS" : "FAIL")
         openSpy.target = null
         stopSpy.target = null
+        projectStopSpy.target = null
+        actionSpy.target = null
+        actionSpy.clear()
         copySpy.target = null
         copyLanSpy.target = null
       }
@@ -414,6 +421,40 @@ ShellRoot {
         panel.revision++
         tryCompare(list, "count", count + 3)
         settled()
+      }
+
+      function test_project_stop_all_is_one_click_and_does_not_fold() {
+        groupedFixtures(9)
+        panel.setProjectCollapsed("/work/atlas", true)
+        settled()
+        var header = findChild(list.itemAtIndex(0), "projectHeader")
+        check(header !== null)
+        var button = findChild(header, "projectStopAll")
+        check(button !== null && button.enabled)
+        mouseClick(button, button.width / 2, button.height / 2)
+        equal(projectStopSpy.count, 1)
+        equal(projectStopSpy.signalArguments[0][0], "/work/atlas")
+        equal(panel.pendingAction, "", "one click needs no per-server confirmation")
+        equal(panel.isProjectCollapsed("/work/atlas"), true, "stop does not toggle folding")
+        panel.actionBusy = true
+        panel.stoppingProjectRoot = "/work/atlas"
+        equal(button.enabled, false)
+        equal(button.text, "Stopping…")
+        mouseClick(button, button.width / 2, button.height / 2)
+        equal(projectStopSpy.count, 1, "a busy stop cannot be started twice")
+        panel.actionBusy = false
+        panel.stoppingProjectRoot = ""
+        panel.query = "Project 3"
+        tryCompare(list, "count", 2)
+        settled()
+        header = findChild(list.itemAtIndex(0), "projectHeader")
+        button = findChild(header, "projectStopAll")
+        mouseClick(button, button.width / 2, button.height / 2)
+        equal(projectStopSpy.count, 2)
+        equal(projectStopSpy.signalArguments[1][0], "/work/atlas",
+          "filtering still requests the entire project")
+        check(button.mapToItem(panel, button.width, 0).x <= panel.width,
+          "stop fits inside the panel")
       }
 
       function test_project_keyboard_fold_and_jump() {
@@ -804,7 +845,27 @@ ShellRoot {
         service.refresh()
         tryVerify(function() { return detected() !== null }, 5000,
           "manual refresh discovers a ready server despite a cached failed probe")
-        service.stop(server)
+        // A stale first target must not prevent the real fixture from stopping.
+        // Two ports on that fixture must still produce only one stop action.
+        var stale = RadarModel.normalizeServer({ serverId: "stale", pid: 2147483647,
+          startTime: 1, projectRoot: server.projectRoot, localUrl: server.localUrl })
+        var other = RadarModel.normalizeServer({ serverId: "other-project", pid: 2147483646,
+          startTime: 1, projectRoot: "/unrelated", localUrl: server.localUrl })
+        var targets = [stale, server, Object.assign({}, server, { serverId: "second-port", port: secondPort }), other]
+        RadarModel.syncServerModel(service.servers, targets)
+        actionSpy.target = service
+        actionSpy.clear()
+        check(service.stopProject(server.projectRoot))
+        equal(service.actionBusy, true)
+        equal(service.stopProject(server.projectRoot), false, "a second batch cannot interrupt the first")
+        equal(service.runAction("stop", server), false, "individual actions cannot interrupt a batch")
+        tryCompare(service, "actionBusy", false, 10000)
+        equal(actionSpy.count, 3, "one failed stop, one successful stop, and one summary")
+        equal(actionSpy.signalArguments[0][1], false)
+        equal(actionSpy.signalArguments[1][1], true)
+        equal(actionSpy.signalArguments[2][0], "stop-project")
+        equal(actionSpy.signalArguments[2][1], false, "partial failures remain visible")
+        check(actionSpy.signalArguments[2][2].indexOf("Stopped 1/2") !== -1)
         tryVerify(function() { return detected() === null }, 10000, "verified stop removes the server")
         check(service.systemMemory.totalBytes > 0, "system RAM remains available with no servers")
       }

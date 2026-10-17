@@ -25,6 +25,12 @@ Item {
   property string actionError: ""
   property string actionOutput: ""
   property string actionServerId: ""
+  readonly property bool actionBusy: actionProcess.running || stoppingProjectRoot !== ""
+  property string stoppingProjectRoot: ""
+  property var projectStopQueue: []
+  property int projectStopTotal: 0
+  property int projectStopSucceeded: 0
+  property var projectStopErrors: []
   property var warnings: []
   property var dependencyWarnings: []
   property var diagnostics: []
@@ -186,8 +192,13 @@ Item {
   }
 
   function runAction(action, server) {
-    if (!server || actionProcess.running) return
-    if (action === "restart" && !RadarModel.actionEnabled(RadarModel.ACTIONS.restart, server)) return
+    if (!server || actionBusy) return false
+    if (action === "restart" && !RadarModel.actionEnabled(RadarModel.ACTIONS.restart, server)) return false
+    startAction(action, server)
+    return true
+  }
+
+  function startAction(action, server) {
     actionName = action
     actionError = ""
     actionOutput = ""
@@ -212,6 +223,38 @@ Item {
   function stop(server) { runAction("stop", server) }
   function forceStop(server) { runAction("force-stop", server) }
   function restart(server) { runAction("restart", server) }
+
+  function stopProject(projectRoot) {
+    if (actionBusy) return false
+    var rows = []
+    for (let index = 0; index < serverModel.count; index++) rows.push(serverModel.get(index))
+    var targets = RadarModel.projectStopTargets(rows, projectRoot)
+    if (!targets.length) return false
+    stoppingProjectRoot = projectRoot
+    projectStopQueue = targets
+    projectStopTotal = targets.length
+    projectStopSucceeded = 0
+    projectStopErrors = []
+    runNextProjectStop()
+    return true
+  }
+
+  function runNextProjectStop() {
+    if (projectStopQueue.length) {
+      let server = projectStopQueue[0]
+      projectStopQueue = projectStopQueue.slice(1)
+      startAction("stop", server)
+      return
+    }
+    var name = RadarModel.basename(stoppingProjectRoot)
+    var failed = projectStopErrors.length
+    var detail = "Stopped " + projectStopSucceeded + "/" + projectStopTotal
+      + " server processes or containers in " + name + "."
+    if (failed) detail += " " + failed + " failed: " + projectStopErrors[0]
+    stoppingProjectRoot = ""
+    actionFinished("stop-project", failed === 0, detail, "")
+    postActionScan.restart()
+  }
 
 
   onPanelActiveChanged: if (panelActive) sampleResources(true)
@@ -354,10 +397,18 @@ Item {
         root.actionOutput,
         root.actionError || (exitCode === 0 ? "Action completed" : "Server action failed"))
       var successful = exitCode === 0 && parsed.ok
-      root.actionFinished(action, successful, parsed.message, root.actionServerId)
+      var serverId = root.actionServerId
       root.actionName = ""
       root.actionServerId = ""
-      postActionScan.restart()
+      if (root.stoppingProjectRoot !== "") {
+        if (successful) root.projectStopSucceeded++
+        else root.projectStopErrors = root.projectStopErrors.concat([parsed.message])
+        root.actionFinished(action, successful, parsed.message, serverId)
+        Qt.callLater(root.runNextProjectStop)
+      } else {
+        root.actionFinished(action, successful, parsed.message, serverId)
+        postActionScan.restart()
+      }
     }
   }
 }

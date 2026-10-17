@@ -17,6 +17,7 @@ for version history and release notes.
 
 - Automatic process, framework, Docker, and Compose discovery
 - Collapsible repository and monorepo groups with package-aware framework detection
+- One-click **Stop all** for every server in a repository or monorepo
 - Localhost and LAN URLs with bind-address-aware availability
 - Open locally, copy local or LAN URLs, QR, terminal, editor, restart, and stop actions
 - Search and complete arrow-key or Vim-style navigation
@@ -35,6 +36,13 @@ count stays visible when collapsed. Fold choices survive scans, closing the
 panel, and switching to the flat list for the current shell session. Search and
 port filters reveal matching servers, then restore your folds when cleared.
 Use the folder button to switch to a flat list sorted by port.
+Click **Stop all** on a project header to gracefully stop all of that project's
+discovered server processes and Docker containers in one click. It includes
+folded servers and servers hidden by search or port filters. Shared processes
+and containers are stopped once, and other projects keep running. Actions run
+in sequence with the same identity checks as individual stops; a failure does
+not prevent the remaining servers from being stopped. The result reports any
+failures, and a process that refuses to stop can still be force-stopped individually.
 Click a row to select it, then use the shared action toolbar. Moving the pointer
 over other rows keeps your selection. **Open** and clicking a port use the local
 URL. **Copy local** copies that same URL; **Copy LAN** and **QR** explicitly
@@ -257,7 +265,7 @@ needed.
 copy first if you want to replace it with the development install. Keep a moved
 copy outside the active plugin path if you plan to restore it later.
 
-If the installed files say `0.7.0` but the bar still shows the previous UI,
+If the installed files say `0.8.0` but the bar still shows the previous UI,
 run `omarchy restart shell`. A successful `omarchy-shell shell rescanPlugins`
 call or a running watcher alone does not prove that new QML code is live:
 some shell versions recreate the widget using cached components at the same

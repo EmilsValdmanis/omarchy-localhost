@@ -26,6 +26,8 @@ Item {
   property var firewallRules: []
   property bool firewallBusy: false
   property string forceStopServerId: ""
+  property bool actionBusy: false
+  property string stoppingProjectRoot: ""
 
   property string query: ""
   property bool groupByProject: true
@@ -65,6 +67,7 @@ Item {
   signal projectRequested(var server)
   signal restartRequested(var server)
   signal stopRequested(var server)
+  signal projectStopRequested(string projectRoot)
   signal forceStopRequested(var server)
   signal firewallAuthorizationConfirmed(var server)
   signal firewallAuthorizationCanceled()
@@ -280,6 +283,7 @@ Item {
   }
 
   function actionEnabled(actionIndex, server) {
+    if (actionBusy && (actionIndex === RadarModel.ACTIONS.stop || actionIndex === RadarModel.ACTIONS.restart)) return false
     return RadarModel.actionEnabled(actionIndex, server)
   }
 
@@ -365,7 +369,7 @@ Item {
   }
 
   function requestStop(server, force) {
-    if (!server) return
+    if (!server || actionBusy) return
     pendingServer = server
     pendingFirewallRule = null
     pendingAction = force ? "force-stop" : "stop"
@@ -1061,9 +1065,14 @@ Item {
               count: entryDelegate.model.count
               collapsed: entryDelegate.model.collapsed
               selected: entryDelegate.selected
+              actionBusy: root.actionBusy
+              stopping: root.stoppingProjectRoot === projectRoot
               foreground: root.foreground
               onToggled: root.toggleProject(projectRoot)
               onFocused: root.selectProject(projectRoot)
+              onStopRequested: {
+                if (!root.actionBusy) root.projectStopRequested(projectRoot)
+              }
               onNavigationKey: function(event) { root.handleSearchKey(event) }
             }
           }
@@ -1134,6 +1143,7 @@ Item {
       server: root.currentServer
       selectedActionIndex: root.selectedActionIndex
       forceStopAvailable: !!server && server.serverId === root.forceStopServerId && server.source !== "docker"
+      actionBusy: root.actionBusy
       foreground: root.foreground
       onActionHovered: function(actionIndex) { root.selectedActionIndex = actionIndex }
       onActionTriggered: function(actionIndex) { root.activateAction(actionIndex, root.currentServer) }

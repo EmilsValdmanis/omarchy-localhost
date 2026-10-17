@@ -86,7 +86,7 @@ ShellRoot {
           Repeater {
             model: [
               "Automatic framework & port detection",
-              "Collapsible project & monorepo groups",
+              "One-click stop for an entire monorepo",
               "Docker & Compose discovery",
               "Compact RAM summary & server trends",
               "Open locally, share over LAN",
@@ -238,6 +238,9 @@ ShellRoot {
         compare(screenshot.width, 1600)
         compare(screenshot.height, 900)
         screenshot.save(output + "/preview.png")
+        card.scale = 1
+        waitForRendering(card)
+        grabImage(card).save(output + "/stop-all-project.png")
       }
 
       function cleanupTestCase() { qr.close() }

@@ -15,6 +15,23 @@ function listener(port) {
   return { pid: 410, port, process: "node", addresses: ["127.0.0.1"] }
 }
 
+test("project stops snapshot only their project and deduplicate processes and containers", () => {
+  const native = { serverId: "web", pid: 410, startTime: 100, projectRoot: "/work/atlas", port: 3000 }
+  const docker = { serverId: "api", source: "docker", containerId: "abc123", projectRoot: "/work/atlas", port: 8000 }
+  const rows = [
+    native, { ...native, serverId: "web-extra", port: 3001 },
+    docker, { ...docker, serverId: "api-extra", port: 8001 },
+    { ...native, serverId: "reused-pid", startTime: 101 },
+    { ...native, serverId: "other", pid: 411, projectRoot: "/work/console" },
+  ]
+  const targets = radar.projectStopTargets(rows, "/work/atlas")
+  assert.deepEqual(plain(targets.map(row => row.serverId)), ["web", "api", "reused-pid"])
+  native.pid = 999
+  assert.equal(targets[0].pid, 410, "a discovery mutation cannot change queued identities")
+  assert.equal(radar.projectStopTargets(rows, "").length, 0)
+  assert.equal(radar.projectStopTargets(rows, "/work/missing").length, 0)
+})
+
 test("groups IPv4 and IPv6 bindings", () => {
   const raw = [
     'LISTEN 0 511 127.0.0.1:5173 0.0.0.0:* users:(("node",pid=410,fd=22))',

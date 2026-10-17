@@ -166,7 +166,7 @@ BarWidget {
         root.forceStopServerId = serverId
       else if (successful && root.forceStopServerId === serverId)
         root.forceStopServerId = ""
-      root.showNotice(detail, !successful)
+      if (radar.stoppingProjectRoot === "") root.showNotice(detail, !successful)
     }
   }
 
@@ -399,6 +399,12 @@ BarWidget {
       }
       onRestartRequested: function(server) { radar.restart(server) }
       onStopRequested: function(server) { radar.stop(server) }
+      actionBusy: radar.actionBusy
+      stoppingProjectRoot: radar.stoppingProjectRoot
+      onProjectStopRequested: function(projectRoot) {
+        if (radar.stopProject(projectRoot))
+          root.showNotice("Stopping all servers in " + RadarModel.basename(projectRoot) + "…", false)
+      }
       onForceStopRequested: function(server) { radar.forceStop(server) }
       onFirewallAuthorizationConfirmed: function(server) {
         root.pendingQrServer = server

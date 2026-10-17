@@ -12,9 +12,12 @@ CursorSurface {
   required property int count
   property bool collapsed: false
   property bool selected: false
+  property bool actionBusy: false
+  property bool stopping: false
 
   signal toggled()
   signal focused()
+  signal stopRequested()
   signal navigationKey(var event)
 
   objectName: "projectHeader"
@@ -73,6 +76,24 @@ CursorSurface {
       color: Qt.darker(header.foreground, 1.4)
       font.family: Style.font.family
       font.pixelSize: Style.font.caption
+    }
+    Button {
+      objectName: "projectStopAll"
+      text: header.stopping ? "Stopping…" : "Stop all"
+      foreground: Color.urgent
+      accent: Color.urgent
+      fontSize: Style.font.caption
+      horizontalPadding: Style.space(6)
+      verticalPadding: Style.space(2)
+      enabled: !header.actionBusy
+      focusable: true
+      opacity: enabled ? 1 : 0.5
+      tooltipText: "Stop all servers in " + header.projectRoot
+        + " in one click, including folded or filtered servers"
+      Accessible.role: Accessible.Button
+      Accessible.name: "Stop all servers in " + header.name
+      Accessible.onPressAction: if (enabled) header.stopRequested()
+      onClicked: header.stopRequested()
     }
   }
 }
