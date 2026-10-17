@@ -25,9 +25,9 @@ Canvas {
     var span = high - low
     var inset = 3
     context.beginPath()
-    for (var index = 0; index < samples.length; index++) {
-      var x = inset + index * (width - inset * 2) / Math.max(1, samples.length - 1)
-      var y = span ? height - inset - (samples[index] - low) / span * (height - inset * 2)
+    for (let index = 0; index < samples.length; index++) {
+      let x = inset + index * (width - inset * 2) / Math.max(1, samples.length - 1)
+      let y = span ? height - inset - (samples[index] - low) / span * (height - inset * 2)
         : height / 2
       if (index === 0) context.moveTo(x, y)
       else context.lineTo(x, y)

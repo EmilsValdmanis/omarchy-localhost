@@ -86,7 +86,7 @@ BarWidget {
     pendingQrServer = server
     if (!setting("authorizeFirewallForQr", true)
         || server.lanInterface === "" || server.lanSubnet === "") {
-      var directServer = pendingQrServer
+      let directServer = pendingQrServer
       pendingQrServer = null
       showQr(directServer)
       return
@@ -190,8 +190,8 @@ BarWidget {
     function refresh(): string { radar.refresh(); root.refreshFirewallRules(); return "ok" }
     function status(): string {
       var detectedServers = []
-      for (var index = 0; index < radar.servers.count; index++) {
-        var server = radar.servers.get(index)
+      for (let index = 0; index < radar.servers.count; index++) {
+        let server = radar.servers.get(index)
         detectedServers.push({
           id: server.serverId,
           name: server.name,
