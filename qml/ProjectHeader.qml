@@ -69,14 +69,6 @@ CursorSurface {
       foreground: header.selected ? Color.accent : header.foreground
       elide: Text.ElideMiddle
     }
-    Text {
-      Layout.alignment: Qt.AlignBaseline
-      textFormat: Text.PlainText
-      text: header.count
-      color: Qt.darker(header.foreground, 1.4)
-      font.family: Style.font.family
-      font.pixelSize: Style.font.caption
-    }
     PanelActionButton {
       objectName: "projectStopAll"
       iconText: header.stopping ? "\uf251" : "\uf04d"
@@ -92,6 +84,14 @@ CursorSurface {
       Accessible.onPressAction: if (enabled) header.stopRequested()
       onClicked: header.stopRequested()
       HoverHandler { id: stopHover }
+    }
+    Text {
+      Layout.alignment: Qt.AlignBaseline
+      textFormat: Text.PlainText
+      text: header.count
+      color: Qt.darker(header.foreground, 1.4)
+      font.family: Style.font.family
+      font.pixelSize: Style.font.caption
     }
   }
 }
