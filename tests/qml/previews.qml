@@ -238,9 +238,6 @@ ShellRoot {
         compare(screenshot.width, 1600)
         compare(screenshot.height, 900)
         screenshot.save(output + "/preview.png")
-        card.scale = 1
-        waitForRendering(card)
-        grabImage(card).save(output + "/stop-all-project.png")
       }
 
       function cleanupTestCase() { qr.close() }
