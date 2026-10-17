@@ -437,12 +437,16 @@ ShellRoot {
         equal(projectStopSpy.signalArguments[0][0], "/work/atlas")
         equal(panel.pendingAction, "", "one click needs no per-server confirmation")
         equal(panel.isProjectCollapsed("/work/atlas"), true, "stop does not toggle folding")
+        button.forceActiveFocus()
+        keyClick(Qt.Key_Return)
+        equal(projectStopSpy.count, 2, "the stop icon supports keyboard activation")
+        equal(panel.isProjectCollapsed("/work/atlas"), true, "Enter on stop does not fold the project")
         panel.actionBusy = true
         panel.stoppingProjectRoot = "/work/atlas"
         equal(button.enabled, false)
         equal(button.iconText, "\uf251")
         mouseClick(button, button.width / 2, button.height / 2)
-        equal(projectStopSpy.count, 1, "a busy stop cannot be started twice")
+        equal(projectStopSpy.count, 2, "a busy stop cannot be started twice")
         panel.actionBusy = false
         panel.stoppingProjectRoot = ""
         panel.query = "Project 3"
@@ -451,8 +455,8 @@ ShellRoot {
         header = findChild(list.itemAtIndex(0), "projectHeader")
         button = findChild(header, "projectStopAll")
         mouseClick(button, button.width / 2, button.height / 2)
-        equal(projectStopSpy.count, 2)
-        equal(projectStopSpy.signalArguments[1][0], "/work/atlas",
+        equal(projectStopSpy.count, 3)
+        equal(projectStopSpy.signalArguments[2][0], "/work/atlas",
           "filtering still requests the entire project")
         check(button.mapToItem(panel, button.width, 0).x <= panel.width,
           "stop fits inside the panel")
@@ -794,6 +798,96 @@ ShellRoot {
         equal(discovery.manualScanQueued, false)
         discovery.scan(true)
         equal(discovery.manualScanQueued, true, "manual refresh during a forced scan schedules another forced scan")
+      }
+
+      function test_project_stop_missing_helper_finishes_and_unlocks() {
+        var service = createTemporaryObject(serviceComponent, tests)
+        var rows = fixtures(2)
+        rows[0].pid = 2147483647
+        rows[1].pid = 2147483646
+        RadarModel.syncServerModel(service.servers, rows)
+        var process = findChild(service, "serverActionProcess")
+        function missingHelper() {
+          if (process.command[1] === service.helperPath)
+            process.command = ["/nonexistent/localhost-test-helper"]
+        }
+        process.commandChanged.connect(missingHelper)
+        actionSpy.target = service
+        actionSpy.clear()
+        check(service.stopProject("/tmp/fixtures"))
+        tryCompare(service, "actionBusy", false, 5000)
+        equal(actionSpy.count, 3, "each launch failure and the batch summary are reported")
+        equal(actionSpy.signalArguments[2][0], "stop-project")
+        equal(actionSpy.signalArguments[2][1], false)
+        check(actionSpy.signalArguments[2][2].indexOf("Project 0 (:3000)") !== -1)
+        check(actionSpy.signalArguments[2][2].indexOf("Could not start") !== -1)
+        equal(service.projectStopQueue.length, 0)
+        equal(service.actionName, "")
+        process.commandChanged.disconnect(missingHelper)
+      }
+
+      function test_project_stop_mixed_sources_keep_each_force_stop_and_can_retry() {
+        var service = createTemporaryObject(serviceComponent, tests)
+        var rows = fixtures(2)
+        rows[0].pid = 2147483647
+        rows[1].pid = 2147483646
+        rows.push(RadarModel.normalizeServer(Object.assign({}, rows[0], {
+          serverId: "docker-api", source: "docker", containerId: "abc123def456", port: 9000
+        })))
+        rows.push(RadarModel.normalizeServer(Object.assign({}, rows[0], {
+          serverId: "shared-port", port: 3002
+        })))
+        RadarModel.syncServerModel(service.servers, rows)
+        var process = findChild(service, "serverActionProcess")
+        var commands = []
+        var succeed = false
+        function helperResponse() {
+          var command = Array.from(process.command)
+          if (command[1] !== service.helperPath) return
+          commands.push(command)
+          var successful = succeed || command[2] === "docker-action"
+          var payload = successful ? { ok: true, message: "Stopped" }
+            : { ok: false, error: "The server did not stop cleanly; use Force stop if needed" }
+          process.command = ["python3", "-c", "print(" + JSON.stringify(JSON.stringify(payload)) + ")"]
+        }
+        process.commandChanged.connect(helperResponse)
+        actionSpy.target = service
+        actionSpy.clear()
+        check(service.stopProject("/tmp/fixtures"))
+        service.servers.clear()
+        tryCompare(service, "actionBusy", false, 5000)
+        equal(commands.length, 3, "the snapshot survives model churn and deduplicates shared ports")
+        equal(commands[0][2], "process-action")
+        equal(commands[0][6], String(rows[0].pid))
+        equal(commands[0][8], String(rows[0].startTime))
+        equal(commands[2][2], "docker-action")
+        equal(commands[2][6], "abc123def456")
+        equal(actionSpy.signalArguments[3][1], false)
+        check(service.forceStopSourceKeys[RadarModel.memorySourceKey(rows[0])],
+          "the first failed process retains Force stop: " + JSON.stringify(service.forceStopSourceKeys))
+        check(service.forceStopSourceKeys[RadarModel.memorySourceKey(rows[1])],
+          "both failed processes retain Force stop")
+        check(service.forceStopSourceKeys[RadarModel.memorySourceKey(rows[3])],
+          "another port on the same process also offers Force stop")
+        succeed = true
+        service.forceStop(rows[0])
+        equal(service.actionBusy, true, "controls lock before the helper finishes starting")
+        tryCompare(service, "actionBusy", false, 5000)
+        equal(commands[3][4], "force-stop")
+        check(!service.forceStopSourceKeys[RadarModel.memorySourceKey(rows[0])],
+          "successful force stop clears that process's recovery state")
+        check(service.forceStopSourceKeys[RadarModel.memorySourceKey(rows[1])],
+          "stopping one process preserves the other's Force stop")
+        RadarModel.syncServerModel(service.servers, rows)
+        check(service.stopProject("/tmp/fixtures"))
+        tryCompare(service, "actionBusy", false, 5000)
+        equal(commands.length, 7)
+        equal(actionSpy.signalArguments[8][0], "stop-project")
+        equal(actionSpy.signalArguments[8][1], true)
+        check(actionSpy.signalArguments[8][2].indexOf("Stopped 3/3 services") !== -1,
+          "the successful retry reports its full result: " + actionSpy.signalArguments[8][2])
+        equal(Object.keys(service.forceStopSourceKeys).length, 0)
+        process.commandChanged.disconnect(helperResponse)
       }
 
       function test_live_discovery_and_verified_stop() {

@@ -64,12 +64,13 @@ Regenerate the shared marketplace and README preview after UI changes:
 python3 tests/run_qml.py --previews
 ```
 
-This renders a single 1600×900 `preview.png` with the Localhost title,
+This renders a 1600×900 `preview.png` with the Localhost title,
 a concise feature list, the actual panel, and a smaller QR card. It uses fixed
 demo data, Omarchy's Everforest palette and tree-tops wallpaper, iA Writer
 Quattro, and JetBrains Mono. The wallpaper is read from the installed Omarchy
 theme (or `OMARCHY_PATH`); it is not duplicated in this repository. Inspect the image before
-committing. The composition lives in `tests/qml/previews.qml`.
+committing. It also exports a close-up of the panel to `stop-all-project.png`.
+The composition lives in `tests/qml/previews.qml`.
 The preview QR links to Rick Astley's video as an easter egg.
 Set `LOCALHOST_PREVIEW_DIR` to save it somewhere else. Rendering uses an
 isolated Quickshell instance and does not change your desktop theme.

@@ -37,12 +37,13 @@ panel, and switching to the flat list for the current shell session. Search and
 port filters reveal matching servers, then restore your folds when cleared.
 Use the folder button to switch to a flat list sorted by port.
 Click the square **Stop all** icon on a project header to gracefully stop all of
-that project's discovered server processes and Docker containers in one click. It includes
-folded servers and servers hidden by search or port filters. Shared processes
-and containers are stopped once, and other projects keep running. Actions run
+that project's discovered server processes and Docker containers in one click.
+It includes folded servers and servers hidden by search or port filters. Shared
+processes and containers are stopped once, and other projects keep running. Actions run
 in sequence with the same identity checks as individual stops; a failure does
 not prevent the remaining servers from being stopped. The result reports any
-failures, and a process that refuses to stop can still be force-stopped individually.
+failures by server name and port. Processes that refuse to stop retain their
+individual **Force stop** action.
 Click a row to select it, then use the shared action toolbar. Moving the pointer
 over other rows keeps your selection. **Open** and clicking a port use the local
 URL. **Copy local** copies that same URL; **Copy LAN** and **QR** explicitly

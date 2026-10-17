@@ -25,7 +25,10 @@ Item {
   property string actionError: ""
   property string actionOutput: ""
   property string actionServerId: ""
-  readonly property bool actionBusy: actionProcess.running || stoppingProjectRoot !== ""
+  property string actionServerLabel: ""
+  property string actionSourceKey: ""
+  property var forceStopSourceKeys: ({})
+  readonly property bool actionBusy: actionName !== "" || stoppingProjectRoot !== ""
   property string stoppingProjectRoot: ""
   property var projectStopQueue: []
   property int projectStopTotal: 0
@@ -203,6 +206,8 @@ Item {
     actionError = ""
     actionOutput = ""
     actionServerId = String(server.serverId || server.id || "")
+    actionServerLabel = server.name + " (:" + server.port + ")"
+    actionSourceKey = RadarModel.memorySourceKey(server)
     if (server.source === "docker" && server.containerId) {
       if (action === "force-stop") action = "stop"
       actionProcess.command = [
@@ -249,11 +254,41 @@ Item {
     var name = RadarModel.basename(stoppingProjectRoot)
     var failed = projectStopErrors.length
     var detail = "Stopped " + projectStopSucceeded + "/" + projectStopTotal
-      + " server processes or containers in " + name + "."
+      + " services in " + name + "."
     if (failed) detail += " " + failed + " failed: " + projectStopErrors[0]
     stoppingProjectRoot = ""
     actionFinished("stop-project", failed === 0, detail, "")
     postActionScan.restart()
+  }
+
+  function finishAction(exitCode, failure) {
+    var action = actionName
+    var parsed = RadarModel.parseActionPayload(actionOutput,
+      failure || actionError || (exitCode === 0 ? "Action completed" : "Server action failed"))
+    var successful = exitCode === 0 && parsed.ok
+    var serverId = actionServerId
+    var label = actionServerLabel
+    var sourceKey = actionSourceKey
+    actionName = ""
+    actionServerId = ""
+    actionServerLabel = ""
+    actionSourceKey = ""
+    if ((action === "stop" && !successful && parsed.message.indexOf("did not stop cleanly") !== -1)
+        || (successful && forceStopSourceKeys[sourceKey])) {
+      let next = Object.assign({}, forceStopSourceKeys)
+      if (successful) delete next[sourceKey]
+      else next[sourceKey] = true
+      forceStopSourceKeys = next
+    }
+    if (stoppingProjectRoot !== "") {
+      if (successful) projectStopSucceeded++
+      else projectStopErrors = projectStopErrors.concat([label + ": " + parsed.message])
+      actionFinished(action, successful, parsed.message, serverId)
+      Qt.callLater(root.runNextProjectStop)
+    } else {
+      actionFinished(action, successful, parsed.message, serverId)
+      postActionScan.restart()
+    }
   }
 
 
@@ -383,6 +418,7 @@ Item {
 
   Process {
     id: actionProcess
+    objectName: "serverActionProcess"
     stdout: StdioCollector {
       waitForEnd: true
       onStreamFinished: root.actionOutput = String(text || "")
@@ -391,24 +427,10 @@ Item {
       waitForEnd: true
       onStreamFinished: root.actionError = String(text || "").trim()
     }
-    onExited: function(exitCode) {
-      var action = root.actionName
-      var parsed = RadarModel.parseActionPayload(
-        root.actionOutput,
-        root.actionError || (exitCode === 0 ? "Action completed" : "Server action failed"))
-      var successful = exitCode === 0 && parsed.ok
-      var serverId = root.actionServerId
-      root.actionName = ""
-      root.actionServerId = ""
-      if (root.stoppingProjectRoot !== "") {
-        if (successful) root.projectStopSucceeded++
-        else root.projectStopErrors = root.projectStopErrors.concat([parsed.message])
-        root.actionFinished(action, successful, parsed.message, serverId)
-        Qt.callLater(root.runNextProjectStop)
-      } else {
-        root.actionFinished(action, successful, parsed.message, serverId)
-        postActionScan.restart()
-      }
-    }
+    onExited: function(exitCode) { root.finishAction(exitCode, "") }
+    // FailedToStart emits runningChanged without exited in Quickshell 0.3.1.
+    // A normal exit clears actionName above before runningChanged is emitted.
+    onRunningChanged: if (!running && root.actionName !== "")
+      root.finishAction(1, "Could not start the server action helper")
   }
 }
