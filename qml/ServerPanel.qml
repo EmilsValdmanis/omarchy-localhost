@@ -92,7 +92,7 @@ Item {
   function summarizeMemory() {
     var currentRevision = revision
     var rows = []
-    if (servers) for (var index = 0; index < servers.count; index++) rows.push(servers.get(index))
+    if (servers) for (let index = 0; index < servers.count; index++) rows.push(servers.get(index))
     return RadarModel.memoryBreakdown(rows, systemMemory)
   }
 
@@ -106,7 +106,7 @@ Item {
   }
 
   function portFilterLabel() {
-    for (var index = 0; index < portFilterOptions.length; index++)
+    for (let index = 0; index < portFilterOptions.length; index++)
       if (portFilterOptions[index].value === portFilter)
         return portFilterOptions[index].label
     return "All ports"
@@ -121,8 +121,8 @@ Item {
     var needle = query.trim().toLowerCase()
     var filtered = []
     if (servers) {
-      for (var index = 0; index < servers.count; index++) {
-        var server = servers.get(index)
+      for (let index = 0; index < servers.count; index++) {
+        let server = servers.get(index)
         if (RadarModel.matchesSearch(server, needle, portFilter)) filtered.push(server)
       }
     }
@@ -133,7 +133,7 @@ Item {
       entryRevision++
     var nextIndex = Math.min(selectedIndex, Math.max(0, filteredModel.count - 1))
     if (nextIndex < 0) nextIndex = 0
-    for (var i = 0; i < filteredModel.count; i++) {
+    for (let i = 0; i < filteredModel.count; i++) {
       if (filteredModel.get(i).serverId === previousId
           || (!groupByProject && previousHeader && filteredModel.get(i).projectRoot === previousRoot)) {
         nextIndex = i
@@ -149,7 +149,7 @@ Item {
     } else {
       selectedProjectRoot = ""
       selectedIndex = nextIndex
-      var next = filteredModel.get(nextIndex)
+      let next = filteredModel.get(nextIndex)
       if (groupByProject && isProjectCollapsed(next.projectRoot)) selectProject(next.projectRoot)
     }
     normalizeSelectedAction(1)
@@ -165,7 +165,7 @@ Item {
     var currentEntries = entryRevision
     var server = selectedServer()
     var id = selectedProjectRoot ? "project:" + selectedProjectRoot : (server ? "server:" + server.serverId : "")
-    for (var i = 0; i < projectModel.count; i++)
+    for (let i = 0; i < projectModel.count; i++)
       if (projectModel.get(i).entryId === id) return i
     return -1
   }
@@ -232,7 +232,7 @@ Item {
     if (!groupByProject || !projectModel.count || showDiagnostics || showFirewallRules) return
     var current = selectedProject()
     var next = Object.assign(Object.create(null), projectCollapseState())
-    for (var projectRoot in groups) {
+    for (let projectRoot in groups) {
       if (collapsed) next[projectRoot] = true
       else delete next[projectRoot]
     }
@@ -246,7 +246,7 @@ Item {
   function selectAdjacentProject(delta) {
     if (!groupByProject || showDiagnostics || showFirewallRules) return
     var roots = []
-    for (var i = 0; i < projectModel.count; i++)
+    for (let i = 0; i < projectModel.count; i++)
       if (projectModel.get(i).projectHeader) roots.push(projectModel.get(i).projectRoot)
     if (!roots.length) return
     var current = roots.indexOf(selectedProject())
@@ -290,7 +290,7 @@ Item {
       return
     }
     if (actionEnabled(selectedActionIndex, server)) return
-    for (var step = 0; step < actionCount; step++) {
+    for (let step = 0; step < actionCount; step++) {
       selectedActionIndex = (selectedActionIndex + direction + actionCount) % actionCount
       if (actionEnabled(selectedActionIndex, server)) return
     }
@@ -300,7 +300,7 @@ Item {
     if (showDiagnostics || showFirewallRules) return
     var server = selectedServer()
     if (!server) return
-    for (var step = 0; step < actionCount; step++) {
+    for (let step = 0; step < actionCount; step++) {
       selectedActionIndex = (selectedActionIndex + delta + actionCount) % actionCount
       if (actionEnabled(selectedActionIndex, server)) return
     }
@@ -531,16 +531,16 @@ Item {
       refreshRequested()
       event.accepted = true
     } else if (alternate && event.key === Qt.Key_R) {
-      var restart = selectedServer()
+      let restart = selectedServer()
       if (actionEnabled(RadarModel.ACTIONS.restart, restart)) restartRequested(restart)
       event.accepted = true
     } else if (event.key === Qt.Key_Delete || (control && event.key === Qt.Key_K && query === "")) {
-      var stopped = selectedServer()
+      let stopped = selectedServer()
       if (stopped) requestStop(stopped, stopped.serverId === forceStopServerId && stopped.source !== "docker")
       event.accepted = true
     } else if (control && event.key === Qt.Key_C && searchField.selectedText.length === 0) {
-      var copied = selectedServer()
-      var shareOverLan = (event.modifiers & Qt.ShiftModifier) !== 0
+      let copied = selectedServer()
+      let shareOverLan = (event.modifiers & Qt.ShiftModifier) !== 0
       if (actionEnabled(shareOverLan ? RadarModel.ACTIONS.copyLan : RadarModel.ACTIONS.copyLocal, copied)) {
         if (shareOverLan) copyLanRequested(copied)
         else copyRequested(copied)
@@ -780,8 +780,8 @@ Item {
               context.closePath()
               context.clip()
               var offset = 0
-              for (var index = 0; index < segments.length; index++) {
-                var segmentWidth = width * segments[index].fraction
+              for (let index = 0; index < segments.length; index++) {
+                let segmentWidth = width * segments[index].fraction
                 context.fillStyle = String(segments[index].color)
                 context.fillRect(offset, 0, segmentWidth, height)
                 offset += segmentWidth

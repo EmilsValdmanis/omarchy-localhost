@@ -58,11 +58,11 @@ Item {
     var entries = nativeDiscovery.readyContexts.concat(includeDocker ? dockerDiscovery.readyContexts : [])
     var nextServers = []
     var activeKeys = {}
-    for (var i = 0; i < entries.length; i++) {
-      var entry = entries[i]
-      var server = RadarModel.serverFromContext(entry.context, entry.scheme,
+    for (let i = 0; i < entries.length; i++) {
+      let entry = entries[i]
+      let server = RadarModel.serverFromContext(entry.context, entry.scheme,
         { ip: lanIp, interfaceName: lanInterface, subnet: lanSubnet }, lanInterfaces)
-      var key = RadarModel.memorySourceKey(server)
+      let key = RadarModel.memorySourceKey(server)
       activeKeys[key] = true
       server.memoryBytes = resourceByKey[key] === undefined ? -1 : resourceByKey[key]
       server.memoryHistory = memoryHistoryByKey[key] || []
@@ -70,7 +70,7 @@ Item {
     }
     var nextResources = {}
     var nextHistory = {}
-    for (var key in activeKeys) {
+    for (let key in activeKeys) {
       if (resourceByKey[key] !== undefined) nextResources[key] = resourceByKey[key]
       if (memoryHistoryByKey[key]) nextHistory[key] = memoryHistoryByKey[key]
     }
@@ -106,9 +106,9 @@ Item {
     var keys = []
     var missingNative = false
     var missingDocker = false
-    for (var i = 0; i < serverModel.count; i++) {
-      var server = serverModel.get(i)
-      var key = RadarModel.memorySourceKey(server)
+    for (let i = 0; i < serverModel.count; i++) {
+      let server = serverModel.get(i)
+      let key = RadarModel.memorySourceKey(server)
       keys.push(key)
       if (server.source === "docker") {
         if (containers.indexOf(server.containerId) === -1) containers.push(server.containerId)
@@ -124,7 +124,7 @@ Item {
         if (force || missingNative) resourceRescanQueued = true
       } else {
         lastNativeResourceScanMs = now
-        for (var k = 0; k < keys.length; k++)
+        for (let k = 0; k < keys.length; k++)
           if (keys[k].indexOf("process:") === 0 && nextResources[keys[k]] === undefined) nextResources[keys[k]] = -1
         resourceOutput = ""
         resourceProcess.command = ["python3", helperPath, "resources", "--pids", pids.join(","), "--uid", String(currentUid)]
@@ -137,7 +137,7 @@ Item {
         if (force || missingDocker) dockerResourceRescanQueued = true
       } else {
         lastDockerResourceScanMs = now
-        for (var d = 0; d < keys.length; d++)
+        for (let d = 0; d < keys.length; d++)
           if (keys[d].indexOf("docker:") === 0 && nextResources[keys[d]] === undefined) nextResources[keys[d]] = -1
         dockerResourceOutput = ""
         dockerMemoryProcess.command = ["python3", helperPath, "resources", "--pids", "", "--uid", String(currentUid),
@@ -157,7 +157,7 @@ Item {
     var nextHistory = Object.assign({}, memoryHistoryByKey)
     // Each sampler refreshes only its own source. Missing/failed readings must
     // stop contributing to totals without erasing the other sampler's results.
-    for (var key in nextResources) {
+    for (let key in nextResources) {
       if (key.indexOf(prefix) === 0 && (!successful || parsed.memory[key] === undefined)) {
         nextResources[key] = -1
         nextHistory[key] = []
@@ -168,9 +168,9 @@ Item {
       resourceWarning = successful ? "" : "RAM sampling is unavailable"
     }
     if (successful) {
-      for (var key in parsed.memory) {
+      for (let key in parsed.memory) {
         if (key.indexOf(prefix) !== 0) continue
-        var bytes = parsed.memory[key]
+        let bytes = parsed.memory[key]
         nextResources[key] = bytes
         nextHistory[key] = bytes < 0 ? [] : (nextHistory[key] || []).concat([bytes]).slice(-30)
       }
@@ -276,7 +276,7 @@ Item {
       onStreamFinished: {
         var missing = String(text || "").trim().split(/\r?\n/).filter(function(value) { return value !== "" })
         var nextWarnings = []
-        for (var index = 0; index < missing.length; index++)
+        for (let index = 0; index < missing.length; index++)
           nextWarnings.push("Missing required command: " + missing[index])
         root.dependencyWarnings = nextWarnings
       }

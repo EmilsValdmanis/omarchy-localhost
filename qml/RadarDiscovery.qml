@@ -75,12 +75,12 @@ Item {
     listenerCount = pendingListeners.length
     var processIds = []
     var paths = []
-    for (var i = 0; i < pendingListeners.length; i++) {
-      var pid = String(pendingListeners[i].pid)
+    for (let i = 0; i < pendingListeners.length; i++) {
+      let pid = String(pendingListeners[i].pid)
       if (processIds.indexOf(pid) === -1) processIds.push(pid)
     }
-    for (var c = 0; c < pendingContexts.length; c++) {
-      var path = pendingContexts[c].process.cwd
+    for (let c = 0; c < pendingContexts.length; c++) {
+      let path = pendingContexts[c].process.cwd
       if (path && paths.indexOf(path) === -1) paths.push(path)
     }
     metadataOutput = ""
@@ -99,8 +99,8 @@ Item {
     var ignored = RadarModel.parsePortSet(ignoredPorts)
     var alwaysInclude = RadarModel.parsePortSet(alwaysIncludePorts)
     if (source === "docker") {
-      for (var i = 0; i < pendingContexts.length; i++) {
-        var context = pendingContexts[i]
+      for (let i = 0; i < pendingContexts.length; i++) {
+        let context = pendingContexts[i]
         context.process.project = (parsed.projects || {})[context.process.cwd] || {}
       }
       pendingDiagnostics = []
@@ -111,8 +111,8 @@ Item {
     }
     candidateCount = pendingContexts.length
     var nextCache = {}
-    for (var c = 0; c < pendingContexts.length; c++) {
-      var id = RadarModel.contextId(pendingContexts[c])
+    for (let c = 0; c < pendingContexts.length; c++) {
+      let id = RadarModel.contextId(pendingContexts[c])
       if (probeCache[id]) nextCache[id] = probeCache[id]
     }
     probeCache = nextCache
@@ -132,11 +132,11 @@ Item {
     ]
     var transfers = []
     var ids = []
-    for (var i = 0; i < contexts.length; i++) {
-      var context = contexts[i]
-      var id = RadarModel.contextId(context)
-      var preferred = RadarModel.schemeFor(context.process.command)
-      var alternate = preferred === "https" ? "http" : "https"
+    for (let i = 0; i < contexts.length; i++) {
+      let context = contexts[i]
+      let id = RadarModel.contextId(context)
+      let preferred = RadarModel.schemeFor(context.process.command)
+      let alternate = preferred === "https" ? "http" : "https"
       ids.push(id)
       transfers.push({ id: id, scheme: preferred, preference: 0 })
       args.push(RadarModel.probeUrl(context, preferred))
@@ -154,13 +154,13 @@ Item {
     var accepted = RadarModel.parseProbeOutput(probeOutput, probeTransferMap)
     var nextCache = Object.assign({}, probeCache)
     var now = Date.now()
-    for (var i = 0; i < probedIds.length; i++) {
-      var id = probedIds[i]
+    for (let i = 0; i < probedIds.length; i++) {
+      let id = probedIds[i]
       if (accepted[id]) {
         pendingSchemes[id] = accepted[id].scheme
         nextCache[id] = { scheme: accepted[id].scheme, expiresAt: now + 60000 }
       } else {
-        var attempts = Number((nextCache[id] && nextCache[id].attempts) || 0) + 1
+        let attempts = Number((nextCache[id] && nextCache[id].attempts) || 0) + 1
         nextCache[id] = { scheme: "", attempts: attempts, expiresAt: now + (attempts === 1 ? 3000 : 15000) }
       }
     }
@@ -171,9 +171,9 @@ Item {
   function applyCandidates() {
     var ready = []
     var details = pendingDiagnostics.slice()
-    for (var i = 0; i < pendingContexts.length; i++) {
-      var context = pendingContexts[i]
-      var scheme = pendingSchemes[RadarModel.contextId(context)] || ""
+    for (let i = 0; i < pendingContexts.length; i++) {
+      let context = pendingContexts[i]
+      let scheme = pendingSchemes[RadarModel.contextId(context)] || ""
       if (scheme) ready.push({ context: context, scheme: scheme })
       else details.push({ port: context.listener.port,
         process: String(context.listener.process || context.displayName || "unknown"),

@@ -44,8 +44,12 @@ node --test --test-isolation=none tests/*.mjs
 python3 -m unittest discover -s tests -p 'test_*.py' -v
 ```
 
-CI runs those checks plus native QML lint and runtime tests on Arch Linux with
-Quickshell and Omarchy v4.0.2's actual shared components. The native tests require
+CI runs those checks plus native QML lint and runtime tests on the October 1,
+2026 Arch Linux snapshot with Qt 6.11, Quickshell, and Omarchy v4.0.2's actual
+shared components. The snapshot keeps Qt and Quickshell compatible with that
+shell release; Qt 6.12's built-in `Color` singleton shadows its theme singleton.
+Update the snapshot and shell reference together when upgrading the UI runtime.
+The native tests require
 Qt 6, `ss`, `curl`, Python 3.11+ and `qrencode`; no desktop session is needed. Set
 `OMARCHY_PATH` to test another Omarchy checkout. `tests/lint_qml.py` explicitly
 uses Qt 6 (`QMLLINT` can override its path), allows only documented upstream

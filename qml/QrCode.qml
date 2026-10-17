@@ -20,11 +20,11 @@ Canvas {
     ctx.fillStyle = "white"
     ctx.fillRect(0, 0, width, height)
     ctx.fillStyle = "black"
-    for (var y = 0; y < rows.length; y++) {
-      var line = rows[y]
-      for (var x = 0; x < line.length; x++) {
+    for (let y = 0; y < rows.length; y++) {
+      let line = rows[y]
+      for (let x = 0; x < line.length; x++) {
         if (line.charAt(x) !== "1") continue
-        var start = x
+        let start = x
         while (x + 1 < line.length && line.charAt(x + 1) === "1") x++
         ctx.fillRect(start * moduleSize, y * moduleSize,
           (x - start + 1) * moduleSize, moduleSize)
