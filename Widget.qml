@@ -21,7 +21,6 @@ BarWidget {
   property string firewallCheckOutput: ""
   property string firewallRulesOutput: ""
   property string firewallError: ""
-  property string forceStopServerId: ""
 
   readonly property int serverCount: radar.serverCount
   // Keep the existing setting key so saved preferences survive the badge removal.
@@ -162,11 +161,7 @@ BarWidget {
     selectedLanInterface: String(root.setting("lanInterface", "") || "")
     panelActive: card.open
     onActionFinished: function(action, successful, detail, serverId) {
-      if (action === "stop" && !successful && detail.indexOf("did not stop cleanly") !== -1)
-        root.forceStopServerId = serverId
-      else if (successful && root.forceStopServerId === serverId)
-        root.forceStopServerId = ""
-      root.showNotice(detail, !successful)
+      if (radar.stoppingProjectRoot === "") root.showNotice(detail, !successful)
     }
   }
 
@@ -380,7 +375,8 @@ BarWidget {
       scanning: radar.scanning
       firewallRules: root.managedFirewallRules
       firewallBusy: firewallAllowProcess.running || firewallRemoveProcess.running
-      forceStopServerId: root.forceStopServerId
+      forceStopServerId: currentServer && radar.forceStopSourceKeys[RadarModel.memorySourceKey(currentServer)]
+        ? currentServer.serverId : ""
 
       onCloseRequested: root.closePanel()
       onRefreshRequested: {
@@ -399,6 +395,12 @@ BarWidget {
       }
       onRestartRequested: function(server) { radar.restart(server) }
       onStopRequested: function(server) { radar.stop(server) }
+      actionBusy: radar.actionBusy
+      stoppingProjectRoot: radar.stoppingProjectRoot
+      onProjectStopRequested: function(projectRoot) {
+        if (radar.stopProject(projectRoot))
+          root.showNotice("Stopping all servers in " + RadarModel.basename(projectRoot) + "…", false)
+      }
       onForceStopRequested: function(server) { radar.forceStop(server) }
       onFirewallAuthorizationConfirmed: function(server) {
         root.pendingQrServer = server

@@ -37,6 +37,8 @@ ShellRoot {
 
       SignalSpy { id: openSpy; signalName: "openRequested" }
       SignalSpy { id: stopSpy; signalName: "stopRequested" }
+      SignalSpy { id: projectStopSpy; signalName: "projectStopRequested" }
+      SignalSpy { id: actionSpy; signalName: "actionFinished" }
       SignalSpy { id: copySpy; signalName: "copyRequested" }
       SignalSpy { id: copyLanSpy; signalName: "copyLanRequested" }
 
@@ -85,6 +87,8 @@ ShellRoot {
         stopSpy.target = panel
         openSpy.clear()
         stopSpy.clear()
+        projectStopSpy.target = panel
+        projectStopSpy.clear()
         copySpy.target = panel
         copyLanSpy.target = panel
         copySpy.clear()
@@ -101,6 +105,9 @@ ShellRoot {
           qtest_results.failCount === failuresBefore ? "PASS" : "FAIL")
         openSpy.target = null
         stopSpy.target = null
+        projectStopSpy.target = null
+        actionSpy.target = null
+        actionSpy.clear()
         copySpy.target = null
         copyLanSpy.target = null
       }
@@ -416,6 +423,169 @@ ShellRoot {
         settled()
       }
 
+      function test_project_stop_all_is_one_click_and_does_not_fold() {
+        groupedFixtures(9)
+        panel.setProjectCollapsed("/work/atlas", true)
+        settled()
+        var header = findChild(list.itemAtIndex(0), "projectHeader")
+        check(header !== null)
+        var button = findChild(header, "projectStopAll")
+        check(button !== null && button.enabled)
+        equal(button.iconText, "\uf04d")
+        mouseClick(button, button.width / 2, button.height / 2)
+        equal(projectStopSpy.count, 1)
+        equal(projectStopSpy.signalArguments[0][0], "/work/atlas")
+        equal(panel.pendingAction, "", "one click needs no per-server confirmation")
+        equal(panel.isProjectCollapsed("/work/atlas"), true, "stop does not toggle folding")
+        button.forceActiveFocus()
+        keyClick(Qt.Key_Return)
+        equal(projectStopSpy.count, 2, "the stop icon supports keyboard activation")
+        equal(panel.isProjectCollapsed("/work/atlas"), true, "Enter on stop does not fold the project")
+        panel.actionBusy = true
+        panel.stoppingProjectRoot = "/work/atlas"
+        equal(button.enabled, false)
+        equal(button.iconText, "\uf251")
+        mouseClick(button, button.width / 2, button.height / 2)
+        equal(projectStopSpy.count, 2, "a busy stop cannot be started twice")
+        panel.actionBusy = false
+        panel.stoppingProjectRoot = ""
+        panel.query = "Project 3"
+        tryCompare(list, "count", 2)
+        settled()
+        header = findChild(list.itemAtIndex(0), "projectHeader")
+        button = findChild(header, "projectStopAll")
+        mouseClick(button, button.width / 2, button.height / 2)
+        equal(projectStopSpy.count, 3)
+        equal(projectStopSpy.signalArguments[2][0], "/work/atlas",
+          "filtering still requests the entire project")
+        check(button.mapToItem(panel, button.width, 0).x <= panel.width,
+          "stop fits inside the panel")
+      }
+
+      function test_project_stop_arrow_navigation_and_busy_guard() {
+        groupedFixtures(9)
+        panel.focusNavigation()
+        wait(50)
+        keyClick(Qt.Key_Home)
+        equal(panel.selectedProjectRoot, "/work/atlas")
+        equal(panel.projectStopSelected, false)
+        var header = findChild(list.itemAtIndex(0), "projectHeader")
+        var button = findChild(header, "projectStopAll")
+        keyClick(Qt.Key_Right)
+        equal(panel.projectStopSelected, true)
+        equal(header.hasCursor, false, "the header yields the visible keyboard cursor")
+        equal(button.hasCursor, true, "the stop icon visibly owns the keyboard cursor")
+        keyClick(Qt.Key_Return)
+        equal(projectStopSpy.count, 1)
+        equal(projectStopSpy.signalArguments[0][0], "/work/atlas")
+        equal(panel.pendingAction, "")
+        equal(panel.isProjectCollapsed("/work/atlas"), false)
+        panel.revision++
+        settled()
+        check(panel.projectStopSelected, "stable discovery preserves the action cursor")
+        var path = Quickshell.env("LOCALHOST_TEST_ARTIFACTS")
+        if (path) grabImage(panel).save(path + "/project-stop-keyboard.png")
+        keyClick(Qt.Key_Left)
+        equal(panel.projectStopSelected, false)
+        keyClick(Qt.Key_Space)
+        equal(panel.isProjectCollapsed("/work/atlas"), true)
+        keyClick(Qt.Key_Right)
+        check(panel.projectStopSelected, "Stop all remains reachable on a folded header")
+        keyClick(Qt.Key_Space)
+        equal(projectStopSpy.count, 2)
+        equal(panel.isProjectCollapsed("/work/atlas"), true, "Space on stop does not fold")
+        var closed = 0
+        panel.closeRequested.connect(function() { closed++ })
+        keyClick(Qt.Key_Escape)
+        equal(panel.projectStopSelected, false)
+        equal(closed, 0, "Escape leaves the action before closing the panel")
+        keyClick(Qt.Key_Right)
+        keyClick(Qt.Key_Down)
+        equal(panel.selectedProjectRoot, "/work/console")
+        equal(panel.projectStopSelected, false, "moving projects clears the destructive action cursor")
+        keyClick(Qt.Key_Right)
+        panel.actionBusy = true
+        equal(panel.projectStopSelected, false)
+        panel.activateSelected()
+        equal(projectStopSpy.count, 2, "busy activation cannot dispatch another batch")
+        keyClick(Qt.Key_Right)
+        check(panel.selectedServer() !== null, "right skips the disabled stop action")
+        equal(panel.projectStopSelected, false)
+        equal(stopSpy.count, 0)
+      }
+
+      function test_project_stop_vim_navigation_search_and_auxiliary_guards() {
+        groupedFixtures(9)
+        panel.focusNavigation()
+        wait(50)
+        keyClick(Qt.Key_G)
+        keyClick(Qt.Key_G)
+        keyClick(Qt.Key_L)
+        check(panel.projectStopSelected)
+        keyClick(Qt.Key_Return)
+        equal(projectStopSpy.count, 1)
+        equal(projectStopSpy.signalArguments[0][0], "/work/atlas")
+        keyClick(Qt.Key_H)
+        equal(panel.projectStopSelected, false)
+        keyClick(Qt.Key_Z)
+        keyClick(Qt.Key_C)
+        check(panel.isProjectCollapsed("/work/atlas"))
+        keyClick(Qt.Key_L)
+        keyClick(Qt.Key_Return)
+        equal(projectStopSpy.count, 2)
+        check(panel.isProjectCollapsed("/work/atlas"))
+        keyClick(Qt.Key_Z)
+        keyClick(Qt.Key_O)
+        check(!panel.isProjectCollapsed("/work/atlas"))
+        equal(panel.projectStopSelected, false, "fold commands restore the header cursor")
+        keyClick(Qt.Key_L)
+        keyClick(Qt.Key_J, Qt.ShiftModifier)
+        equal(panel.selectedProjectRoot, "/work/console")
+        equal(panel.projectStopSelected, false)
+        keyClick(Qt.Key_L)
+        keyClick(Qt.Key_K, Qt.ShiftModifier)
+        equal(panel.selectedProjectRoot, "/work/atlas")
+        equal(panel.projectStopSelected, false)
+        keyClick(Qt.Key_L)
+        panel.showDiagnostics = true
+        equal(panel.projectStopSelected, false)
+        keyClick(Qt.Key_L)
+        keyClick(Qt.Key_Return)
+        equal(projectStopSpy.count, 2, "diagnostics cannot activate a hidden project action")
+        panel.showDiagnostics = false
+        keyClick(Qt.Key_L)
+        panel.showFirewallRules = true
+        equal(panel.projectStopSelected, false)
+        keyClick(Qt.Key_Return)
+        equal(projectStopSpy.count, 2)
+        panel.showFirewallRules = false
+        keyClick(Qt.Key_L)
+        panel.beginSearch()
+        wait(50)
+        check(panel.searchMode)
+        equal(panel.projectStopSelected, false)
+        keyClick(Qt.Key_L)
+        keyClick(Qt.Key_H)
+        equal(panel.query, "lh", "Vim action keys remain ordinary search text")
+        keyClick(Qt.Key_Return)
+        equal(projectStopSpy.count, 2, "search input cannot retain a destructive action cursor")
+        panel.clearSearch()
+        wait(50)
+        keyClick(Qt.Key_Home)
+        keyClick(Qt.Key_L)
+        check(panel.projectStopSelected)
+        var remaining = []
+        for (var i = 0; i < servers.count; i++)
+          if (servers.get(i).projectRoot !== "/work/atlas") remaining.push(servers.get(i))
+        RadarModel.syncServerModel(servers, remaining)
+        panel.revision++
+        settled()
+        equal(panel.projectStopSelected, false, "removing the selected project clears its action cursor")
+        keyClick(Qt.Key_Return)
+        equal(projectStopSpy.count, 2, "discovery changes cannot redirect Enter to another project's stop")
+        equal(stopSpy.count, 0)
+      }
+
       function test_project_keyboard_fold_and_jump() {
         groupedFixtures(9)
         panel.focusNavigation()
@@ -439,9 +609,11 @@ ShellRoot {
         tryCompare(list, "count", 6)
         keyClick(Qt.Key_Left)
         equal(list.count, 6, "left is idempotent")
-        keyClick(Qt.Key_L)
+        keyClick(Qt.Key_Right, Qt.ControlModifier)
         tryCompare(list, "count", 9)
-        equal(panel.selectedProjectRoot, "/work/console", "right expands before entering")
+        equal(panel.selectedProjectRoot, "/work/console", "Ctrl+right expands the project")
+        keyClick(Qt.Key_Right)
+        check(panel.projectStopSelected, "right selects the project's stop action")
         keyClick(Qt.Key_Right)
         equal(panel.selectedServer().serverId, "server-1")
         keyClick(Qt.Key_Right)
@@ -521,8 +693,11 @@ ShellRoot {
         equal(panel.selectedProjectRoot, "/work/atlas")
         keyClick(Qt.Key_H)
         equal(list.count, 9)
-        keyClick(Qt.Key_L)
+        keyClick(Qt.Key_Z)
+        keyClick(Qt.Key_O)
         tryCompare(list, "count", 12)
+        keyClick(Qt.Key_L)
+        check(panel.projectStopSelected, "l selects Stop all on a project header")
         keyClick(Qt.Key_L)
         equal(panel.selectedServer().serverId, "server-0", "l enters an expanded project")
         keyClick(Qt.Key_J)
@@ -754,6 +929,96 @@ ShellRoot {
         equal(discovery.manualScanQueued, true, "manual refresh during a forced scan schedules another forced scan")
       }
 
+      function test_project_stop_missing_helper_finishes_and_unlocks() {
+        var service = createTemporaryObject(serviceComponent, tests)
+        var rows = fixtures(2)
+        rows[0].pid = 2147483647
+        rows[1].pid = 2147483646
+        RadarModel.syncServerModel(service.servers, rows)
+        var process = findChild(service, "serverActionProcess")
+        function missingHelper() {
+          if (process.command[1] === service.helperPath)
+            process.command = ["/nonexistent/localhost-test-helper"]
+        }
+        process.commandChanged.connect(missingHelper)
+        actionSpy.target = service
+        actionSpy.clear()
+        check(service.stopProject("/tmp/fixtures"))
+        tryCompare(service, "actionBusy", false, 5000)
+        equal(actionSpy.count, 3, "each launch failure and the batch summary are reported")
+        equal(actionSpy.signalArguments[2][0], "stop-project")
+        equal(actionSpy.signalArguments[2][1], false)
+        check(actionSpy.signalArguments[2][2].indexOf("Project 0 (:3000)") !== -1)
+        check(actionSpy.signalArguments[2][2].indexOf("Could not start") !== -1)
+        equal(service.projectStopQueue.length, 0)
+        equal(service.actionName, "")
+        process.commandChanged.disconnect(missingHelper)
+      }
+
+      function test_project_stop_mixed_sources_keep_each_force_stop_and_can_retry() {
+        var service = createTemporaryObject(serviceComponent, tests)
+        var rows = fixtures(2)
+        rows[0].pid = 2147483647
+        rows[1].pid = 2147483646
+        rows.push(RadarModel.normalizeServer(Object.assign({}, rows[0], {
+          serverId: "docker-api", source: "docker", containerId: "abc123def456", port: 9000
+        })))
+        rows.push(RadarModel.normalizeServer(Object.assign({}, rows[0], {
+          serverId: "shared-port", port: 3002
+        })))
+        RadarModel.syncServerModel(service.servers, rows)
+        var process = findChild(service, "serverActionProcess")
+        var commands = []
+        var succeed = false
+        function helperResponse() {
+          var command = Array.from(process.command)
+          if (command[1] !== service.helperPath) return
+          commands.push(command)
+          var successful = succeed || command[2] === "docker-action"
+          var payload = successful ? { ok: true, message: "Stopped" }
+            : { ok: false, error: "The server did not stop cleanly; use Force stop if needed" }
+          process.command = ["python3", "-c", "print(" + JSON.stringify(JSON.stringify(payload)) + ")"]
+        }
+        process.commandChanged.connect(helperResponse)
+        actionSpy.target = service
+        actionSpy.clear()
+        check(service.stopProject("/tmp/fixtures"))
+        service.servers.clear()
+        tryCompare(service, "actionBusy", false, 5000)
+        equal(commands.length, 3, "the snapshot survives model churn and deduplicates shared ports")
+        equal(commands[0][2], "process-action")
+        equal(commands[0][6], String(rows[0].pid))
+        equal(commands[0][8], String(rows[0].startTime))
+        equal(commands[2][2], "docker-action")
+        equal(commands[2][6], "abc123def456")
+        equal(actionSpy.signalArguments[3][1], false)
+        check(service.forceStopSourceKeys[RadarModel.memorySourceKey(rows[0])],
+          "the first failed process retains Force stop: " + JSON.stringify(service.forceStopSourceKeys))
+        check(service.forceStopSourceKeys[RadarModel.memorySourceKey(rows[1])],
+          "both failed processes retain Force stop")
+        check(service.forceStopSourceKeys[RadarModel.memorySourceKey(rows[3])],
+          "another port on the same process also offers Force stop")
+        succeed = true
+        service.forceStop(rows[0])
+        equal(service.actionBusy, true, "controls lock before the helper finishes starting")
+        tryCompare(service, "actionBusy", false, 5000)
+        equal(commands[3][4], "force-stop")
+        check(!service.forceStopSourceKeys[RadarModel.memorySourceKey(rows[0])],
+          "successful force stop clears that process's recovery state")
+        check(service.forceStopSourceKeys[RadarModel.memorySourceKey(rows[1])],
+          "stopping one process preserves the other's Force stop")
+        RadarModel.syncServerModel(service.servers, rows)
+        check(service.stopProject("/tmp/fixtures"))
+        tryCompare(service, "actionBusy", false, 5000)
+        equal(commands.length, 7)
+        equal(actionSpy.signalArguments[8][0], "stop-project")
+        equal(actionSpy.signalArguments[8][1], true)
+        check(actionSpy.signalArguments[8][2].indexOf("Stopped 3/3 services") !== -1,
+          "the successful retry reports its full result: " + actionSpy.signalArguments[8][2])
+        equal(Object.keys(service.forceStopSourceKeys).length, 0)
+        process.commandChanged.disconnect(helperResponse)
+      }
+
       function test_live_discovery_and_verified_stop() {
         var port = Number(Quickshell.env("LOCALHOST_TEST_PORT"))
         check(port > 0, "runner provides a loopback HTTP fixture")
@@ -804,7 +1069,27 @@ ShellRoot {
         service.refresh()
         tryVerify(function() { return detected() !== null }, 5000,
           "manual refresh discovers a ready server despite a cached failed probe")
-        service.stop(server)
+        // A stale first target must not prevent the real fixture from stopping.
+        // Two ports on that fixture must still produce only one stop action.
+        var stale = RadarModel.normalizeServer({ serverId: "stale", pid: 2147483647,
+          startTime: 1, projectRoot: server.projectRoot, localUrl: server.localUrl })
+        var other = RadarModel.normalizeServer({ serverId: "other-project", pid: 2147483646,
+          startTime: 1, projectRoot: "/unrelated", localUrl: server.localUrl })
+        var targets = [stale, server, Object.assign({}, server, { serverId: "second-port", port: secondPort }), other]
+        RadarModel.syncServerModel(service.servers, targets)
+        actionSpy.target = service
+        actionSpy.clear()
+        check(service.stopProject(server.projectRoot))
+        equal(service.actionBusy, true)
+        equal(service.stopProject(server.projectRoot), false, "a second batch cannot interrupt the first")
+        equal(service.runAction("stop", server), false, "individual actions cannot interrupt a batch")
+        tryCompare(service, "actionBusy", false, 10000)
+        equal(actionSpy.count, 3, "one failed stop, one successful stop, and one summary")
+        equal(actionSpy.signalArguments[0][1], false)
+        equal(actionSpy.signalArguments[1][1], true)
+        equal(actionSpy.signalArguments[2][0], "stop-project")
+        equal(actionSpy.signalArguments[2][1], false, "partial failures remain visible")
+        check(actionSpy.signalArguments[2][2].indexOf("Stopped 1/2") !== -1)
         tryVerify(function() { return detected() === null }, 10000, "verified stop removes the server")
         check(service.systemMemory.totalBytes > 0, "system RAM remains available with no servers")
       }

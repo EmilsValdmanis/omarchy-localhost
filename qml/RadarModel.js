@@ -407,6 +407,24 @@ function projectGroups(servers) {
   return groups
 }
 
+// Snapshot the whole project, including folded/filtered rows, and signal each
+// process identity or container only once even when it publishes several ports.
+function projectStopTargets(servers, projectRoot) {
+  var targets = []
+  var seen = Object.create(null)
+  if (!projectRoot) return targets
+  for (var index = 0; index < servers.length; index++) {
+    var server = normalizeServer(servers[index])
+    if (server.projectRoot !== projectRoot) continue
+    var key = memorySourceKey(server)
+    if (!seen[key]) {
+      seen[key] = true
+      targets.push(server)
+    }
+  }
+  return targets
+}
+
 function actionEnabled(index, server) {
   return !!server && ((index !== ACTIONS.copyLan && index !== ACTIONS.qr) || actionUrl(server, true) !== "")
     && (index !== ACTIONS.restart || server.source === "docker" || server.restartAvailable === true)

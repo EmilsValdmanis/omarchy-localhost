@@ -12,14 +12,19 @@ CursorSurface {
   required property int count
   property bool collapsed: false
   property bool selected: false
+  property bool stopSelected: false
+  property bool actionBusy: false
+  property bool stopping: false
 
   signal toggled()
   signal focused()
+  signal stopRequested()
+  signal stopFocused()
   signal navigationKey(var event)
 
   objectName: "projectHeader"
   implicitHeight: Style.space(30)
-  hasCursor: selected
+  hasCursor: selected && !stopSelected
   activeFocusOnTab: true
   onActiveFocusChanged: if (activeFocus) focused()
   Keys.onPressed: function(event) { header.navigationKey(event) }
@@ -30,15 +35,14 @@ CursorSurface {
   Accessible.checkable: true
   Accessible.checked: !collapsed
   Accessible.focusable: true
-  Accessible.focused: selected
+  Accessible.focused: selected && !stopSelected
   Accessible.onPressAction: toggled()
 
   HoverHandler { id: hover; cursorShape: Qt.PointingHandCursor }
   TapHandler { onTapped: header.toggled() }
   PanelToolTip {
-    visible: hover.hovered
-    text: (header.collapsed ? "Expand" : "Collapse") + " " + header.projectRoot
-      + " · Enter / Space · h/l fold · J/K switch project"
+    visible: hover.hovered && !stopHover.hovered
+    text: header.collapsed ? "Expand project" : "Collapse project"
   }
 
   RowLayout {
@@ -65,6 +69,24 @@ CursorSurface {
       text: header.name
       foreground: header.selected ? Color.accent : header.foreground
       elide: Text.ElideMiddle
+    }
+    PanelActionButton {
+      objectName: "projectStopAll"
+      iconText: header.stopping ? "\uf251" : "\uf04d"
+      foreground: Color.urgent
+      hoverColor: Color.urgent
+      enabled: !header.actionBusy
+      hasCursor: header.selected && header.stopSelected
+      bordered: hasCursor
+      focusable: true
+      onActiveFocusChanged: if (activeFocus) header.stopFocused()
+      tooltipText: header.stopping ? "Stopping project servers…" : "Stop all servers in this project"
+      Accessible.role: Accessible.Button
+      Accessible.name: (header.stopping ? "Stopping all servers in " : "Stop all servers in ") + header.name
+      Accessible.focused: header.selected && header.stopSelected
+      Accessible.onPressAction: if (enabled) header.stopRequested()
+      onClicked: header.stopRequested()
+      HoverHandler { id: stopHover }
     }
     Text {
       Layout.alignment: Qt.AlignBaseline

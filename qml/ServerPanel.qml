@@ -26,6 +26,8 @@ Item {
   property var firewallRules: []
   property bool firewallBusy: false
   property string forceStopServerId: ""
+  property bool actionBusy: false
+  property string stoppingProjectRoot: ""
 
   property string query: ""
   property bool groupByProject: true
@@ -33,6 +35,7 @@ Item {
   property var collapsedProjects: ({})
   property var filteredCollapsedProjects: ({})
   property string selectedProjectRoot: ""
+  property bool projectStopSelected: false
   property string pendingVimPrefix: ""
   property int entryRevision: 0
   property int filteredRevision: 0
@@ -65,6 +68,7 @@ Item {
   signal projectRequested(var server)
   signal restartRequested(var server)
   signal stopRequested(var server)
+  signal projectStopRequested(string projectRoot)
   signal forceStopRequested(var server)
   signal firewallAuthorizationConfirmed(var server)
   signal firewallAuthorizationCanceled()
@@ -187,6 +191,7 @@ Item {
   function selectProject(projectRoot) {
     if (!groupByProject || !groups[projectRoot]) return
     pendingVimPrefix = ""
+    projectStopSelected = false
     selectedIndex = -1
     selectedProjectRoot = projectRoot
     normalizeSelectedAction(1)
@@ -257,10 +262,16 @@ Item {
   function navigateHorizontal(delta) {
     if (!selectedProjectRoot) { selectAction(delta); return }
     if (showDiagnostics || showFirewallRules) return
-    if (delta < 0) setProjectCollapsed(selectedProjectRoot, true)
-    else if (isProjectCollapsed(selectedProjectRoot)) setProjectCollapsed(selectedProjectRoot, false)
-    else if (selectedEntryIndex + 1 < projectModel.count && !projectModel.get(selectedEntryIndex + 1).projectHeader)
-      selectEntry(selectedEntryIndex + 1)
+    if (delta < 0) {
+      if (projectStopSelected) projectStopSelected = false
+      else setProjectCollapsed(selectedProjectRoot, true)
+    } else if (!projectStopSelected && !actionBusy) {
+      projectStopSelected = true
+    } else {
+      if (isProjectCollapsed(selectedProjectRoot)) setProjectCollapsed(selectedProjectRoot, false)
+      if (selectedEntryIndex + 1 < projectModel.count && !projectModel.get(selectedEntryIndex + 1).projectHeader)
+        selectEntry(selectedEntryIndex + 1)
+    }
   }
 
   function ensureSelectedVisible() {
@@ -280,6 +291,7 @@ Item {
   }
 
   function actionEnabled(actionIndex, server) {
+    if (actionBusy && (actionIndex === RadarModel.ACTIONS.stop || actionIndex === RadarModel.ACTIONS.restart)) return false
     return RadarModel.actionEnabled(actionIndex, server)
   }
 
@@ -318,6 +330,8 @@ Item {
       focusNavigation()
     } else if (searchMode) {
       focusNavigation()
+    } else if (projectStopSelected) {
+      projectStopSelected = false
     } else if (query) {
       clearSearch()
     } else if (portFilter !== "all") {
@@ -330,8 +344,17 @@ Item {
 
   function activateSelected() {
     if (showDiagnostics || showFirewallRules) return
-    if (selectedProjectRoot) { toggleProject(selectedProjectRoot); return }
+    if (selectedProjectRoot) {
+      if (projectStopSelected) stopProject(selectedProjectRoot)
+      else toggleProject(selectedProjectRoot)
+      return
+    }
     activateAction(selectedActionIndex, selectedServer())
+  }
+
+  function stopProject(projectRoot) {
+    if (actionBusy || showDiagnostics || showFirewallRules || confirmDialog.opened) return
+    if (groupByProject && groups[projectRoot]) projectStopRequested(projectRoot)
   }
 
   function activateAction(actionIndex, selected) {
@@ -350,6 +373,7 @@ Item {
   function beginSearch() {
     if (showDiagnostics || showFirewallRules) return
     pendingVimPrefix = ""
+    projectStopSelected = false
     Qt.callLater(function() { searchField.forceActiveFocus() })
   }
 
@@ -365,7 +389,7 @@ Item {
   }
 
   function requestStop(server, force) {
-    if (!server) return
+    if (!server || actionBusy) return
     pendingServer = server
     pendingFirewallRule = null
     pendingAction = force ? "force-stop" : "stop"
@@ -476,6 +500,8 @@ Item {
       if (confirmDialog.handleKey(event)) event.accepted = true
       return
     }
+    // The panel cursor owns navigation even after a click focused an icon.
+    if (!searchMode) keyCatcher.forceActiveFocus()
     if (handleVimKey(event)) {
       event.accepted = true
       return
@@ -503,7 +529,8 @@ Item {
       selectEntry(event.key === Qt.Key_Home ? 0 : projectModel.count - 1)
       event.accepted = true
     } else if (plainNavigation && event.key === Qt.Key_Space && selectedProjectRoot) {
-      toggleProject(selectedProjectRoot)
+      if (projectStopSelected) stopProject(selectedProjectRoot)
+      else toggleProject(selectedProjectRoot)
       event.accepted = true
     } else if (plainNavigation
                && (event.key === Qt.Key_Left || event.key === Qt.Key_H)) {
@@ -551,8 +578,12 @@ Item {
 
   onRevisionChanged: Qt.callLater(rebuildFilteredModel)
   onServersChanged: Qt.callLater(rebuildFilteredModel)
-  onPanelActiveChanged: { pendingVimPrefix = ""; if (panelActive) Qt.callLater(rebuildFilteredModel) }
-  onSearchModeChanged: pendingVimPrefix = ""
+  onPanelActiveChanged: { pendingVimPrefix = ""; projectStopSelected = false; if (panelActive) Qt.callLater(rebuildFilteredModel) }
+  onSearchModeChanged: { pendingVimPrefix = ""; projectStopSelected = false }
+  onSelectedProjectRootChanged: projectStopSelected = false
+  onActionBusyChanged: if (actionBusy) projectStopSelected = false
+  onShowDiagnosticsChanged: projectStopSelected = false
+  onShowFirewallRulesChanged: projectStopSelected = false
   onGroupByProjectChanged: { rebuildFilteredModel(); ensureSelectedVisible() }
   onSelectedIndexChanged: if (selectedIndex >= 0) selectedProjectRoot = ""
   onQueryChanged: { filteredCollapsedProjects = ({}); rebuildFilteredModel(); ensureSelectedVisible() }
@@ -1061,9 +1092,17 @@ Item {
               count: entryDelegate.model.count
               collapsed: entryDelegate.model.collapsed
               selected: entryDelegate.selected
+              stopSelected: entryDelegate.selected && root.projectStopSelected
+              actionBusy: root.actionBusy
+              stopping: root.stoppingProjectRoot === projectRoot
               foreground: root.foreground
               onToggled: root.toggleProject(projectRoot)
               onFocused: root.selectProject(projectRoot)
+              onStopFocused: {
+                root.selectProject(projectRoot)
+                root.projectStopSelected = true
+              }
+              onStopRequested: root.stopProject(projectRoot)
               onNavigationKey: function(event) { root.handleSearchKey(event) }
             }
           }
@@ -1134,6 +1173,7 @@ Item {
       server: root.currentServer
       selectedActionIndex: root.selectedActionIndex
       forceStopAvailable: !!server && server.serverId === root.forceStopServerId && server.source !== "docker"
+      actionBusy: root.actionBusy
       foreground: root.foreground
       onActionHovered: function(actionIndex) { root.selectedActionIndex = actionIndex }
       onActionTriggered: function(actionIndex) { root.activateAction(actionIndex, root.currentServer) }
@@ -1157,7 +1197,9 @@ Item {
       textFormat: Text.PlainText
       Layout.fillWidth: true
       text: root.selectedProjectRoot
-        ? "j/k select · h/l fold · enter toggle · J/K project"
+        ? (root.projectStopSelected
+          ? "enter stop all · ← / h back · j/k select · esc cancel"
+          : "→ / l stop all · space fold · zc/zo fold · J/K project")
         : (root.groupByProject
           ? "↑↓ / j/k select · zc/zo fold · J/K project · / search"
           : "↑↓ select · ←→ action · enter run · / search")

@@ -25,6 +25,15 @@ Item {
   property string actionError: ""
   property string actionOutput: ""
   property string actionServerId: ""
+  property string actionServerLabel: ""
+  property string actionSourceKey: ""
+  property var forceStopSourceKeys: ({})
+  readonly property bool actionBusy: actionName !== "" || stoppingProjectRoot !== ""
+  property string stoppingProjectRoot: ""
+  property var projectStopQueue: []
+  property int projectStopTotal: 0
+  property int projectStopSucceeded: 0
+  property var projectStopErrors: []
   property var warnings: []
   property var dependencyWarnings: []
   property var diagnostics: []
@@ -186,12 +195,19 @@ Item {
   }
 
   function runAction(action, server) {
-    if (!server || actionProcess.running) return
-    if (action === "restart" && !RadarModel.actionEnabled(RadarModel.ACTIONS.restart, server)) return
+    if (!server || actionBusy) return false
+    if (action === "restart" && !RadarModel.actionEnabled(RadarModel.ACTIONS.restart, server)) return false
+    startAction(action, server)
+    return true
+  }
+
+  function startAction(action, server) {
     actionName = action
     actionError = ""
     actionOutput = ""
     actionServerId = String(server.serverId || server.id || "")
+    actionServerLabel = server.name + " (:" + server.port + ")"
+    actionSourceKey = RadarModel.memorySourceKey(server)
     if (server.source === "docker" && server.containerId) {
       if (action === "force-stop") action = "stop"
       actionProcess.command = [
@@ -212,6 +228,68 @@ Item {
   function stop(server) { runAction("stop", server) }
   function forceStop(server) { runAction("force-stop", server) }
   function restart(server) { runAction("restart", server) }
+
+  function stopProject(projectRoot) {
+    if (actionBusy) return false
+    var rows = []
+    for (let index = 0; index < serverModel.count; index++) rows.push(serverModel.get(index))
+    var targets = RadarModel.projectStopTargets(rows, projectRoot)
+    if (!targets.length) return false
+    stoppingProjectRoot = projectRoot
+    projectStopQueue = targets
+    projectStopTotal = targets.length
+    projectStopSucceeded = 0
+    projectStopErrors = []
+    runNextProjectStop()
+    return true
+  }
+
+  function runNextProjectStop() {
+    if (projectStopQueue.length) {
+      let server = projectStopQueue[0]
+      projectStopQueue = projectStopQueue.slice(1)
+      startAction("stop", server)
+      return
+    }
+    var name = RadarModel.basename(stoppingProjectRoot)
+    var failed = projectStopErrors.length
+    var detail = "Stopped " + projectStopSucceeded + "/" + projectStopTotal
+      + " services in " + name + "."
+    if (failed) detail += " " + failed + " failed: " + projectStopErrors[0]
+    stoppingProjectRoot = ""
+    actionFinished("stop-project", failed === 0, detail, "")
+    postActionScan.restart()
+  }
+
+  function finishAction(exitCode, failure) {
+    var action = actionName
+    var parsed = RadarModel.parseActionPayload(actionOutput,
+      failure || actionError || (exitCode === 0 ? "Action completed" : "Server action failed"))
+    var successful = exitCode === 0 && parsed.ok
+    var serverId = actionServerId
+    var label = actionServerLabel
+    var sourceKey = actionSourceKey
+    actionName = ""
+    actionServerId = ""
+    actionServerLabel = ""
+    actionSourceKey = ""
+    if ((action === "stop" && !successful && parsed.message.indexOf("did not stop cleanly") !== -1)
+        || (successful && forceStopSourceKeys[sourceKey])) {
+      let next = Object.assign({}, forceStopSourceKeys)
+      if (successful) delete next[sourceKey]
+      else next[sourceKey] = true
+      forceStopSourceKeys = next
+    }
+    if (stoppingProjectRoot !== "") {
+      if (successful) projectStopSucceeded++
+      else projectStopErrors = projectStopErrors.concat([label + ": " + parsed.message])
+      actionFinished(action, successful, parsed.message, serverId)
+      Qt.callLater(root.runNextProjectStop)
+    } else {
+      actionFinished(action, successful, parsed.message, serverId)
+      postActionScan.restart()
+    }
+  }
 
 
   onPanelActiveChanged: if (panelActive) sampleResources(true)
@@ -340,6 +418,7 @@ Item {
 
   Process {
     id: actionProcess
+    objectName: "serverActionProcess"
     stdout: StdioCollector {
       waitForEnd: true
       onStreamFinished: root.actionOutput = String(text || "")
@@ -348,16 +427,10 @@ Item {
       waitForEnd: true
       onStreamFinished: root.actionError = String(text || "").trim()
     }
-    onExited: function(exitCode) {
-      var action = root.actionName
-      var parsed = RadarModel.parseActionPayload(
-        root.actionOutput,
-        root.actionError || (exitCode === 0 ? "Action completed" : "Server action failed"))
-      var successful = exitCode === 0 && parsed.ok
-      root.actionFinished(action, successful, parsed.message, root.actionServerId)
-      root.actionName = ""
-      root.actionServerId = ""
-      postActionScan.restart()
-    }
+    onExited: function(exitCode) { root.finishAction(exitCode, "") }
+    // FailedToStart emits runningChanged without exited in Quickshell 0.3.1.
+    // A normal exit clears actionName above before runningChanged is emitted.
+    onRunningChanged: if (!running && root.actionName !== "")
+      root.finishAction(1, "Could not start the server action helper")
   }
 }

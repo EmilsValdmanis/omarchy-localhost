@@ -11,6 +11,7 @@ RowLayout {
   property var server: null
   property int selectedActionIndex: 0
   property bool forceStopAvailable: false
+  property bool actionBusy: false
   property color foreground: Color.popups.text
   signal actionHovered(int actionIndex)
   signal actionTriggered(int actionIndex)
@@ -57,7 +58,7 @@ RowLayout {
         ? root.server.restartReason : modelData.tip
       foreground: index === 3 ? Color.urgent : root.foreground
       hoverColor: index === 3 ? Color.urgent : Color.accent
-      enabled: RadarModel.actionEnabled(index + 4, root.server)
+      enabled: RadarModel.actionEnabled(index + 4, root.server) && (index < 2 || !root.actionBusy)
       hasCursor: root.server !== null && root.selectedActionIndex === index + 4
       bordered: hasCursor
       onHovered: function(on) { if (on) root.actionHovered(index + 4) }
