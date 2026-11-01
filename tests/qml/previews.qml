@@ -38,7 +38,7 @@ ShellRoot {
         id: poster
         width: 1600
         height: 900
-        color: "#181d20"
+        color: Theme.Color.background
 
         Image {
           id: wallpaper
@@ -51,8 +51,8 @@ ShellRoot {
           anchors.fill: parent
           gradient: Gradient {
             orientation: Gradient.Horizontal
-            GradientStop { position: 0; color: "#b8181d20" }
-            GradientStop { position: 1; color: "#70181d20" }
+            GradientStop { position: 0; color: Qt.alpha(Theme.Color.background, 0.88) }
+            GradientStop { position: 1; color: Qt.alpha(Theme.Color.background, 0.45) }
           }
         }
 
@@ -67,16 +67,37 @@ ShellRoot {
           font.weight: Font.Bold
           font.letterSpacing: -3
         }
-        Copy {
-          x: 112; y: 220
-          text: "for Omarchy"
-          color: Theme.Color.accent
-          font.pixelSize: 22
+        Item {
+          x: 112
+          // Keep the visible subtitle 20px below the title's lettering.
+          y: title.y + title.baselineOffset + titleMetrics.tightBoundingRect(title.text).y + titleMetrics.tightBoundingRect(title.text).height
+            + 20 - attribution.baselineOffset - attributionMetrics.tightBoundingRect(attribution.text).y
+          width: attribution.width + 12 + omarchyLogo.width
+          height: attribution.height
+          FontMetrics { id: attributionMetrics; font: attribution.font }
+          Copy {
+            id: attribution
+            text: "for Omarchy"
+            color: Theme.Color.accent
+            font.pixelSize: 22
+          }
+          PluginUi.PaintedGlyph {
+            id: omarchyLogo
+            x: attribution.width + 12
+            y: attribution.baselineOffset + attributionMetrics.tightBoundingRect("H").y
+              + attributionMetrics.tightBoundingRect("H").height / 2 - height / 2
+            width: 24; height: 24
+            text: "\ue900"
+            fontFamily: "omarchy"
+            fontSize: 24
+            paintedSize: 22
+            color: Theme.Color.accent
+          }
         }
         Copy {
           x: 112; y: 278
           text: "Your dev servers, in one place."
-          color: "#c1c9bd"
+          color: Theme.Color.foreground
           font.pixelSize: 25
         }
 
@@ -86,10 +107,10 @@ ShellRoot {
           spacing: 8
           Repeater {
             model: [
-              "Automatic framework & port detection",
-              "One-click stop for an entire monorepo",
-              "Docker & Compose discovery",
-              "Compact RAM summary & server trends",
+              "Automatic server & framework detection",
+              "Project groups & one-click stop all",
+              "Docker, Compose & custom port skips",
+              "Live RAM usage & server trends",
               "Open locally, share over LAN",
               "Quick search & keyboard navigation"
             ]
@@ -108,8 +129,9 @@ ShellRoot {
           y: Math.max(Math.round(card.y + card.height * card.scale - height),
             features.y + features.height + 42)
           width: 506; height: 209
-          color: "#21272c"
-          border.color: "#343f44"
+          color: Theme.Color.popups.background
+          border.color: Qt.alpha(Theme.Color.popups.border, 0.45)
+          radius: Style.cornerRadius
           PluginUi.QrCode {
             id: qrCode
             x: 22 + Math.floor((165 - width) / 2)
@@ -132,7 +154,7 @@ ShellRoot {
           Copy {
             x: 211; y: 136
             text: "Same Wi-Fi. One scan."
-            color: "#9da9a0"
+            color: Qt.darker(Theme.Color.foreground, 1.4)
             font.pixelSize: 16
           }
         }
@@ -160,20 +182,17 @@ ShellRoot {
       }
 
       function initTestCase() {
-        // A fixed palette makes screenshots reproducible without changing the desktop theme.
-        Theme.Color.foreground = "#d3c6aa"
-        Theme.Color.background = "#2d353b"
-        Theme.Color.accent = "#7fbbb3"
-        Theme.Color.urgent = "#e67e80"
-        Theme.Color.shellValues = ({ "popups.background": "#21272c", "popups.border": "#475258" })
+        // Load the preview theme only in this isolated Quickshell instance.
+        Theme.Color.loadColors(Quickshell.env("LOCALHOST_PREVIEW_COLORS"))
+        Theme.Color.shellValues = Theme.Color.parseShell(Quickshell.env("LOCALHOST_PREVIEW_SHELL"))
+        Style.applyShellValues(Theme.Color.shellValues)
         Style.fontBaseSize = 12
         Style.spacingScale = 1
         Style.fontFamily = "JetBrainsMono Nerd Font"
-        Style.cornerRadius = 0
-        Style.styleOverrides = ({})
+        Style.cornerRadius = 6
         var demo = [
-          ["@atlas/web", "Next.js", "next", 3000, "atlas", "apps/web", true],
-          ["@atlas/docs", "Astro", "astro", 4321, "atlas", "apps/docs", true],
+          ["@atlas/web", "TanStack Start", "tanstack", 3000, "atlas", "apps/web", true],
+          ["@atlas/docs", "Docusaurus", "docusaurus", 3001, "atlas", "apps/docs", true],
           ["@atlas/api", "FastAPI", "fastapi", 8000, "atlas", "services/api", true],
           ["@storefront/admin", "React", "react", 5173, "storefront", "apps/admin", false],
           ["@storefront/ui", "Storybook", "storybook", 6006, "storefront", "packages/ui", false],
@@ -207,7 +226,7 @@ ShellRoot {
         panel.rebuildFilteredModel()
         panel.revision++
         // A preview-only easter egg for anyone who scans the marketplace image.
-        qr.open(JSON.stringify({ name: "Atlas / web", framework: "Next.js", url: "https://youtu.be/oHg5SJYRHA0" }))
+        qr.open(JSON.stringify({ name: "Atlas / web", framework: "TanStack Start", url: "https://youtu.be/oHg5SJYRHA0" }))
         mouseMove(tests, 1590, 890)
         wait(300)
       }

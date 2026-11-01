@@ -49,9 +49,14 @@ def main():
         docker_stub.chmod(0o755)
         env["PATH"] = str(fixture_bin) + os.pathsep + env["PATH"]
         if args.previews:
-            wallpaper = shell.parent / "themes/everforest/backgrounds/1-tree-tops.jpg"
-            if not wallpaper.is_file():
-                sys.exit(f"Preview rendering requires the Everforest wallpaper: {wallpaper}")
+            config_home = Path(os.environ.get("XDG_CONFIG_HOME", str(Path.home() / ".config")))
+            theme = Path(os.environ.get("LOCALHOST_PREVIEW_THEME", str(config_home / "omarchy/themes/motion-blur"))).expanduser()
+            wallpaper = Path(os.environ.get("LOCALHOST_PREVIEW_WALLPAPER", str(theme / "backgrounds/01-wedge.webp"))).expanduser()
+            for source in (theme / "colors.toml", theme / "shell.toml", wallpaper):
+                if not source.is_file():
+                    sys.exit(f"Preview asset missing: {source}. Set LOCALHOST_PREVIEW_THEME or LOCALHOST_PREVIEW_WALLPAPER.")
+            env["LOCALHOST_PREVIEW_COLORS"] = (theme / "colors.toml").read_text()
+            env["LOCALHOST_PREVIEW_SHELL"] = (theme / "shell.toml").read_text()
             destination = Path(os.environ.get("LOCALHOST_PREVIEW_DIR", str(repo))).resolve()
             destination.mkdir(parents=True, exist_ok=True)
             env["LOCALHOST_PREVIEW_DIR"] = str(destination)

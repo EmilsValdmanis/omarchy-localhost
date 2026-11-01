@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "id": "emils.localhost",
   "name": "Localhost",
-  "version": "0.8.0",
+  "version": "0.9.0",
   "author": "Emil Valdmanis",
   "license": "MIT",
   "description": "Discover local development servers, open them instantly, and send LAN-ready projects to your phone with a QR code.",
@@ -63,14 +63,14 @@
         "key": "ignoredPorts",
         "type": "string",
         "label": "Ignored ports",
-        "description": "Comma-separated ports or ranges, for example 3001,8000-8010.",
+        "description": "Hide ports without stopping them. Restore them from Skipped. Accepts ranges such as 3001,8000-8010.",
         "defaultValue": ""
       },
       {
         "key": "alwaysIncludePorts",
         "type": "string",
         "label": "Always include ports",
-        "description": "Probe these ports even when the process is not recognized as a development server.",
+        "description": "Probe excluded ports. They still need an HTTP or HTTPS response to appear in Servers.",
         "defaultValue": ""
       },
       {

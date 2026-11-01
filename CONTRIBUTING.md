@@ -29,8 +29,9 @@ The UI suite sends native wheel and keyboard events, checks scrolling after
 model changes, verifies small popups and font scaling, tests QR pixels and
 process cancellation, grouping and shared actions, and discovers/stops a
 disposable process with two loopback HTTP listeners. It also verifies local/LAN
-copy shortcuts, collapsible projects and RAM details, stable colors, independent
-Docker latency, and RAM sampling history. Docker is stubbed in the isolated runner;
+copy shortcuts, collapsible project and skip groups, RAM hover details, stable
+colors, independent Docker latency, and RAM sampling history. Docker is stubbed
+in the isolated runner;
 tests do not connect to your Docker daemon. Model and helper tests
 cover framework arguments, port selection, repository/workspace metadata, and
 bounded restart logs after the action helper has exited.
@@ -64,15 +65,19 @@ Regenerate the shared marketplace and README preview after UI changes:
 python3 tests/run_qml.py --previews
 ```
 
-This renders a single 1600×900 `preview.png` with the Localhost title,
-a concise feature list, the actual panel, and a smaller QR card. It uses fixed
-demo data, Omarchy's Everforest palette and tree-tops wallpaper, iA Writer
-Quattro, and JetBrains Mono. The wallpaper is read from the installed Omarchy
-theme (or `OMARCHY_PATH`); it is not duplicated in this repository. Inspect the image before
-committing. The composition lives in `tests/qml/previews.qml`.
-The preview QR links to Rick Astley's video as an easter egg.
-Set `LOCALHOST_PREVIEW_DIR` to save it somewhere else. Rendering uses an
-isolated Quickshell instance and does not change your desktop theme.
+This renders a single 1600×900 `preview.png` with a concise feature list, the
+actual panel, and a smaller QR card. It uses fixed demo data, the installed
+[Motion Blur](https://github.com/erikrjohansson/omarchy-motion-blur-theme)
+palette and wedge-car wallpaper by Erik Johansson, iA Writer Quattro, and JetBrains
+Mono. The theme is read from `~/.config/omarchy/themes/motion-blur` (respecting
+`XDG_CONFIG_HOME`); its original wallpaper is not duplicated in this repository.
+Keep the preview credit and [third-party notices](THIRD_PARTY_NOTICES.md) with the image.
+
+Set `LOCALHOST_PREVIEW_THEME` to another theme directory,
+`LOCALHOST_PREVIEW_WALLPAPER` to an image path, or `LOCALHOST_PREVIEW_DIR` to
+save elsewhere. The preview QR retains its Rick Astley easter egg. Rendering
+uses an isolated Quickshell instance and leaves the desktop theme unchanged. Inspect
+the image before committing; its composition lives in `tests/qml/previews.qml`.
 
 ## Pull requests
 
@@ -96,7 +101,7 @@ and rebase methods for native stacks.
 To ship a stable version, bump `manifest.json` using `major.minor.patch`.
 After the PR merges and both CI jobs pass on `main`, the workflow runs
 `gh release create --generate-notes`. The release title is just the version,
-such as `v0.5.1`. GitHub generates "What's Changed", PR links, contributor
+such as `v0.9.0`. GitHub generates "What's Changed", PR links, contributor
 credits, and a full changelog comparison from the merged pull requests.
 
 No manual changelog or release notes are required. Already published versions
