@@ -87,7 +87,8 @@ Item {
     memoryHistoryByKey = nextHistory
     nextServers.sort(function(a, b) { return a.port - b.port || a.name.toLowerCase().localeCompare(b.name.toLowerCase()) })
     if (RadarModel.syncServerModel(serverModel, nextServers)) revision++
-    var nextDiagnostics = nativeDiscovery.diagnostics.concat(includeDocker ? dockerDiscovery.diagnostics : []).slice(0, 30)
+    var nextDiagnostics = nativeDiscovery.diagnostics.concat(includeDocker ? dockerDiscovery.diagnostics : [])
+    nextDiagnostics.sort(function(a, b) { return a.port - b.port || String(a.process).localeCompare(String(b.process)) })
     if (!arraysEqual(diagnostics, nextDiagnostics)) diagnostics = nextDiagnostics
     var nextWarnings = dependencyWarnings.concat(routeWarning ? [routeWarning] : [],
       resourceWarning ? [resourceWarning] : [], nativeDiscovery.warnings, includeDocker ? dockerDiscovery.warnings : [])
@@ -137,6 +138,7 @@ Item {
           if (keys[k].indexOf("process:") === 0 && nextResources[keys[k]] === undefined) nextResources[keys[k]] = -1
         resourceOutput = ""
         resourceProcess.command = ["python3", helperPath, "resources", "--pids", pids.join(","), "--uid", String(currentUid)]
+        resourceProcess.awaitingExit = true
         resourceProcess.running = true
       }
     }
@@ -151,6 +153,7 @@ Item {
         dockerResourceOutput = ""
         dockerMemoryProcess.command = ["python3", helperPath, "resources", "--pids", "", "--uid", String(currentUid),
           "--containers", containers.join(","), "--no-system"]
+        dockerMemoryProcess.awaitingExit = true
         dockerMemoryProcess.running = true
       }
     }
@@ -293,12 +296,13 @@ Item {
 
 
   onPanelActiveChanged: if (panelActive) sampleResources(true)
-  onSelectedLanInterfaceChanged: if (!ipProcess.running) ipProcess.running = true
+  onSelectedLanInterfaceChanged: if (!ipProcess.running) ipProcess.start()
 
   Component.onCompleted: {
     dependencyProcess.running = true
+    uidProcess.awaitingExit = true
     uidProcess.running = true
-    ipProcess.running = true
+    ipProcess.start()
   }
 
   RadarDiscovery {
@@ -334,7 +338,7 @@ Item {
     interval: 60000
     running: true
     repeat: true
-    onTriggered: if (!ipProcess.running) ipProcess.running = true
+    onTriggered: if (!ipProcess.running) ipProcess.start()
   }
   Timer {
     id: postActionScan
@@ -363,25 +367,34 @@ Item {
 
   Process {
     id: uidProcess
+    property bool awaitingExit: false
     command: ["id", "-u"]
     stdout: StdioCollector {
       waitForEnd: true
       onStreamFinished: root.currentUid = Number(String(text || "").trim())
     }
-    onExited: function(exitCode) {
+    function finish(exitCode) {
+      if (!awaitingExit) return
+      awaitingExit = false
       if (exitCode !== 0 || root.currentUid < 0) root.uidError = "Could not determine the current user"
       else root.scan()
     }
+    onExited: function(exitCode) { finish(exitCode) }
+    onRunningChanged: if (!running && awaitingExit) finish(1)
   }
 
   Process {
     id: ipProcess
+    property bool awaitingExit: false
+    function start() { awaitingExit = true; running = true }
     command: ["bash", "-c", "ip -j -4 route show && ip -j -4 address show up"]
     stdout: StdioCollector {
       waitForEnd: true
       onStreamFinished: root.ipOutput = String(text || "")
     }
-    onExited: function(exitCode) {
+    function finish(exitCode) {
+      if (!awaitingExit) return
+      awaitingExit = false
       if (exitCode !== 0) {
         root.lanIp = ""
         root.lanInterface = ""
@@ -402,18 +415,26 @@ Item {
         : "No active IPv4 LAN route was found")
       root.scan()
     }
+    onExited: function(exitCode) { finish(exitCode) }
+    onRunningChanged: if (!running && awaitingExit) finish(1)
   }
 
 
   Process {
     id: resourceProcess
+    property bool awaitingExit: false
     stdout: StdioCollector { waitForEnd: true; onStreamFinished: root.resourceOutput = String(text || "") }
-    onExited: function(exitCode) { root.finishResourceSample(root.resourceOutput, false, exitCode) }
+    function finish(exitCode) { if (!awaitingExit) return; awaitingExit = false; root.finishResourceSample(root.resourceOutput, false, exitCode) }
+    onExited: function(exitCode) { finish(exitCode) }
+    onRunningChanged: if (!running && awaitingExit) finish(1)
   }
   Process {
     id: dockerMemoryProcess
+    property bool awaitingExit: false
     stdout: StdioCollector { waitForEnd: true; onStreamFinished: root.dockerResourceOutput = String(text || "") }
-    onExited: function(exitCode) { root.finishResourceSample(root.dockerResourceOutput, true, exitCode) }
+    function finish(exitCode) { if (!awaitingExit) return; awaitingExit = false; root.finishResourceSample(root.dockerResourceOutput, true, exitCode) }
+    onExited: function(exitCode) { finish(exitCode) }
+    onRunningChanged: if (!running && awaitingExit) finish(1)
   }
 
   Process {

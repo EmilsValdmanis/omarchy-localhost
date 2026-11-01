@@ -1,5 +1,6 @@
 import os
 import io
+import http.client
 import json
 from contextlib import redirect_stdout
 import shutil
@@ -92,6 +93,8 @@ class ProcessInspectionTests(unittest.TestCase):
         self.assertEqual(helper.parse_docker_memory("100MiB / 4GiB"), 104857600)
         self.assertEqual(helper.parse_docker_memory("12.5MB / 1GB"), 12500000)
         self.assertEqual(helper.parse_docker_memory("unavailable"), -1)
+        self.assertEqual(helper.parse_docker_memory("1..2 MiB"), -1)
+        self.assertEqual(helper.parse_docker_memory("9" * 400 + " GiB"), -1)
 
     def test_reads_total_and_available_system_ram(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -361,10 +364,15 @@ class ProcessActionTests(unittest.TestCase):
     def test_delayed_replacement_waits_for_http_readiness(self):
         self.start_http_server()
         self.script.write_text("import time\ntime.sleep(0.3)\n" + self.script.read_text())
-        started_at = time.monotonic()
         with mock.patch.dict(os.environ, {"XDG_STATE_HOME": self.state_directory.name}):
             self.restarted, _log = helper.restart_process(self.child.pid, self.start_time, self.url)
-        self.assertGreaterEqual(time.monotonic() - started_at, 0.5)
+        self.assertIn(self.port, helper.listening_ports(Path(f"/proc/{self.restarted.pid}")))
+        connection = http.client.HTTPConnection("127.0.0.1", self.port, timeout=2)
+        try:
+            connection.request("HEAD", "/")
+            self.assertEqual(connection.getresponse().status, 404)
+        finally:
+            connection.close()
 
     def test_other_process_http_response_cannot_make_replacement_ready(self):
         self.start_http_server()

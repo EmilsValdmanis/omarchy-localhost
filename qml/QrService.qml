@@ -59,6 +59,7 @@ Item {
     expectedStop = false
     loading = true
     qrProcess.command = ["qrencode", "--type", "ASCII", "--margin", "4", "--output", "-", url]
+    qrProcess.awaitingExit = true
     qrProcess.running = true
   }
 
@@ -77,6 +78,7 @@ Item {
 
   Process {
     id: qrProcess
+    property bool awaitingExit: false
 
     stdout: StdioCollector {
       waitForEnd: true
@@ -92,7 +94,9 @@ Item {
       }
     }
 
-    onExited: function(exitCode) {
+    function finish(exitCode) {
+      if (!awaitingExit) return
+      awaitingExit = false
       root.loading = false
       if (root.expectedStop) {
         root.expectedStop = false
@@ -101,5 +105,7 @@ Item {
       }
       if (exitCode !== 0 && root.error === "") root.error = "Could not generate the QR code"
     }
+    onExited: function(exitCode) { finish(exitCode) }
+    onRunningChanged: if (!running && awaitingExit && !root.expectedStop) finish(1)
   }
 }

@@ -94,6 +94,7 @@ BarWidget {
     firewallCheckOutput = ""
     firewallError = ""
     showNotice("Checking LAN access…", false)
+    firewallCheckProcess.awaitingExit = true
     firewallCheckProcess.running = true
   }
 
@@ -107,6 +108,7 @@ BarWidget {
       "from", server.lanSubnet, "to", "any", "port", String(server.port),
       "proto", "tcp", "comment", "omarchy-localhost"
     ]
+    firewallAllowProcess.awaitingExit = true
     firewallAllowProcess.running = true
   }
 
@@ -118,6 +120,7 @@ BarWidget {
   function refreshFirewallRules() {
     if (firewallRulesProcess.running) return
     firewallRulesOutput = ""
+    firewallRulesProcess.awaitingExit = true
     firewallRulesProcess.running = true
   }
 
@@ -130,8 +133,9 @@ BarWidget {
       String(rule.interfaceName), "from", String(rule.subnet), "to", "any",
       "port", String(rule.port), "proto", "tcp", "comment", "omarchy-localhost"
     ]
-    firewallRemoveProcess.running = true
+    firewallRemoveProcess.awaitingExit = true
     showNotice("Removing LAN access for :" + rule.port + "…", false)
+    firewallRemoveProcess.running = true
   }
 
   function openPanel() {
@@ -220,6 +224,7 @@ BarWidget {
 
   Process {
     id: firewallCheckProcess
+    property bool awaitingExit: false
     command: root.firewallStatusCommand
     stdout: StdioCollector {
       waitForEnd: true
@@ -229,9 +234,16 @@ BarWidget {
       waitForEnd: true
       onStreamFinished: root.firewallError = String(text || "").trim()
     }
-    onExited: function(exitCode) {
+    function finish(exitCode) {
+      if (!awaitingExit) return
+      awaitingExit = false
       var server = root.pendingQrServer
       if (!server) return
+      if (exitCode !== 0) {
+        root.pendingQrServer = null
+        root.showNotice(root.firewallError || "Could not check LAN access", true)
+        return
+      }
       var active = root.firewallCheckOutput.indexOf("active\n") === 0
       var rules = active ? root.firewallCheckOutput.slice(7) : ""
       var unreadable = rules.split(/\r?\n/).indexOf("unreadable") !== -1
@@ -245,33 +257,43 @@ BarWidget {
         root.showNotice("UFW rules could not be read; confirming LAN access for :" + server.port, false)
       panel.requestFirewallAuthorization(server)
     }
+    onExited: function(exitCode) { finish(exitCode) }
+    onRunningChanged: if (!running && awaitingExit) finish(1)
   }
 
   Process {
     id: firewallRulesProcess
+    property bool awaitingExit: false
     command: root.firewallStatusCommand
     stdout: StdioCollector {
       waitForEnd: true
       onStreamFinished: root.firewallRulesOutput = String(text || "")
     }
-    onExited: function(exitCode) {
+    function finish(exitCode) {
+      if (!awaitingExit) return
+      awaitingExit = false
       var active = exitCode === 0 && root.firewallRulesOutput.indexOf("active\n") === 0
       var body = active ? root.firewallRulesOutput.slice(7) : ""
       var unreadable = body.split(/\r?\n/).indexOf("unreadable") !== -1
-      root.firewallRulesUnreadable = active && unreadable
+      root.firewallRulesUnreadable = exitCode !== 0 || (active && unreadable)
       root.managedFirewallRules = active && !unreadable
         ? RadarModel.parseManagedUfwRules(body, "omarchy-localhost")
         : []
     }
+    onExited: function(exitCode) { finish(exitCode) }
+    onRunningChanged: if (!running && awaitingExit) finish(1)
   }
 
   Process {
     id: firewallAllowProcess
+    property bool awaitingExit: false
     stderr: StdioCollector {
       waitForEnd: true
       onStreamFinished: root.firewallError = String(text || "").trim()
     }
-    onExited: function(exitCode) {
+    function finish(exitCode) {
+      if (!awaitingExit) return
+      awaitingExit = false
       var server = root.pendingQrServer
       root.pendingQrServer = null
       root.refreshFirewallRules()
@@ -282,15 +304,20 @@ BarWidget {
         root.showNotice(root.firewallError || "LAN access was not authorized", true)
       }
     }
+    onExited: function(exitCode) { finish(exitCode) }
+    onRunningChanged: if (!running && awaitingExit) finish(1)
   }
 
   Process {
     id: firewallRemoveProcess
+    property bool awaitingExit: false
     stderr: StdioCollector {
       waitForEnd: true
       onStreamFinished: root.firewallError = String(text || "").trim()
     }
-    onExited: function(exitCode) {
+    function finish(exitCode) {
+      if (!awaitingExit) return
+      awaitingExit = false
       var rule = root.pendingFirewallRule
       root.pendingFirewallRule = null
       root.refreshFirewallRules()
@@ -299,6 +326,8 @@ BarWidget {
       else
         root.showNotice(root.firewallError || "Could not remove the LAN access rule", true)
     }
+    onExited: function(exitCode) { finish(exitCode) }
+    onRunningChanged: if (!running && awaitingExit) finish(1)
   }
 
   WidgetButton {

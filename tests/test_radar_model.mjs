@@ -15,6 +15,59 @@ function listener(port) {
   return { pid: 410, port, process: "node", addresses: ["127.0.0.1"] }
 }
 
+test("skipped port explanations preserve unknown reasons and avoid claiming a failed probe is not a web server", () => {
+  assert.equal(radar.skippedPortPresentation("ignored by settings").text, "Excluded in settings")
+  assert.equal(radar.skippedPortPresentation("no HTTP or HTTPS response").text, "No response to the HTTP / HTTPS check")
+  assert.equal(radar.skippedPortPresentation("non-HTTP service port").text, "Port usually used by a non-web service")
+  for (const reason of ["A future diagnostic reason", "constructor", "__proto__"])
+    assert.equal(radar.skippedPortPresentation(reason).text, reason)
+  assert.equal(radar.skippedPortPresentation(null).text, "Reason unavailable")
+})
+
+test("skipped groups put manual choices first and preserve entry order within each section", () => {
+  const diagnostics = [
+    { port: 3000, reason: "runtime helper process" },
+    { port: 8000, reason: "ignored by settings" },
+    { port: 4206, reason: "TanStack Devtools event bus" },
+  ]
+  const groups = radar.skippedPortGroups(diagnostics)
+  assert.deepEqual(plain(groups.manual), [diagnostics[1]])
+  assert.deepEqual(plain(groups.automatic), [diagnostics[0], diagnostics[2]])
+  const folded = plain(radar.skippedPortEntries(groups, { automatic: true }))
+  assert.deepEqual(folded.map(entry => entry.kind === "header" ? entry.name : entry.port), ["Manual", 8000, "Automatic"])
+  assert.equal(folded[2].count, 2)
+  assert.equal(radar.skippedPortEntries(groups, {}).length, 5)
+  assert.equal(radar.skippedPortEntries(groups, { manual: true, automatic: true }).length, 2)
+  assert.deepEqual(plain(radar.skippedPortEntries(radar.skippedPortGroups([]), {})), [])
+})
+
+test("port preferences are reversible within ranges and preserve unrelated settings", () => {
+  const settings = { ignoredPorts: "3000-3010,8000", alwaysIncludePorts: "7000-7005", includeDocker: false, lanInterface: "wlan0" }
+  const included = plain(radar.portPreferenceSettings(settings, 3005, true))
+  assert.deepEqual(included, { ...settings, ignoredPorts: "3000-3004,3006-3010,8000", alwaysIncludePorts: "3005,7000-7005" })
+  assert.equal(settings.ignoredPorts, "3000-3010,8000", "do not mutate the host's settings object")
+  assert.deepEqual(plain(radar.portPreferenceSettings(included, 3005, false)), settings)
+  const skipped = plain(radar.portPreferenceSettings(settings, 7002, false))
+  assert.equal(skipped.alwaysIncludePorts, "7000-7001,7003-7005")
+  assert.equal(radar.parsePortSet(skipped.ignoredPorts)[7002], true)
+  assert.deepEqual(plain(radar.portPreferenceSettings(skipped, 7002, false)), skipped)
+  for (const port of [0, -1, 65536, 3.5, "invalid"]) assert.equal(radar.portPreferenceSettings(settings, port, true), null)
+  const many = radar.parsePortSet("1-4097,4098-8194")
+  assert.deepEqual(plain(radar.parsePortSet(radar.formatPortSet(many))), plain(many), "large sets remain parseable after formatting")
+})
+
+test("skipped Docker ports remain available for inclusion without duplicate address rows", () => {
+  const raw = JSON.stringify(["abcdef123456", "api", "image", "0.0.0.0:8000->8000/tcp, [::]:8000->8000/tcp, 0.0.0.0:15432->5432/tcp", "/work", "api", "demo"])
+  const stats = {}
+  assert.equal(radar.dockerPublishedContexts(raw, { 8000: true }, {}, stats).length, 0)
+  assert.deepEqual(plain(stats.diagnostics).sort((a,b) => a.port-b.port), [
+    { port: 8000, process: "api", reason: "ignored by settings" },
+    { port: 15432, process: "api", reason: "non-HTTP service port" },
+  ])
+  assert.equal(radar.dockerPublishedContexts(raw, {}, { 8000: true, 15432: true }, stats).length, 2)
+  assert.deepEqual(plain(stats.diagnostics), [])
+})
+
 test("project stops snapshot only their project and deduplicate processes and containers", () => {
   const native = { serverId: "web", pid: 410, startTime: 100, projectRoot: "/work/atlas", port: 3000 }
   const docker = { serverId: "api", source: "docker", containerId: "abc123", projectRoot: "/work/atlas", port: 8000 }
@@ -184,6 +237,20 @@ test("recognizes the Next.js process title read as a single argv entry", () => {
   assert.equal(radar.frameworkFor("node app.js", {}, ["node", "app.js", "--label", title]).id, "node")
 })
 
+test("TanStack Start and Docusaurus dependencies take precedence over React and Vite", () => {
+  for (const command of ["vite --host", "node /work/app/node_modules/vite/bin/vite.js", "bun run dev"]) {
+    for (const adapter of ["@tanstack/react-start", "@tanstack/solid-start"]) {
+      assert.deepEqual(plain(radar.frameworkFor(command, { dependencies: ["react", "solid-js", "vite", adapter] })),
+        { name: "TanStack Start", id: "tanstack" })
+    }
+    assert.equal(radar.frameworkFor(command, { dependencies: ["react", "@docusaurus/core"] }).id, "docusaurus")
+  }
+  assert.equal(radar.frameworkFor("vite", { dependencies: ["react", "@tanstack/react-query", "@tanstack/react-router"] }).id, "react")
+  assert.equal(radar.frameworkFor("next dev", { dependencies: ["react", "@tanstack/react-start"] }).id, "next")
+  assert.ok(radar.frameworkIcon("tanstack"))
+  assert.ok(radar.frameworkIcon("docusaurus"))
+})
+
 test("port hints parse addresses and positional ports, not unrelated numeric options", () => {
   assert.deepEqual(plain(radar.declaredPorts("gunicorn app:app --bind=0.0.0.0:4567 --workers 4")), [4567])
   assert.deepEqual(plain(radar.declaredPorts("php -S [::]:8082")), [8082])
@@ -198,6 +265,53 @@ test("debugger and database listeners are excluded unless explicitly included", 
   assert.deepEqual(plain(radar.candidateContexts(listeners, { 410: process }, {}, { 9229: true })).map(row => row.listener.port), [3000, 9229])
   assert.deepEqual(plain(radar.inspectorPorts("node --inspect-brk=127.0.0.1:9230 app.js")), [9230])
   assert.equal(radar.isCandidate(listener(4567), { command: "custom-server --port 4567" }, { id: "server" }), true)
+})
+
+test("TanStack Devtools helper ports are skipped without merging distinct apps", () => {
+  const processes = {
+    410: { command: "bun /work/web/node_modules/vite/bin/vite.js dev --port 3000 --host 0.0.0.0", cwd: "/work/web",
+      project: { dependencies: ["@tanstack/react-start", "@tanstack/devtools-vite"] } },
+    411: { command: "bun /work/admin/node_modules/vite/bin/vite.js dev --port 3001", cwd: "/work/admin",
+      project: { dependencies: ["@tanstack/react-start", "@tanstack/devtools-vite"] } },
+  }
+  const listeners = [listener(3000), listener(4206),
+    { ...listener(3001), pid: 411 }, { ...listener(4206), pid: 411, addresses: ["::1"] }]
+  const selected = radar.candidateContexts(listeners, processes)
+  assert.deepEqual(plain(selected).map(row => row.listener.port), [3000, 3001])
+  assert.deepEqual(plain(radar.candidateDiagnostics(listeners, processes, selected)).map(row => [row.port, row.reason]),
+    [[4206, "TanStack Devtools event bus"], [4206, "TanStack Devtools event bus"]])
+  assert.equal(radar.candidateContexts(listeners, processes, {}, { 4206: true }).length, 4)
+  assert.equal(radar.candidateContexts(listeners, processes, { 4206: true }, { 4206: true }).length, 2)
+  assert.equal(radar.candidateContexts([listener(4206)], processes).length, 1, "a lone endpoint remains visible")
+  processes[410].command = "vite --port 4206"
+  assert.equal(radar.candidateContexts(listeners.slice(0, 2), processes).length, 2, "explicit app ports win")
+  processes[410].command = "vite"
+  assert.equal(radar.candidateContexts([listener(5173), listener(4206)], processes).length, 1, "default Vite port")
+  processes[410].project.dependencies = ["@tanstack/react-start"]
+  assert.equal(radar.candidateContexts(listeners.slice(0, 2), processes).length, 2, "Start alone does not imply Devtools")
+})
+
+test("Azure Functions worker endpoints are skipped only alongside the same host's app port", () => {
+  for (const address of ["127.0.0.1", "::1"]) {
+    const processes = { 410: { command: "/tools/func start --address 0.0.0.0 --port 7073", cwd: "/work/notifications" } }
+    const listeners = [{ ...listener(7073), addresses: ["0.0.0.0"] }, { ...listener(36811), addresses: [address] }]
+    const selected = radar.candidateContexts(listeners, processes)
+    assert.deepEqual(plain(selected).map(row => row.listener.port), [7073])
+    assert.equal(radar.candidateDiagnostics(listeners, processes, selected)[0].reason, "Azure Functions worker endpoint")
+    assert.equal(radar.candidateContexts(listeners, processes, {}, { 36811: true }).length, 2)
+    assert.equal(radar.candidateContexts([listeners[1]], processes).length, 1, "no primary endpoint, no suppression")
+    assert.equal(radar.candidateContexts([{ ...listeners[0], pid: 411 }, listeners[1]], processes).length, 1,
+      "another process's app port is not evidence")
+    processes[410].command = "func start"
+    assert.equal(radar.candidateContexts([{ ...listeners[0], port: 7071 }, listeners[1]], processes).length, 1)
+    processes[410].command = "func start --port 7073 --listen-port 36811"
+    assert.equal(radar.candidateContexts(listeners, processes).length, 2, "both explicitly declared endpoints are kept")
+    processes[410].command = "node app.js --port 7073"
+    assert.equal(radar.candidateContexts(listeners, processes).length, 2, "generic multi-port servers are unchanged")
+    processes[410].command = "func start --port 7073"
+    listeners[1].addresses = [address, "0.0.0.0"]
+    assert.equal(radar.candidateContexts(listeners, processes).length, 2, "public secondary endpoints are kept")
+  }
 })
 
 test("keeps unknown servers on the letter fallback path", () => {
@@ -568,14 +682,19 @@ test("local actions stay local and sharing is explicit", () => {
   assert.equal(radar.actionEnabled(radar.ACTIONS.copyLocal, server), true)
 })
 
-test("source colors are stable across insertion, removal, and reordering", () => {
-  const a = { source: "process", pid: 100, startTime: 10 }
-  const b = { source: "docker", containerId: "abc123def456" }
-  const colors = rows => Object.fromEntries(rows.map(row => [radar.memorySourceKey(row), radar.sourceColorOffset(radar.memorySourceKey(row))]))
-  const before = colors([a, b])
-  const after = colors([{ source: "process", pid: 5, startTime: 1 }, b, a])
-  for (const key of Object.keys(before)) assert.equal(before[key], after[key])
-  assert.notEqual(before[radar.memorySourceKey(a)], before[radar.memorySourceKey(b)])
+test("unavailable LAN sharing explains loopback binds separately from missing network addresses", () => {
+  const context = { listener: listener(3000), process: { cwd: "/work", startTime: 1 }, framework: { name: "Vite", id: "vite" } }
+  const local = radar.serverFromContext(context, "http", "192.168.1.2")
+  assert.equal(radar.actionEnabled(radar.ACTIONS.qr, local), false)
+  assert.match(radar.lanUnavailableReason(local), /localhost only.*0\.0\.0\.0/)
+  context.listener.addresses = ["0.0.0.0"]
+  const offline = radar.serverFromContext(context, "http", "")
+  assert.equal(radar.actionEnabled(radar.ACTIONS.qr, offline), false)
+  assert.match(radar.lanUnavailableReason(offline), /No LAN address.*LAN interface/)
+  const available = radar.serverFromContext(context, "http", "192.168.1.2")
+  assert.equal(radar.actionEnabled(radar.ACTIONS.qr, available), true)
+  assert.equal(radar.lanUnavailableReason(available), "")
+  assert.match(radar.lanUnavailableReason(null), /Select a server/)
 })
 
 test("resource payloads keep process identity and reject other users", () => {
@@ -611,14 +730,60 @@ test("Docker ranges reject malformed bounds, UDP, and unpublished ports", () => 
   assert.equal(radar.dockerPublishedContexts(ipv6).length, 3)
 })
 
+test("bounds large Docker ranges while preserving explicit and ordinary ports", () => {
+  const raw = [
+    JSON.stringify(["abc123def456", "many", "node", "0.0.0.0:3000-65000->3000-65000/tcp, [::]:3000-65000->3000-65000/tcp", "", "", ""]),
+    JSON.stringify(["def123abc456", "one", "node", "0.0.0.0:8080->8080/tcp", "", "", ""]),
+  ].join("\n")
+  const stats = {}
+  const contexts = plain(radar.dockerPublishedContexts(raw, { 3000: true }, { 65000: true }, stats))
+  const range = contexts.filter(context => context.containerId === "abc123def456")
+  assert.equal(stats.truncated, true)
+  assert.ok(range.length <= 128)
+  assert.ok(range.some(context => context.listener.port === 65000))
+  assert.ok(!range.some(context => context.listener.port === 3000))
+  assert.ok(range.every(context => JSON.stringify(context.listener.addresses) === JSON.stringify(["0.0.0.0", "::"])))
+  assert.ok(contexts.some(context => context.containerId === "def123abc456" && context.listener.port === 8080))
+})
+
+test("caps Docker candidates across many containers and reports truncation", () => {
+  const raw = Array.from({ length: 1030 }, (_, index) => JSON.stringify([
+    String(index), "web", "node", "0.0.0.0:8080->8080/tcp", "", "", "",
+  ])).join("\n")
+  const stats = {}
+  assert.equal(radar.dockerPublishedContexts(raw, {}, {}, stats).length, 1024)
+  assert.equal(stats.truncated, true)
+  const smallStats = {}
+  radar.dockerPublishedContexts(raw.split("\n")[0], {}, {}, smallStats)
+  assert.equal(smallStats.truncated, false)
+})
+
+test("Docker truncation warning only reports omitted eligible ports", () => {
+  const raw = JSON.stringify(["abc123def456", "web", "node", "0.0.0.0:3000-3127->3000-3127/tcp", "", "", ""])
+  const stats = {}
+  assert.equal(radar.dockerPublishedContexts(raw, {}, { 3127: true }, stats).length, 128)
+  assert.equal(stats.truncated, false)
+})
+
 test("manual probe plans bypass both failed and successful caches", () => {
   const contexts = [3000, 3001].map(port => ({ listener: listener(port), process: { startTime: 1 } }))
   const cache = {
-    [radar.contextId(contexts[0])]: { scheme: "", expiresAt: 15000 },
-    [radar.contextId(contexts[1])]: { scheme: "http", expiresAt: 60000 },
+    [radar.probeCacheKey(contexts[0])]: { scheme: "", expiresAt: 15000 },
+    [radar.probeCacheKey(contexts[1])]: { scheme: "http", expiresAt: 60000 },
   }
   assert.equal(radar.probePlan(contexts, cache, 100).pending.length, 0)
   assert.deepEqual(plain(radar.probePlan(contexts, cache, 100, true).pending), plain(contexts))
+})
+
+test("probe cache invalidates when the probe host or preferred scheme changes", () => {
+  const context = { listener: { pid: 1, port: 3000, addresses: ["127.0.0.1"] }, process: { startTime: 1, command: "node app" } }
+  const cache = { [radar.probeCacheKey(context)]: { scheme: "http", expiresAt: 60000 } }
+  assert.equal(radar.probePlan([context], cache, 100).pending.length, 0)
+  context.listener.addresses = ["::1"]
+  assert.equal(radar.probePlan([context], cache, 100).pending.length, 1)
+  context.listener.addresses = ["127.0.0.1"]
+  context.process.command = "node app --https"
+  assert.equal(radar.probePlan([context], cache, 100).pending.length, 1)
 })
 
 test("recognizes exact and broader UFW LAN rules", () => {
@@ -629,6 +794,53 @@ test("recognizes exact and broader UFW LAN rules", () => {
   assert.equal(radar.ufwAllowsPort(rules, "enp5s0", "192.168.0.0/24", 3000), true)
   assert.equal(radar.ufwAllowsPort(rules, "wlan0", "10.12.0.0/24", 3002), true)
   assert.equal(radar.ufwAllowsPort(rules, "enp5s0", "192.168.0.0/24", 4000), false)
+})
+
+test("UFW access checks respect earlier denies and unknown restrictions", () => {
+  const allow = "-A ufw-user-input -p tcp --dport 3000 -j ACCEPT"
+  const check = rules => radar.ufwAllowsPort(rules, "wlan0", "192.168.1.0/24", 3000)
+  assert.equal(check(`-A ufw-user-input -p tcp -s 192.168.1.42 --dport 3000 -j DROP\n${allow}`), false)
+  assert.equal(check(`-A ufw-user-input -p tcp -s 10.0.0.0/8 --dport 3000 -j DROP\n${allow}`), true)
+  assert.equal(check(`-A ufw-user-input -p udp --dport 3000 -j DROP\n${allow}`), true)
+  assert.equal(check(`-A ufw-user-input -i wl+ -p tcp --dport 3000 -j DROP\n${allow}`), false)
+  assert.equal(check(`-A ufw-user-input -i en+ -p tcp --dport 3000 -j DROP\n${allow}`), true)
+  assert.equal(check(`-A ufw-user-input -p all -j DROP\n${allow}`), false)
+  assert.equal(check("-A ufw-user-input -p tcp -d 192.168.2.1 --dport 3000 -j ACCEPT"), false)
+  assert.equal(check("-A ufw-user-input ! -s 192.168.1.0/24 -p tcp --dport 3000 -j ACCEPT"), false)
+  assert.equal(check(`-A ufw-user-input -p tcp --dport 3000 -j ufw-user-limit\n${allow}`), false)
+})
+
+test("unrelated UFW rate-limit rules do not hide later LAN allow rules", () => {
+  const allow = "-A ufw-user-input -i wlan0 -p tcp -s 192.168.1.0/24 --dport 3000 -j ACCEPT"
+  const limitSteps = [
+    "-m conntrack --ctstate NEW -m recent --set",
+    "-m conntrack --ctstate NEW -m recent --update --seconds 30 --hitcount 6 -j ufw-user-limit",
+    "-j ufw-user-limit-accept",
+  ]
+  for (const match of [
+    "-p tcp --dport 22",
+    "-i eth0 -p tcp --dport 3000",
+    "-p tcp -s 10.0.0.0/8 --dport 3000",
+  ]) {
+    const rules = limitSteps.map(step => `-A ufw-user-input ${match} ${step}`).join("\n")
+    assert.equal(radar.ufwAllowsPort(`${rules}\n${allow}`, "wlan0", "192.168.1.0/24", 3000), true, match)
+    // Each rate-limit step must also work independently of the preceding one.
+    for (const step of limitSteps)
+      assert.equal(radar.ufwAllowsPort(`-A ufw-user-input ${match} ${step}\n${allow}`,
+        "wlan0", "192.168.1.0/24", 3000), true, `${match} ${step}`)
+  }
+})
+
+test("matching UFW rate-limit rules still prevent assuming unrestricted LAN access", () => {
+  const allow = "-A ufw-user-input -p tcp --dport 3000 -j ACCEPT"
+  for (const step of [
+    "-m conntrack --ctstate NEW -m recent --set",
+    "-m conntrack --ctstate NEW -m recent --update --seconds 30 --hitcount 6 -j ufw-user-limit",
+    "-j ufw-user-limit-accept",
+  ]) {
+    assert.equal(radar.ufwAllowsPort(`-A ufw-user-input -p tcp --dport 3000 ${step}\n${allow}`,
+      "wlan0", "192.168.1.0/24", 3000), false, step)
+  }
 })
 
 test("finds only Localhost-managed UFW rules", () => {
