@@ -28,13 +28,17 @@ BarWidget {
   readonly property string countLabel: showServerCount && serverCount > 0 ? String(serverCount) : ""
   readonly property string glyph: "\uf0ac"
   readonly property bool showWhenEmpty: setting("showWhenEmpty", false)
+  readonly property bool hasManagedSkippedPorts: {
+    var included = RadarModel.parsePortSet(setting("alwaysIncludePorts", ""))
+    return radar.diagnostics.some(function(entry) { return entry.reason === "ignored by settings" || included[entry.port] === true })
+  }
   readonly property bool opened: card.open
   readonly property var firewallStatusCommand: [
     "bash", "-c",
     "if ! command -v ufw >/dev/null || ! systemctl is-active --quiet ufw; then echo inactive; exit 0; fi; echo active; cat /etc/ufw/user.rules 2>/dev/null || echo unreadable"
   ]
 
-  visible: serverCount > 0 || showWhenEmpty
+  visible: serverCount > 0 || showWhenEmpty || hasManagedSkippedPorts
   implicitWidth: button.implicitWidth
   implicitHeight: button.implicitHeight
 
@@ -44,6 +48,25 @@ BarWidget {
     notice = String(message || "")
     noticeUrgent = urgent === true
     noticeTimer.restart()
+  }
+
+  // The host injects a capability-scoped facade; BarWidget types it as QObject.
+  function portSettingsApi(host) { return host ? host.shell : null }
+
+  function setPortIncluded(port, include) {
+    var settingsApi = portSettingsApi(bar)
+    var next = RadarModel.portPreferenceSettings(root.settings, port, include)
+    if (!next) return
+    var changed = next.ignoredPorts !== String(setting("ignoredPorts", ""))
+      || next.alwaysIncludePorts !== String(setting("alwaysIncludePorts", ""))
+    if (changed && (!settingsApi || typeof settingsApi.updateEntryInline !== "function"
+        || !settingsApi.updateEntryInline(moduleName, next))) {
+      showNotice("Could not save the port preference.", true)
+      return
+    }
+    radar.refresh()
+    showNotice(include ? "Checking :" + port + " · must respond to HTTP or HTTPS"
+      : "Skipped :" + port + " · server is still running", false)
   }
 
   function openServer(server) {
@@ -400,6 +423,7 @@ BarWidget {
       scanError: radar.scanError
       warnings: radar.warnings
       diagnostics: radar.diagnostics
+      includedPorts: RadarModel.parsePortSet(root.setting("alwaysIncludePorts", ""))
       scanSummary: radar.scanSummary
       scanning: radar.scanning
       firewallRules: root.managedFirewallRules
@@ -408,6 +432,8 @@ BarWidget {
         ? currentServer.serverId : ""
 
       onCloseRequested: root.closePanel()
+      onIncludePortRequested: function(port) { root.setPortIncluded(port, true) }
+      onSkipPortRequested: function(port) { root.setPortIncluded(port, false) }
       onRefreshRequested: {
         radar.refresh()
         root.refreshFirewallRules()

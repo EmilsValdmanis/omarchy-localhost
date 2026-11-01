@@ -1,6 +1,7 @@
 import QtQuick
 import Quickshell
 import Quickshell.Wayland
+import qs.Commons
 import "qml" as Internal
 
 Item {
@@ -25,7 +26,7 @@ Item {
   function open(payloadJson) {
     qr.open(payloadJson)
     Qt.callLater(function() {
-      if (root.opened) keyCatcher.forceActiveFocus()
+      if (root.opened) content.forceActiveFocus()
     })
   }
 
@@ -52,7 +53,7 @@ Item {
       opacity: root.opened ? 1 : 0
 
       Behavior on opacity {
-        NumberAnimation { duration: 160; easing.type: Easing.OutCubic }
+        NumberAnimation { duration: Style.duration(160); easing.type: Easing.OutCubic }
       }
 
       MouseArea {
@@ -69,16 +70,16 @@ Item {
 
       Item {
         anchors.centerIn: parent
-        width: content.implicitWidth
+        width: Math.min(content.implicitWidth, parent.width - Style.space(32))
         height: content.implicitHeight
         opacity: root.opened ? 1 : 0
         scale: root.opened ? 1 : 0.96
 
         Behavior on opacity {
-          NumberAnimation { duration: 200; easing.type: Easing.OutCubic }
+          NumberAnimation { duration: Style.duration(160); easing.type: Easing.OutCubic }
         }
         Behavior on scale {
-          NumberAnimation { duration: 200; easing.type: Easing.OutCubic }
+          NumberAnimation { duration: Style.duration(160); easing.type: Easing.OutCubic }
         }
 
         MouseArea { anchors.fill: parent; onClicked: function(mouse) { mouse.accepted = true } }
@@ -88,6 +89,8 @@ Item {
           anchors.fill: parent
           qrState: qr
           onCopyRequested: Quickshell.execDetached(["wl-copy", root.url])
+          onCloseRequested: root.dismiss()
+          onRetryRequested: qr.generate()
         }
       }
     }

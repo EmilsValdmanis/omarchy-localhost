@@ -33,7 +33,8 @@ function entriesEqual(left, right) {
 }
 
 // Keep surviving delegates and the native scroll origin through scans/folds.
-function syncEntries(model, entries) {
+function syncEntries(model, entries, equal) {
+  var compare = equal || entriesEqual
   var incoming = Object.create(null)
   for (var i = 0; i < entries.length; i++) incoming[entries[i].entryId] = true
   var changed = false
@@ -52,7 +53,7 @@ function syncEntries(model, entries) {
       else model.insert(target, next)
       changed = true
     }
-    if (!entriesEqual(model.get(target), next)) {
+    if (!compare(model.get(target), next)) {
       model.set(target, next)
       changed = true
     }

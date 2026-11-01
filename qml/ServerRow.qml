@@ -14,8 +14,7 @@ CursorSurface {
   property color memoryColor: Color.accent
   readonly property color dim: Qt.darker(foreground, 1.4)
   readonly property string frameworkIcon: RadarModel.frameworkIcon(server.frameworkId)
-  readonly property string detail: server.framework
-    + (server.projectPath && server.projectPath !== "." ? " · " + server.projectPath : "")
+  readonly property string detail: server.projectPath && server.projectPath !== "." ? server.projectPath : ""
   readonly property var memoryHistory: RadarModel.parseMemoryHistory(server.memoryHistoryJson)
 
   signal rowSelected()
@@ -39,13 +38,22 @@ CursorSurface {
     Item {
       Layout.preferredWidth: Style.space(22)
       Layout.preferredHeight: Style.space(24)
+      Accessible.role: Accessible.StaticText
+      Accessible.name: row.server.framework
+      HoverHandler { id: frameworkHover }
+      PanelToolTip {
+        visible: frameworkHover.hovered
+        text: row.server.framework
+      }
       OpticalGlyph {
+        objectName: "frameworkGlyph"
         anchors.fill: parent
         visible: row.frameworkIcon !== ""
         text: row.frameworkIcon
         color: row.selected ? Color.accent : row.foreground
         fontFamily: Style.font.family
-        fontSize: Style.font.heading
+        fontSize: row.server.frameworkId === "docusaurus" ? Style.font.body : Style.font.heading
+        paintedSize: Style.space(row.server.frameworkId === "docusaurus" ? 12 : 16)
       }
       Text {
         anchors.centerIn: parent
@@ -62,17 +70,50 @@ CursorSurface {
       id: labels
       Layout.fillWidth: true
       spacing: Style.space(1)
-      Text {
+      RowLayout {
         Layout.fillWidth: true
-        textFormat: Text.PlainText
-        text: row.server.name.replace(/^@[^/]+\//, "")
-        color: row.foreground
-        font.family: Style.font.family
-        font.pixelSize: Style.font.body
-        font.bold: true
-        elide: Text.ElideRight
+        spacing: Style.space(5)
+
+        Text {
+          id: serverNameLabel
+          objectName: "serverName"
+          Layout.fillWidth: true
+          Layout.maximumWidth: Math.ceil(implicitWidth)
+          textFormat: Text.PlainText
+          text: row.server.name.replace(/^@[^/]+\//, "")
+          color: row.foreground
+          font.family: Style.font.family
+          font.pixelSize: Style.font.body
+          font.bold: true
+          elide: Text.ElideRight
+        }
+
+        Item {
+          objectName: "serverLanIcon"
+          visible: row.server.lanAvailable
+          Layout.preferredWidth: Style.space(14)
+          Layout.preferredHeight: serverNameLabel.implicitHeight
+          Accessible.role: Accessible.StaticText
+          Accessible.name: "LAN sharing available"
+
+          InlineIcon {
+            anchors.fill: parent
+            label: serverNameLabel
+            text: "\uf1e0"
+            color: row.dim
+          }
+          HoverHandler { id: lanHover }
+          PanelToolTip {
+            visible: lanHover.hovered
+            text: "LAN sharing available" + (row.server.lanUrl ? "\n" + row.server.lanUrl : "")
+          }
+        }
+
+        Item { Layout.fillWidth: true }
       }
       Text {
+        objectName: "serverPath"
+        visible: row.detail !== ""
         Layout.fillWidth: true
         textFormat: Text.PlainText
         text: row.detail
@@ -83,20 +124,8 @@ CursorSurface {
       }
     }
 
-    Rectangle {
-      Layout.preferredWidth: Style.space(5)
-      Layout.preferredHeight: Style.space(5)
-      radius: width / 2
-      color: row.server.lanAvailable ? Color.accent : row.dim
-      HoverHandler { id: statusHover }
-      PanelToolTip {
-        visible: statusHover.hovered
-        text: row.server.lanAvailable ? "Available on LAN" : "Localhost only"
-      }
-    }
-
     Item {
-      Layout.preferredWidth: Style.space(48)
+      Layout.preferredWidth: Style.space(62)
       Layout.preferredHeight: Style.space(20)
 
       MemorySparkline {

@@ -21,6 +21,15 @@ Item {
   property string scanError: ""
   property var warnings: []
   property var diagnostics: []
+  property var includedPorts: ({})
+  property var skippedGroupOverrides: ({})
+  property string selectedSkippedGroup: ""
+  readonly property var skippedGroups: RadarModel.skippedPortGroups(diagnostics)
+  readonly property bool hasManualSkips: skippedGroups.manual.length > 0
+  readonly property var skippedGroupState: ({
+    manual: skippedGroupOverrides.manual === true,
+    automatic: skippedGroupOverrides.automatic === undefined ? hasManualSkips : skippedGroupOverrides.automatic
+  })
   property string scanSummary: ""
   property bool scanning: false
   property var firewallRules: []
@@ -42,14 +51,15 @@ Item {
   readonly property int selectedEntryIndex: selectionEntryIndex()
   property string portFilter: "all"
   readonly property var portFilterOptions: [
-    { value: "all", label: "All ports" },
-    { value: "dev", label: "Dev ports" },
-    { value: "lan", label: "LAN ready" },
-    { value: "docker", label: "Docker" }
+    { value: "all", label: "All ports", icon: "\uf1e6" },
+    { value: "dev", label: "Dev ports", icon: "\uf121" },
+    { value: "lan", label: "LAN ready", icon: "\uf1e0" },
+    { value: "docker", label: "Docker", icon: "\uf308" }
   ]
   readonly property bool searchMode: searchField.activeFocus
   property int selectedIndex: 0
   property int selectedActionIndex: 0
+  property bool showActionHint: false
   property bool showFirewallRules: false
   property bool showDiagnostics: false
   property var pendingServer: null
@@ -60,6 +70,8 @@ Item {
 
   signal closeRequested()
   signal refreshRequested()
+  signal includePortRequested(int port)
+  signal skipPortRequested(int port)
   signal openRequested(var server)
   signal copyRequested(var server)
   signal copyLanRequested(var server)
@@ -79,10 +91,14 @@ Item {
   readonly property int panelWidth: Style.space(460)
   readonly property int serverCount: servers ? servers.count : 0
   readonly property int resultCount: filteredModel.count
-  readonly property int actionCount: 8
+  readonly property int actionCount: 9
+  readonly property var actionOrder: [RadarModel.ACTIONS.open, RadarModel.ACTIONS.copyLocal, RadarModel.ACTIONS.qr,
+    RadarModel.ACTIONS.terminal, RadarModel.ACTIONS.project, RadarModel.ACTIONS.restart,
+    RadarModel.ACTIONS.skip, RadarModel.ACTIONS.stop]
   readonly property var currentServer: selectedServer()
   readonly property int projectCount: Object.keys(groups).length
-  readonly property real cardInset: Style.space(2)
+  readonly property real cardInset: 0
+  readonly property real scrollBarGap: Style.space(2)
   readonly property int listHeight: Math.min(serverList.contentHeight, Style.space(450))
   readonly property bool hasDiagnostics: scanError !== "" || warnings.length > 0
   readonly property bool resultsFiltered: hasResultFilter()
@@ -92,6 +108,34 @@ Item {
 
   implicitWidth: panelWidth
   implicitHeight: panelLayout.implicitHeight
+
+  function toggleSkippedGroup(group, keepFocus) {
+    selectedSkippedGroup = group
+    var next = Object.assign({}, skippedGroupOverrides)
+    next[group] = !skippedGroupState[group]
+    skippedGroupOverrides = next
+    if (keepFocus) Qt.callLater(function() {
+      var index = group === "manual" ? 0 : 1 + (root.skippedGroupState.manual ? 0 : root.skippedGroups.manual.length)
+      discoveryList.positionViewAtIndex(index, ListView.Contain)
+      var entry = discoveryList.itemAtIndex(index)
+      if (entry && entry.item) entry.item.forceActiveFocus()
+    })
+  }
+
+  function rebuildSkippedModel() {
+    ProjectList.syncEntries(skippedModel, RadarModel.skippedPortEntries(skippedGroups, skippedGroupState), RadarModel.skippedEntriesEqual)
+  }
+
+  onSkippedGroupsChanged: Qt.callLater(rebuildSkippedModel)
+  onSkippedGroupStateChanged: Qt.callLater(rebuildSkippedModel)
+
+  // A fresh manual section gets priority; otherwise retain explicit folds
+  // across polling updates. Removing the last manual skip reveals automatic ones.
+  onHasManualSkipsChanged: {
+    var next = Object.assign({}, skippedGroupOverrides)
+    delete next.automatic
+    skippedGroupOverrides = next
+  }
 
   function summarizeMemory() {
     var currentRevision = revision
@@ -200,6 +244,7 @@ Item {
 
   function selectEntry(index) {
     if (index < 0 || index >= projectModel.count) return
+    showActionHint = false
     pendingVimPrefix = ""
     var entry = projectModel.get(index)
     if (entry.projectHeader) selectProject(entry.projectRoot)
@@ -256,7 +301,7 @@ Item {
     if (!roots.length) return
     var current = roots.indexOf(selectedProject())
     if (current < 0) current = delta < 0 ? 0 : -1
-    selectProject(roots[(current + delta + roots.length) % roots.length])
+    selectProject(roots[Math.max(0, Math.min(roots.length - 1, current + delta))])
   }
 
   function navigateHorizontal(delta) {
@@ -285,7 +330,7 @@ Item {
 
   function select(delta) {
     if (!projectModel.count || showDiagnostics || showFirewallRules) return
-    selectEntry((selectedEntryIndex + delta + projectModel.count) % projectModel.count)
+    selectEntry(Math.max(0, Math.min(projectModel.count - 1, selectedEntryIndex + delta)))
     normalizeSelectedAction(delta < 0 ? -1 : 1)
     ensureSelectedVisible()
   }
@@ -301,10 +346,10 @@ Item {
       selectedActionIndex = 0
       return
     }
-    if (actionEnabled(selectedActionIndex, server)) return
+    if (selectedActionIndex !== RadarModel.ACTIONS.copyLan) return
     for (let step = 0; step < actionCount; step++) {
       selectedActionIndex = (selectedActionIndex + direction + actionCount) % actionCount
-      if (actionEnabled(selectedActionIndex, server)) return
+      if (selectedActionIndex !== RadarModel.ACTIONS.copyLan) return
     }
   }
 
@@ -312,10 +357,10 @@ Item {
     if (showDiagnostics || showFirewallRules) return
     var server = selectedServer()
     if (!server) return
-    for (let step = 0; step < actionCount; step++) {
-      selectedActionIndex = (selectedActionIndex + delta + actionCount) % actionCount
-      if (actionEnabled(selectedActionIndex, server)) return
-    }
+    showActionHint = true
+    var position = actionOrder.indexOf(selectedActionIndex)
+    if (position < 0) { normalizeSelectedAction(delta); return }
+    selectedActionIndex = actionOrder[(position + delta + actionOrder.length) % actionOrder.length]
   }
 
   function setActionCursor(rowIndex, actionIndex) {
@@ -366,6 +411,7 @@ Item {
     else if (actionIndex === RadarModel.ACTIONS.terminal) terminalRequested(selected)
     else if (actionIndex === RadarModel.ACTIONS.project) projectRequested(selected)
     else if (actionIndex === RadarModel.ACTIONS.restart) restartRequested(selected)
+    else if (actionIndex === RadarModel.ACTIONS.skip) skipPortRequested(selected.port)
     else if (actionIndex === RadarModel.ACTIONS.stop)
       requestStop(selected, selected.serverId === forceStopServerId && selected.source !== "docker")
   }
@@ -379,7 +425,10 @@ Item {
 
   function focusNavigation() {
     pendingVimPrefix = ""
-    Qt.callLater(function() { keyCatcher.forceActiveFocus() })
+    Qt.callLater(function() {
+      if (!portFilterDropdown.popupOpen)
+        keyCatcher.forceActiveFocus()
+    })
   }
 
   function clearSearch() {
@@ -495,6 +544,7 @@ Item {
   }
 
   function handleSearchKey(event) {
+    if (portFilterDropdown.popupOpen) return
     if (confirmDialog.opened) {
       pendingVimPrefix = ""
       if (confirmDialog.handleKey(event)) event.accepted = true
@@ -578,20 +628,21 @@ Item {
 
   onRevisionChanged: Qt.callLater(rebuildFilteredModel)
   onServersChanged: Qt.callLater(rebuildFilteredModel)
-  onPanelActiveChanged: { pendingVimPrefix = ""; projectStopSelected = false; if (panelActive) Qt.callLater(rebuildFilteredModel) }
-  onSearchModeChanged: { pendingVimPrefix = ""; projectStopSelected = false }
+  onPanelActiveChanged: { showActionHint = false; if (!panelActive) { portFilterDropdown.close() }; pendingVimPrefix = ""; projectStopSelected = false; if (panelActive) Qt.callLater(rebuildFilteredModel) }
+  onSearchModeChanged: { showActionHint = false; pendingVimPrefix = ""; projectStopSelected = false }
   onSelectedProjectRootChanged: projectStopSelected = false
   onActionBusyChanged: if (actionBusy) projectStopSelected = false
-  onShowDiagnosticsChanged: projectStopSelected = false
-  onShowFirewallRulesChanged: projectStopSelected = false
+  onShowDiagnosticsChanged: { showActionHint = false; projectStopSelected = false; portFilterDropdown.close() }
+  onShowFirewallRulesChanged: { showActionHint = false; projectStopSelected = false; portFilterDropdown.close() }
   onGroupByProjectChanged: { rebuildFilteredModel(); ensureSelectedVisible() }
-  onSelectedIndexChanged: if (selectedIndex >= 0) selectedProjectRoot = ""
+  onSelectedIndexChanged: { showActionHint = false; if (selectedIndex >= 0) selectedProjectRoot = "" }
   onQueryChanged: { filteredCollapsedProjects = ({}); rebuildFilteredModel(); ensureSelectedVisible() }
   onPortFilterChanged: { filteredCollapsedProjects = ({}); rebuildFilteredModel(); ensureSelectedVisible() }
-  Component.onCompleted: rebuildFilteredModel()
+  Component.onCompleted: { rebuildFilteredModel(); rebuildSkippedModel() }
 
   ListModel { id: filteredModel }
   ListModel { id: projectModel }
+  ListModel { id: skippedModel }
 
   Item {
     id: keyCatcher
@@ -610,69 +661,54 @@ Item {
       Layout.fillWidth: true
       spacing: Style.space(8)
 
-      ColumnLayout {
+      RowLayout {
+        id: viewTabs
         Layout.fillWidth: true
-        spacing: Style.space(1)
+        spacing: Style.space(3)
+        Repeater {
+          model: [
+            { label: "Servers", icon: "\uf233" },
+            { label: "Skipped", icon: "\uf05e" },
+            { label: "Access", icon: "󰒘" }
+          ]
+          Button {
+            required property int index
+            required property var modelData
+            objectName: "headerView" + index
+            text: modelData.label
+            iconText: modelData.icon
+            foreground: root.foreground
+            selected: index === (root.showDiagnostics ? 1 : (root.showFirewallRules ? 2 : 0))
+            focusable: true
+            fontSize: Style.font.caption
+            horizontalPadding: Style.space(8)
+            verticalPadding: Style.space(7)
+            Accessible.role: Accessible.PageTab
+            Accessible.name: modelData.label
+            Accessible.selected: selected
+            onClicked: {
+              root.showDiagnostics = index === 1
+              root.showFirewallRules = index === 2
+              root.focusNavigation()
+            }
 
-        PanelSectionHeader {
-          text: "LOCALHOST"
-          foreground: root.foreground
-          fontSize: Style.font.heading
+          }
         }
-
-        Text {
-          textFormat: Text.PlainText
-          Layout.fillWidth: true
-          text: (root.resultsFiltered
-              ? root.resultCount + " of " + root.serverCount + " servers"
-              : root.serverCount + " server" + (root.serverCount === 1 ? "" : "s"))
-            + (root.groupByProject ? " · " + root.projectCount + " project" + (root.projectCount === 1 ? "" : "s") : "")
-          color: root.dim
-          font.family: Style.font.family
-          font.pixelSize: Style.font.caption
-          elide: Text.ElideRight
-        }
+        Item { Layout.fillWidth: true }
       }
 
-      PanelActionButton {
-        objectName: "groupToggle"
-        iconText: "\uf07b"
-        tooltipText: root.groupByProject ? "Grouped by project · click to sort by port" : "Group by project"
-        foreground: root.foreground
-        bordered: root.groupByProject
-        onClicked: { root.groupByProject = !root.groupByProject; root.focusNavigation() }
-      }
-
-      PanelActionButton {
-        visible: root.scanSummary !== "" || root.diagnostics.length > 0
-        iconText: "\uf05a"
-        tooltipText: root.showDiagnostics ? "Hide discovery details" : "Show discovery details"
-        foreground: root.foreground
-        bordered: root.showDiagnostics
-        onClicked: {
-          root.showDiagnostics = !root.showDiagnostics
-          if (root.showDiagnostics) root.showFirewallRules = false
-          root.focusNavigation()
-        }
-      }
-
-      PanelActionButton {
-        visible: root.firewallRules.length > 0
-        iconText: "󰒘"
-        tooltipText: root.showFirewallRules ? "Hide LAN access rules" : "Manage LAN access rules"
-        foreground: root.foreground
-        bordered: root.showFirewallRules
-        onClicked: {
-          root.showFirewallRules = !root.showFirewallRules
-          if (root.showFirewallRules) root.showDiagnostics = false
-          root.focusNavigation()
-        }
-      }
-
-      PanelActionButton {
+      Button {
+        objectName: "refreshServers"
+        Layout.preferredHeight: viewTabs.implicitHeight
+        Layout.preferredWidth: viewTabs.implicitHeight
+        fontSize: Style.font.caption
+        horizontalPadding: Style.space(8)
+        verticalPadding: Style.space(7)
         iconText: "\uf2f9"
         tooltipText: "Refresh servers (Ctrl+R)"
         foreground: root.foreground
+        focusable: true
+        Accessible.name: "Refresh servers"
         onClicked: root.refreshRequested()
       }
     }
@@ -695,13 +731,11 @@ Item {
         Keys.onPressed: function(event) { root.handleSearchKey(event) }
       }
 
-      Dropdown {
+      PortFilter {
         id: portFilterDropdown
-        Layout.preferredWidth: Style.space(116)
+        objectName: "portFilter"
+        Layout.preferredWidth: Style.space(140)
         Layout.preferredHeight: searchField.implicitHeight
-        showLabel: false
-        rowHeight: searchField.implicitHeight
-        popupRowHeight: Style.space(30)
         options: root.portFilterOptions
         value: root.portFilter
         foreground: root.foreground
@@ -713,59 +747,67 @@ Item {
     }
 
     BorderSurface {
+      id: memoryOverview
       objectName: "memoryOverview"
       visible: !root.showFirewallRules && !root.showDiagnostics
       Layout.fillWidth: true
-      Layout.preferredHeight: memoryLayout.implicitHeight + Style.space(14)
-      color: Style.hoverFillFor(root.foreground, Color.accent)
+      Layout.preferredHeight: memoryLayout.implicitHeight + Style.space(16)
+      color: Style.controlFill(false, false, root.foreground, Color.accent)
       borderSpec: Border.controlSpec("normal", root.foreground, Color.accent)
       radius: Style.cornerRadius
 
       ColumnLayout {
         id: memoryLayout
         anchors.fill: parent
-        anchors.margins: Style.space(7)
-        spacing: Style.space(7)
+        anchors.margins: Style.space(8)
+        spacing: Style.space(6)
 
         RowLayout {
           Layout.fillWidth: true
-          spacing: Style.space(8)
-
-          ColumnLayout {
-            spacing: Style.space(1)
-            PanelSectionHeader {
-              text: root.memoryStats.unmeasured
-                ? "SERVERS  " + root.memoryStats.measured + "/"
-                  + (root.memoryStats.measured + root.memoryStats.unmeasured)
-                : "SERVERS"
-              foreground: root.foreground
-            }
-            Text {
-              objectName: "trackedMemory"
-              textFormat: Text.PlainText
-              text: root.memoryStats.measured
-                ? RadarModel.formatMemory(root.memoryStats.serverBytes) : "—"
-              color: Color.accent
-              font.family: Style.font.family
-              font.pixelSize: Style.font.body
-              font.bold: true
-            }
+          spacing: Style.space(6)
+          InlineIcon {
+            Layout.preferredWidth: Style.space(14)
+            label: serversMemoryLabel
+            text: "\uf233"
+            color: root.dim
+            paintedSize: Style.space(12)
           }
-
+          Text {
+            id: serversMemoryLabel
+            text: "Servers"
+            color: root.dim
+            font.family: Style.font.family
+            font.pixelSize: Style.font.body
+          }
+          Text {
+            objectName: "trackedMemory"
+            text: root.memoryStats.measured ? RadarModel.formatMemory(root.memoryStats.serverBytes) : "—"
+            color: root.foreground
+            font.family: Style.font.family
+            font.pixelSize: Style.font.body
+          }
           Item { Layout.fillWidth: true }
-
-          ColumnLayout {
-            spacing: Style.space(1)
-            PanelSectionHeader { text: "SYSTEM RAM"; foreground: root.foreground }
-            Text {
-              objectName: "totalMemory"
-              textFormat: Text.PlainText
-              text: RadarModel.formatMemory(root.memoryStats.totalBytes)
-              color: root.foreground
-              font.family: Style.font.family
-              font.pixelSize: Style.font.title
-              font.bold: true
-            }
+          InlineIcon {
+            Layout.preferredWidth: Style.space(14)
+            label: systemMemoryLabel
+            text: "\uf108"
+            color: root.dim
+            paintedSize: Style.space(12)
+          }
+          Text {
+            id: systemMemoryLabel
+            text: "System"
+            color: root.dim
+            font.family: Style.font.family
+            font.pixelSize: Style.font.body
+          }
+          Text {
+            objectName: "totalMemory"
+            text: RadarModel.formatMemory(root.memoryStats.totalBytes)
+            color: root.foreground
+            font.family: Style.font.family
+            font.pixelSize: Style.font.body
+            Accessible.name: "Total system RAM: " + text
           }
         }
 
@@ -775,11 +817,24 @@ Item {
           Layout.fillWidth: true
           Layout.preferredHeight: Style.space(9)
           radius: height / 2
-          color: root.freeMemoryColor
+          color: root.memoryStats.totalBytes > 0 ? "transparent" : root.freeMemoryColor
           border.width: Math.max(1, Style.spacing.hairline)
           border.color: root.dim
+          readonly property int hoveredSegment: {
+            if (!root.panelActive || !visible || width <= 0) return -1
+            if (!barHover.hovered) return -1
+            var fraction = barHover.point.position.x / width
+            var end = 0
+            for (let index = 0; index < memoryCanvas.segments.length; index++) {
+              end += memoryCanvas.segments[index].fraction
+              if (fraction < end) return index
+            }
+            return -1
+          }
+          HoverHandler { id: barHover }
 
           Canvas {
+            id: memoryCanvas
             anchors.fill: parent
             anchors.margins: memoryBar.border.width
             antialiasing: true
@@ -791,8 +846,12 @@ Item {
               })
               parts.push({ fraction: stats.totalBytes > 0 ? stats.otherBytes / stats.totalBytes : 0,
                 color: root.otherMemoryColor })
+              parts.push({ fraction: stats.totalBytes > 0 ? stats.availableBytes / stats.totalBytes : 0,
+                color: "transparent" })
               return parts
             }
+            property int hoveredSegment: memoryBar.hoveredSegment
+            onHoveredSegmentChanged: requestPaint()
             onSegmentsChanged: requestPaint()
             onWidthChanged: requestPaint()
             onHeightChanged: requestPaint()
@@ -813,6 +872,13 @@ Item {
               var offset = 0
               for (let index = 0; index < segments.length; index++) {
                 let segmentWidth = width * segments[index].fraction
+                context.globalAlpha = hoveredSegment < 0 || hoveredSegment === index ? 1 : 0.25
+                // Paint the background with each segment so even available RAM
+                // dims on hover, while preserving the normal layered colors.
+                context.fillStyle = String(hoveredSegment === index && index === segments.length - 1
+                  ? Qt.rgba(root.foreground.r, root.foreground.g, root.foreground.b, 0.3)
+                  : root.freeMemoryColor)
+                context.fillRect(offset, 0, segmentWidth, height)
                 context.fillStyle = String(segments[index].color)
                 context.fillRect(offset, 0, segmentWidth, height)
                 offset += segmentWidth
@@ -871,9 +937,35 @@ Item {
       }
     }
 
-    PanelSeparator {
+    RowLayout {
+      visible: !root.showFirewallRules && !root.showDiagnostics
       Layout.fillWidth: true
-      foreground: root.foreground
+      spacing: Style.space(8)
+      Text {
+        Layout.fillWidth: true
+        text: (root.resultsFiltered ? root.resultCount + " of " + root.serverCount + " servers"
+          : root.serverCount + " server" + (root.serverCount === 1 ? "" : "s"))
+          + (root.groupByProject ? " · " + root.projectCount + " project" + (root.projectCount === 1 ? "" : "s") : "")
+        color: root.dim
+        font.family: Style.font.family
+        font.pixelSize: Style.font.caption
+        elide: Text.ElideRight
+      }
+      Button {
+        objectName: "groupToggle"
+        text: "Group"
+        iconText: root.groupByProject ? "\uf14a" : "\uf096"
+        foreground: root.dim
+        focusable: true
+        fontSize: Style.font.caption
+        horizontalPadding: Style.space(3)
+        verticalPadding: Style.space(3)
+        Accessible.role: Accessible.CheckBox
+        Accessible.name: "Group by project"
+        Accessible.checkable: true
+        Accessible.checked: root.groupByProject
+        onClicked: { root.groupByProject = !root.groupByProject; root.focusNavigation() }
+      }
     }
 
     BorderSurface {
@@ -900,148 +992,124 @@ Item {
     }
 
     PanelScrollArea {
+      id: accessList
       objectName: "firewallList"
       visible: root.showFirewallRules
-      Layout.fillWidth: true
-      spacing: Style.space(6)
-
-      PanelSectionHeader {
-        Layout.fillWidth: true
-        text: "LAN ACCESS RULES"
-        foreground: root.foreground
-      }
-
-      Repeater {
-        model: root.firewallRules
-
-        CursorSurface {
-          id: firewallRow
-          required property var modelData
-          Layout.fillWidth: true
-          Layout.preferredHeight: Style.space(38)
-          bordered: true
-          foreground: root.foreground
-
-          RowLayout {
-            anchors.fill: parent
-            anchors.leftMargin: Style.space(10)
-            anchors.rightMargin: Style.space(8)
-            spacing: Style.space(8)
-
-            Text {
-              textFormat: Text.PlainText
-              text: ":" + firewallRow.modelData.port
-              color: root.foreground
-              font.family: Style.font.family
-              font.pixelSize: Style.font.body
-              font.bold: true
-            }
-
-            Text {
-              textFormat: Text.PlainText
-              Layout.fillWidth: true
-              text: firewallRow.modelData.subnet + (firewallRow.modelData.interfaceName ? "  ·  " + firewallRow.modelData.interfaceName : "")
-              color: root.dim
-              font.family: Style.font.family
-              font.pixelSize: Style.font.caption
-              elide: Text.ElideRight
-            }
-
-            Button {
-              text: "Remove"
-              tooltipText: "Remove this LAN access rule"
-              foreground: Color.urgent
-              accent: Color.urgent
-              bordered: true
-              fontSize: Style.font.caption
-              horizontalPadding: Style.space(8)
-              verticalPadding: Style.space(4)
-              enabled: !root.firewallBusy
-              onClicked: root.requestFirewallRemoval(firewallRow.modelData)
-            }
-          }
+      scrollBarGap: root.scrollBarGap
+      model: root.firewallRules
+      emptyText: "No LAN access rules yet.\nShare a server with QR to set up access."
+      header: Item {
+        width: accessList.viewportWidth
+        height: accessSummary.implicitHeight + Style.space(8)
+        Text {
+          id: accessSummary
+          anchors.left: parent.left
+          anchors.right: parent.right
+          anchors.leftMargin: Style.space(8)
+          anchors.rightMargin: Style.space(6)
+          text: root.firewallRules.length + " LAN access rule" + (root.firewallRules.length === 1 ? "" : "s")
+          color: root.dim
+          font.family: Style.font.family
+          font.pixelSize: Style.font.caption
         }
+      }
+      delegate: DetailRow {
+        required property var modelData
+        objectName: "accessRow"
+        width: accessList.viewportWidth
+        title: ":" + modelData.port
+        detail: modelData.subnet + (modelData.interfaceName ? " · " + modelData.interfaceName : "")
+        icon: "\uf0e8"
+        foreground: root.foreground
+        removable: true
+        actionBusy: root.firewallBusy
+        onRemoveRequested: root.requestFirewallRemoval(modelData)
       }
     }
 
     PanelScrollArea {
+      id: discoveryList
       objectName: "diagnosticList"
       visible: root.showDiagnostics
-      Layout.fillWidth: true
-      spacing: Style.space(6)
-
-      Text {
-        textFormat: Text.PlainText
-        Layout.fillWidth: true
-        text: root.scanSummary || "DISCOVERY DETAILS"
-        color: root.dim
-        font.family: Style.font.family
-        font.pixelSize: Style.font.caption
-        font.bold: true
-        font.letterSpacing: 0.5
-        elide: Text.ElideRight
+      scrollBarGap: root.scrollBarGap
+      model: skippedModel
+      emptyText: root.scanning ? "Checking local ports…" : "No skipped ports in the latest scan."
+      header: Item {
+        width: discoveryList.viewportWidth
+        height: discoverySummary.implicitHeight + Style.space(8)
+        Text {
+          id: discoverySummary
+          anchors.left: parent.left
+          anchors.right: parent.right
+          anchors.leftMargin: Style.space(8)
+          anchors.rightMargin: Style.space(6)
+          text: root.diagnostics.length + " listening port" + (root.diagnostics.length === 1 ? "" : "s") + " left out of Servers"
+          textFormat: Text.PlainText
+          wrapMode: Text.WordWrap
+          color: root.dim
+          font.family: Style.font.family
+          font.pixelSize: Style.font.caption
+        }
       }
+      delegate: Loader {
+        id: skippedEntry
+        required property var model
+        width: discoveryList.viewportWidth
+        height: item ? (item as Item).implicitHeight : 0
+        sourceComponent: model.kind === "header" ? skippedHeaderComponent : skippedPortComponent
 
-      Repeater {
-        model: root.diagnostics.slice(0, 8)
-
-        BorderSurface {
-          id: diagnosticItem
-          required property var modelData
-          Layout.fillWidth: true
-          Layout.preferredHeight: diagnosticRow.implicitHeight + Style.space(12)
-          color: "transparent"
-          borderSpec: Border.controlSpec("normal", root.foreground, Color.accent)
-          radius: Style.cornerRadius
-
-          RowLayout {
-            id: diagnosticRow
-            anchors.left: parent.left
-            anchors.right: parent.right
-            anchors.verticalCenter: parent.verticalCenter
-            anchors.leftMargin: Style.space(9)
-            anchors.rightMargin: Style.space(9)
-            spacing: Style.space(8)
-
-            Text {
-              textFormat: Text.PlainText
-              text: ":" + diagnosticItem.modelData.port
-              color: root.foreground
-              font.family: Style.font.family
-              font.pixelSize: Style.font.caption
-              font.bold: true
-            }
-            Text {
-              textFormat: Text.PlainText
-              Layout.preferredWidth: Style.space(90)
-              text: diagnosticItem.modelData.process
-              color: root.foreground
-              font.family: Style.font.family
-              font.pixelSize: Style.font.caption
-              elide: Text.ElideRight
-            }
-            Text {
-              textFormat: Text.PlainText
-              Layout.fillWidth: true
-              text: diagnosticItem.modelData.reason
-              color: root.dim
-              font.family: Style.font.family
-              font.pixelSize: Style.font.caption
-              elide: Text.ElideRight
+        Component {
+          id: skippedHeaderComponent
+          ProjectHeader {
+            objectName: "skippedGroupHeader"
+            projectRoot: ""
+            name: skippedEntry.model.name
+            count: skippedEntry.model.count
+            countNoun: "port"
+            collapsed: skippedEntry.model.collapsed
+            showStopAction: false
+            selected: root.selectedSkippedGroup === skippedEntry.model.groupId
+            foreground: root.foreground
+            onFocused: root.selectedSkippedGroup = skippedEntry.model.groupId
+            onToggled: root.toggleSkippedGroup(skippedEntry.model.groupId, true)
+            onNavigationKey: function(event) {
+              if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter || event.key === Qt.Key_Space
+                  || event.key === Qt.Key_Left || event.key === Qt.Key_Right) {
+                event.accepted = true
+                if ((event.key !== Qt.Key_Left && event.key !== Qt.Key_Right)
+                    || (event.key === Qt.Key_Left && !collapsed) || (event.key === Qt.Key_Right && collapsed))
+                  root.toggleSkippedGroup(skippedEntry.model.groupId, true)
+              }
             }
           }
         }
-      }
-
-      Text {
-        textFormat: Text.PlainText
-        visible: root.diagnostics.length > 8
-        Layout.fillWidth: true
-        text: "+ " + (root.diagnostics.length - 8) + " more skipped listeners"
-        color: root.dim
-        font.family: Style.font.family
-        font.pixelSize: Style.font.caption
-        horizontalAlignment: Text.AlignHCenter
+        Component {
+          id: skippedPortComponent
+          DetailRow {
+            readonly property var diagnostic: ({
+              port: skippedEntry.model ? skippedEntry.model.port : 0,
+              process: skippedEntry.model ? skippedEntry.model.process : "",
+              reason: skippedEntry.model ? skippedEntry.model.reason : ""
+            })
+            readonly property var explanation: RadarModel.skippedPortPresentation(diagnostic.reason)
+            objectName: "discoveryRow"
+            title: ":" + diagnostic.port
+            detail: explanation.text
+            wrapDetail: true
+            trailingText: diagnostic.process || "Unknown process"
+            icon: explanation.icon
+            foreground: root.foreground
+            includable: true
+            manuallySkipped: diagnostic.reason === "ignored by settings"
+            included: root.includedPorts[diagnostic.port] === true && !manuallySkipped
+            includeAvailable: diagnostic.reason !== "process metadata unavailable"
+            includeHint: !includeAvailable ? "Process details are unavailable; refresh after the process can be inspected."
+              : (included ? "Already included in detection. It must respond to HTTP or HTTPS to appear in Servers."
+                : (manuallySkipped ? "Remove this port from your skipped ports and check it again."
+                  : "Check this port even if normally excluded. It must respond to HTTP or HTTPS."))
+            onIncludeRequested: root.includePortRequested(diagnostic.port)
+          }
+        }
       }
     }
 
@@ -1050,12 +1118,13 @@ Item {
       Layout.fillWidth: true
       Layout.fillHeight: true
       Layout.minimumHeight: 0
-      Layout.preferredHeight: root.resultCount > 0 ? Math.max(Style.space(80), root.listHeight) : Style.space(120)
+      Layout.preferredHeight: root.resultCount > 0 ? root.listHeight : Style.space(120)
 
       ListView {
         id: serverList
         objectName: "serverList"
         anchors.fill: parent
+        anchors.rightMargin: serverScrollBar.visible ? serverScrollBar.width + root.scrollBarGap : 0
         visible: root.resultCount > 0
         model: projectModel
         clip: true
@@ -1067,9 +1136,14 @@ Item {
         highlightFollowsCurrentItem: false
         reuseItems: true
 
-        ScrollBar.vertical: ScrollBar {
+        ScrollBar.vertical: ListScrollBar {
           id: serverScrollBar
-          policy: ScrollBar.AsNeeded
+          objectName: "serverScrollBar"
+          parent: serverList.parent
+          x: parent.width - width
+          y: serverList.y
+          height: serverList.height
+          foreground: root.foreground
         }
 
         delegate: Loader {
@@ -1080,7 +1154,6 @@ Item {
           readonly property bool selected: index === root.selectedEntryIndex
           x: root.cardInset
           width: serverList.width - root.cardInset * 2
-            - (serverScrollBar.visible ? serverScrollBar.width + Style.space(4) : 0)
           height: item ? (item as Item).implicitHeight : 0
           sourceComponent: model.projectHeader ? projectHeaderComponent : serverRowComponent
 
@@ -1126,10 +1199,12 @@ Item {
       }
 
 
+      ListEdgeFades { anchors.fill: serverList; view: serverList }
+
       Column {
         visible: root.resultCount === 0
-        anchors.centerIn: parent
-        width: parent.width
+        anchors.centerIn: serverList
+        width: serverList.width
         spacing: Style.space(6)
 
         Text {
@@ -1161,54 +1236,46 @@ Item {
       }
     }
 
-    PanelSeparator {
-      visible: !root.showFirewallRules && !root.showDiagnostics && root.resultCount > 0
-      Layout.fillWidth: true
-      foreground: root.foreground
-    }
-
     ServerActions {
+      id: serverActions
       visible: !root.showFirewallRules && !root.showDiagnostics && root.resultCount > 0
       Layout.fillWidth: true
       server: root.currentServer
       selectedActionIndex: root.selectedActionIndex
+      keyboardHints: root.showActionHint && root.panelActive
       forceStopAvailable: !!server && server.serverId === root.forceStopServerId && server.source !== "docker"
       actionBusy: root.actionBusy
       foreground: root.foreground
-      onActionHovered: function(actionIndex) { root.selectedActionIndex = actionIndex }
+      onActionHovered: function(actionIndex) { root.showActionHint = false; root.selectedActionIndex = actionIndex }
       onActionTriggered: function(actionIndex) { root.activateAction(actionIndex, root.currentServer) }
     }
 
     Text {
-      textFormat: Text.PlainText
-      visible: root.notice !== ""
-      Layout.fillWidth: true
-      text: root.notice
-      maximumLineCount: 3
-      elide: Text.ElideRight
-      color: root.noticeUrgent ? Color.urgent : root.dim
-      font.family: Style.font.family
-      font.pixelSize: Style.font.caption
-      wrapMode: Text.Wrap
-      horizontalAlignment: Text.AlignHCenter
-    }
-
-    Text {
+      id: footerStatus
+      objectName: "footerStatus"
       textFormat: Text.PlainText
       Layout.fillWidth: true
-      text: root.selectedProjectRoot
+      text: root.notice !== "" ? root.notice.replace(/[\r\n]+/g, " ") : (root.showDiagnostics || root.showFirewallRules ? "Ctrl+R refresh · Esc back" : (root.selectedProjectRoot
         ? (root.projectStopSelected
           ? "enter stop all · ← / h back · j/k select · esc cancel"
           : "→ / l stop all · space fold · zc/zo fold · J/K project")
         : (root.groupByProject
           ? "↑↓ / j/k select · zc/zo fold · J/K project · / search"
-          : "↑↓ select · ←→ action · enter run · / search")
-      color: root.dim
-      opacity: 0.66
+          : "↑↓ select · ←→ action · enter run · / search")))
+      color: root.notice !== "" && root.noticeUrgent ? Color.urgent : root.dim
+      opacity: root.notice !== "" ? 1 : 0.66
       font.family: Style.font.family
       font.pixelSize: Style.font.caption
       horizontalAlignment: Text.AlignHCenter
       elide: Text.ElideRight
+      maximumLineCount: 1
+      wrapMode: Text.NoWrap
+      HoverHandler { id: noticeHover }
+      PanelToolTip {
+        visible: noticeHover.hovered && root.notice !== "" && footerStatus.truncated
+        text: root.notice
+        width: Math.min(implicitWidth, Style.space(360))
+      }
     }
   }
 

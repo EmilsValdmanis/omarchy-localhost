@@ -15,6 +15,8 @@ CursorSurface {
   property bool stopSelected: false
   property bool actionBusy: false
   property bool stopping: false
+  property bool showStopAction: true
+  property string countNoun: "server"
 
   signal toggled()
   signal focused()
@@ -30,41 +32,49 @@ CursorSurface {
   Keys.onPressed: function(event) { header.navigationKey(event) }
 
   Accessible.role: Accessible.Button
-  Accessible.name: name + ", " + count + " server" + (count === 1 ? "" : "s")
-  Accessible.description: projectRoot + " · " + (collapsed ? "Collapsed" : "Expanded")
+  Accessible.name: name + ", " + count + " " + countNoun + (count === 1 ? "" : "s")
+  Accessible.description: (projectRoot ? projectRoot + " · " : "") + (collapsed ? "Collapsed" : "Expanded")
   Accessible.checkable: true
   Accessible.checked: !collapsed
   Accessible.focusable: true
   Accessible.focused: selected && !stopSelected
   Accessible.onPressAction: toggled()
 
-  HoverHandler { id: hover; cursorShape: Qt.PointingHandCursor }
+  HoverHandler { cursorShape: Qt.PointingHandCursor }
   TapHandler { onTapped: header.toggled() }
-  PanelToolTip {
-    visible: hover.hovered && !stopHover.hovered
-    text: header.collapsed ? "Expand project" : "Collapse project"
-  }
 
   RowLayout {
     anchors.fill: parent
     anchors.leftMargin: Style.space(8)
     anchors.rightMargin: Style.space(10)
     spacing: Style.space(8)
-    Text {
+    OpticalGlyph {
+      objectName: "projectChevron"
       Layout.preferredWidth: Style.space(12)
-      textFormat: Text.PlainText
+      Layout.preferredHeight: Style.space(12)
+      Layout.alignment: Qt.AlignVCenter
       text: "›"
+      paintedSize: Style.space(8)
       rotation: header.collapsed ? 0 : 90
+      transformOrigin: Item.Center
       color: header.selected ? Color.accent : Qt.darker(header.foreground, 1.4)
-      font.family: Style.font.family
-      font.pixelSize: Style.font.body
-      horizontalAlignment: Text.AlignHCenter
+      fontFamily: Style.font.family
+      fontSize: Style.font.body
+      Behavior on rotation {
+        enabled: !Style.reduceMotion
+        NumberAnimation {
+          duration: Style.duration(140)
+          easing.type: Easing.Bezier
+          easing.bezierCurve: Style.easeOut
+        }
+      }
     }
     PanelSectionHeader {
+      objectName: "projectName"
       Layout.fillWidth: true
-      Layout.alignment: Qt.AlignBaseline
+      Layout.alignment: Qt.AlignVCenter
       // Section labels reserve extra top padding for clipped list headings.
-      // This row already has vertical space; keep its label on the count's baseline.
+      // This row already has vertical space; center the label and count together.
       topPadding: 0
       text: header.name
       foreground: header.selected ? Color.accent : header.foreground
@@ -72,10 +82,11 @@ CursorSurface {
     }
     PanelActionButton {
       objectName: "projectStopAll"
-      iconText: header.stopping ? "\uf251" : "\uf04d"
+      visible: header.showStopAction
+      Layout.alignment: Qt.AlignVCenter
       foreground: Color.urgent
       hoverColor: Color.urgent
-      enabled: !header.actionBusy
+      enabled: header.showStopAction && !header.actionBusy
       hasCursor: header.selected && header.stopSelected
       bordered: hasCursor
       focusable: true
@@ -86,10 +97,22 @@ CursorSurface {
       Accessible.focused: header.selected && header.stopSelected
       Accessible.onPressAction: if (enabled) header.stopRequested()
       onClicked: header.stopRequested()
-      HoverHandler { id: stopHover }
+      InlineIcon {
+        objectName: "projectStopIcon"
+        anchors.centerIn: parent
+        anchors.alignWhenCentered: false
+        anchors.verticalCenterOffset: countLabel.y + countLabel.height / 2 - (parent.y + parent.height / 2)
+        width: Style.space(14)
+        height: countLabel.implicitHeight
+        label: countLabel
+        text: header.stopping ? "\uf251" : "\uf04d"
+        color: header.actionBusy ? Qt.darker(Color.urgent, 2) : Color.urgent
+      }
     }
     Text {
-      Layout.alignment: Qt.AlignBaseline
+      id: countLabel
+      objectName: "projectCount"
+      Layout.alignment: Qt.AlignVCenter
       textFormat: Text.PlainText
       text: header.count
       color: Qt.darker(header.foreground, 1.4)
