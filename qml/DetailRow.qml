@@ -1,6 +1,7 @@
 import QtQuick
 import QtQuick.Layouts
 import qs.Commons
+import qs.Commons as Theme
 import qs.Ui
 
 CursorSurface {
@@ -49,7 +50,7 @@ CursorSurface {
     anchors.leftMargin: Style.space(8)
     anchors.rightMargin: Style.space(6)
     spacing: Style.space(9)
-    OpticalGlyph {
+    PaintedGlyph {
       Layout.preferredWidth: Style.space(22)
       Layout.preferredHeight: Style.space(24)
       text: root.icon
@@ -137,8 +138,8 @@ CursorSurface {
       visible: root.removable
       text: "Remove"
       iconText: "\uf1f8"
-      foreground: Color.urgent
-      accent: Color.urgent
+      foreground: Theme.Color.urgent
+      accent: Theme.Color.urgent
       fontSize: Style.font.caption
       horizontalPadding: Style.space(7)
       verticalPadding: Style.space(5)

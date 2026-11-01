@@ -4,13 +4,14 @@ import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
 import qs.Commons
+import qs.Commons as Theme
 import qs.Ui
 
 Item {
   id: root
   property string value: "all"
   property var options: []
-  property color foreground: Color.popups.text
+  property color foreground: Theme.Color.popups.text
   readonly property bool popupOpen: popup.visible
   signal changed(string value)
   implicitHeight: trigger.implicitHeight
@@ -44,7 +45,7 @@ Item {
     Accessible.name: "Filter servers: " + text
     onClicked: popup.visible ? popup.close() : popup.open()
     Keys.onDownPressed: popup.open()
-    OpticalGlyph {
+    PaintedGlyph {
       anchors.right: parent.right
       anchors.rightMargin: Style.space(8)
       anchors.verticalCenter: parent.verticalCenter
@@ -69,8 +70,8 @@ Item {
       // outside press would close here, then reopen on the trigger's release.
       closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutsideParent
       background: BorderSurface {
-        color: Color.popups.background
-        borderSpec: Border.controlSpec("normal", root.foreground, Color.accent)
+        color: Theme.Color.popups.background
+        borderSpec: Border.controlSpec("normal", root.foreground, Theme.Color.accent)
         radius: Style.cornerRadius
       }
       onOpened: {

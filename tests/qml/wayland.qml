@@ -1,6 +1,7 @@
 import QtQuick
 import Quickshell
 import qs.Commons
+import qs.Commons as Theme
 import "Plugin" as Plugin
 
 // Hidden entry-point smoke test: no panels are opened on the user's desktop.
@@ -70,7 +71,7 @@ ShellRoot {
 
         // Kanagawa's pale accent can blend into a light wallpaper. The shared
         // label follows Omarchy's resolved dark or light bar foreground.
-        Color.accent = "#dcd7ba"
+        Theme.Color.accent = "#dcd7ba"
         themeBar.barForeground = "#1f1f28"
         passed = passed && shell.sameColor(label.color, themeBar.barForeground)
         themeBar.barForeground = "#dcd7ba"

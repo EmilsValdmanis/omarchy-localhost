@@ -2,8 +2,10 @@ import QtQuick
 import QtTest
 import Quickshell
 import qs.Commons
+import qs.Commons as Theme
 import "Plugin/qml" as PluginUi
 import "Plugin/qml/RadarModel.js" as RadarModel
+import "Plugin/qml/Motion.js" as Motion
 
 ShellRoot {
   FloatingWindow {
@@ -11,7 +13,7 @@ ShellRoot {
     visible: true
     implicitWidth: 900
     implicitHeight: 800
-    color: Color.popups.background
+    color: Theme.Color.popups.background
 
     TestCase {
       id: tests
@@ -539,7 +541,7 @@ ShellRoot {
         tryCompare(area, "count", 5)
         equal(area.itemAtIndex(2).item, automatic, "folding preserves the header instance for its animation")
         check(automatic.selected && automatic.hasCursor, "clicking highlights the header like a project")
-        if (!Style.reduceMotion)
+        if (Motion.duration(Style, 140) > 0)
           tryVerify(function() { return chevron.rotation > 0 && chevron.rotation < 90 }, 120, "the shared chevron animates")
         tryCompare(chevron, "rotation", 90)
         panel.diagnostics = entries.map(function(entry) { return Object.assign({}, entry) })

@@ -3,6 +3,8 @@ pragma ComponentBehavior: Bound
 import QtQuick
 import QtQuick.Layouts
 import qs.Commons
+import qs.Commons as Theme
+import "Motion.js" as Motion
 import qs.Ui
 
 CursorSurface {
@@ -48,7 +50,7 @@ CursorSurface {
     anchors.leftMargin: Style.space(8)
     anchors.rightMargin: Style.space(10)
     spacing: Style.space(8)
-    OpticalGlyph {
+    PaintedGlyph {
       objectName: "projectChevron"
       Layout.preferredWidth: Style.space(12)
       Layout.preferredHeight: Style.space(12)
@@ -57,15 +59,13 @@ CursorSurface {
       paintedSize: Style.space(8)
       rotation: header.collapsed ? 0 : 90
       transformOrigin: Item.Center
-      color: header.selected ? Color.accent : Qt.darker(header.foreground, 1.4)
+      color: header.selected ? Theme.Color.accent : Qt.darker(header.foreground, 1.4)
       fontFamily: Style.font.family
       fontSize: Style.font.body
       Behavior on rotation {
-        enabled: !Style.reduceMotion
         NumberAnimation {
-          duration: Style.duration(140)
-          easing.type: Easing.Bezier
-          easing.bezierCurve: Style.easeOut
+          duration: Motion.duration(Style, 140)
+          easing.type: Easing.OutCubic
         }
       }
     }
@@ -77,15 +77,15 @@ CursorSurface {
       // This row already has vertical space; center the label and count together.
       topPadding: 0
       text: header.name
-      foreground: header.selected ? Color.accent : header.foreground
+      foreground: header.selected ? Theme.Color.accent : header.foreground
       elide: Text.ElideMiddle
     }
     PanelActionButton {
       objectName: "projectStopAll"
       visible: header.showStopAction
       Layout.alignment: Qt.AlignVCenter
-      foreground: Color.urgent
-      hoverColor: Color.urgent
+      foreground: Theme.Color.urgent
+      hoverColor: Theme.Color.urgent
       enabled: header.showStopAction && !header.actionBusy
       hasCursor: header.selected && header.stopSelected
       bordered: hasCursor
@@ -106,7 +106,7 @@ CursorSurface {
         height: countLabel.implicitHeight
         label: countLabel
         text: header.stopping ? "\uf251" : "\uf04d"
-        color: header.actionBusy ? Qt.darker(Color.urgent, 2) : Color.urgent
+        color: header.actionBusy ? Qt.darker(Theme.Color.urgent, 2) : Theme.Color.urgent
       }
     }
     Text {

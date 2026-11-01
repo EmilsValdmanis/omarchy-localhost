@@ -1,11 +1,12 @@
 import QtQuick
 import qs.Commons
+import qs.Commons as Theme
 
 Canvas {
   id: root
   objectName: "memorySparkline"
   property var samples: []
-  property color lineColor: Color.accent
+  property color lineColor: Theme.Color.accent
 
   implicitWidth: Style.space(48)
   implicitHeight: Style.space(20)

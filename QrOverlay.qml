@@ -3,6 +3,7 @@ import Quickshell
 import Quickshell.Wayland
 import qs.Commons
 import "qml" as Internal
+import "qml/Motion.js" as Motion
 
 Item {
   id: root
@@ -53,7 +54,7 @@ Item {
       opacity: root.opened ? 1 : 0
 
       Behavior on opacity {
-        NumberAnimation { duration: Style.duration(160); easing.type: Easing.OutCubic }
+        NumberAnimation { duration: Motion.duration(Style, 160); easing.type: Easing.OutCubic }
       }
 
       MouseArea {
@@ -76,10 +77,10 @@ Item {
         scale: root.opened ? 1 : 0.96
 
         Behavior on opacity {
-          NumberAnimation { duration: Style.duration(160); easing.type: Easing.OutCubic }
+          NumberAnimation { duration: Motion.duration(Style, 160); easing.type: Easing.OutCubic }
         }
         Behavior on scale {
-          NumberAnimation { duration: Style.duration(160); easing.type: Easing.OutCubic }
+          NumberAnimation { duration: Motion.duration(Style, 160); easing.type: Easing.OutCubic }
         }
 
         MouseArea { anchors.fill: parent; onClicked: function(mouse) { mouse.accepted = true } }

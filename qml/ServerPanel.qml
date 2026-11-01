@@ -4,6 +4,7 @@ import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
 import qs.Commons
+import qs.Commons as Theme
 import qs.Ui
 import "RadarModel.js" as RadarModel
 import "ProjectList.js" as ProjectList
@@ -86,7 +87,7 @@ Item {
   signal firewallAuthorizationCanceled()
   signal firewallRemovalConfirmed(var rule)
 
-  readonly property color foreground: Color.popups.text
+  readonly property color foreground: Theme.Color.popups.text
   readonly property color dim: Qt.darker(foreground, 1.4)
   readonly property int panelWidth: Style.space(460)
   readonly property int serverCount: servers ? servers.count : 0
@@ -145,7 +146,7 @@ Item {
   }
 
   function colorForSource(key) {
-    var hue = Color.accent.hslHue
+    var hue = Theme.Color.accent.hslHue
     return Qt.hsla(((hue < 0 ? 0.48 : hue) + RadarModel.sourceColorOffset(key)) % 1, 0.52, 0.68, 1)
   }
 
@@ -752,8 +753,8 @@ Item {
       visible: !root.showFirewallRules && !root.showDiagnostics
       Layout.fillWidth: true
       Layout.preferredHeight: memoryLayout.implicitHeight + Style.space(16)
-      color: Style.controlFill(false, false, root.foreground, Color.accent)
-      borderSpec: Border.controlSpec("normal", root.foreground, Color.accent)
+      color: Style.controlFill(false, false, root.foreground, Theme.Color.accent)
+      borderSpec: Border.controlSpec("normal", root.foreground, Theme.Color.accent)
       radius: Style.cornerRadius
 
       ColumnLayout {
@@ -972,8 +973,8 @@ Item {
       visible: root.hasDiagnostics
       Layout.fillWidth: true
       Layout.preferredHeight: diagnosticText.implicitHeight + Style.space(14)
-      color: Style.hoverFillFor(root.foreground, root.scanError ? Color.urgent : Color.accent)
-      borderSpec: Border.controlSpec("normal", root.foreground, Color.accent)
+      color: Style.hoverFillFor(root.foreground, root.scanError ? Theme.Color.urgent : Theme.Color.accent)
+      borderSpec: Border.controlSpec("normal", root.foreground, Theme.Color.accent)
       radius: Style.cornerRadius
 
       Text {
@@ -984,7 +985,7 @@ Item {
         text: root.scanError || root.warnings.join("\n")
         maximumLineCount: 3
         elide: Text.ElideRight
-        color: root.scanError ? Color.urgent : root.dim
+        color: root.scanError ? Theme.Color.urgent : root.dim
         font.family: Style.font.family
         font.pixelSize: Style.font.caption
         wrapMode: Text.Wrap
@@ -1262,7 +1263,7 @@ Item {
         : (root.groupByProject
           ? "↑↓ / j/k select · zc/zo fold · J/K project · / search"
           : "↑↓ select · ←→ action · enter run · / search")))
-      color: root.notice !== "" && root.noticeUrgent ? Color.urgent : root.dim
+      color: root.notice !== "" && root.noticeUrgent ? Theme.Color.urgent : root.dim
       opacity: root.notice !== "" ? 1 : 0.66
       font.family: Style.font.family
       font.pixelSize: Style.font.caption
@@ -1283,9 +1284,9 @@ Item {
     id: confirmDialog
     anchors.fill: parent
     z: 100
-    background: Color.popups.background
+    background: Theme.Color.popups.background
     foreground: root.foreground
-    selectedText: Color.accent
+    selectedText: Theme.Color.accent
     fontFamily: Style.font.family
     onCanceled: root.cancelPendingAction()
     onConfirmed: root.confirmPendingAction()

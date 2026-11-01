@@ -21,7 +21,7 @@ Item {
     font: root.label.font
     text: "H"
   }
-  OpticalGlyph {
+  PaintedGlyph {
     id: glyph
     width: root.width
     height: root.height
