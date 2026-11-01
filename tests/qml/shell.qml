@@ -32,8 +32,10 @@ ShellRoot {
         systemMemory: ({ totalBytes: 16 * 1073741824, availableBytes: 4 * 1073741824 })
       } }
       Component { id: qrComponent; PluginUi.QrCode {} }
+      Component { id: qrContentComponent; PluginUi.QrContent { width: implicitWidth; height: implicitHeight } }
       Component { id: serviceComponent; PluginUi.RadarService { includeDocker: false } }
       Component { id: overlayComponent; PluginUi.QrService {} }
+      Component { id: metricsComponent; TextMetrics {} }
 
       SignalSpy { id: openSpy; signalName: "openRequested" }
       SignalSpy { id: stopSpy; signalName: "stopRequested" }
@@ -130,6 +132,61 @@ ShellRoot {
         check(bottom <= panel.height, "list fits inside the popup")
       }
 
+      function test_scrollbar_can_be_dragged_in_both_directions() {
+        var scrollbar = findChild(panel, "serverScrollBar")
+        check(scrollbar.visible && scrollbar.interactive)
+        check(scrollbar.mapToItem(panel, scrollbar.width, 0).x <= panel.width,
+          "the entire drag target stays inside the panel")
+        var firstRow = list.itemAtIndex(0)
+        check(scrollbar.mapToItem(panel, 0, 0).x > firstRow.mapToItem(panel, firstRow.width, 0).x,
+          "the scrollbar track never overlaps a row")
+        fuzzyCompare(findChild(panel, "memoryOverview").width, panel.width, 0.5,
+          "the header uses the full panel width without a global scrollbar gutter")
+        fuzzyCompare(scrollbar.mapToItem(panel, 0, 0).x - firstRow.mapToItem(panel, firstRow.width, 0).x,
+          Style.space(2), 0.5, "the list keeps a compact gap beside the scrollbar")
+        var selected = panel.selectedServer().serverId
+        var initial = list.contentY
+        var x = scrollbar.width - Style.space(1.5)
+        var thumbCenter = scrollbar.height * (scrollbar.visualPosition + scrollbar.visualSize / 2)
+        mousePress(scrollbar, x, thumbCenter)
+        tryCompare(scrollbar, "pressed", true)
+        mouseMove(scrollbar, x, scrollbar.height * 0.75, 100)
+        mouseRelease(scrollbar, x, scrollbar.height * 0.75)
+        settled()
+        check(list.contentY > initial + list.height, "dragging the thumb scrolls down")
+        equal(panel.selectedServer().serverId, selected, "dragging does not change the server selection")
+        thumbCenter = scrollbar.height * (scrollbar.visualPosition + scrollbar.visualSize / 2)
+        mousePress(scrollbar, x, thumbCenter)
+        tryCompare(scrollbar, "pressed", true)
+        mouseMove(scrollbar, x, 0, 100)
+        mouseRelease(scrollbar, x, 0)
+        settled()
+        check(list.atYBeginning, "dragging back up reaches the first row")
+        verifyViewport()
+        RadarModel.syncServerModel(servers, fixtures(1))
+        panel.revision++
+        tryCompare(list, "count", 1)
+        tryCompare(scrollbar, "visible", false, 2000, "no scrollbar is shown when the rows fit")
+        fuzzyCompare(list.width, panel.width, 0.5, "no scrollbar padding is reserved when rows fit")
+      }
+
+      function test_toolbar_actions_use_consistent_buttons() {
+        panel.selectedIndex = 0
+        panel.selectedActionIndex = RadarModel.ACTIONS.terminal
+        mouseMove(tests, 850, 750)
+        settled()
+        var open = findChild(panel, "serverAction0")
+        var copy = findChild(panel, "serverAction1")
+        equal(open.borderTop, 0, "Open has no idle outline")
+        equal(copy.borderTop, 0, "Copy has no idle outline")
+        for (var index = 4; index < 9; index++) {
+          var action = findChild(panel, "serverAction" + index)
+          fuzzyCompare(action.height, open.height, 0.5, "both toolbar sides share the same height")
+          fuzzyCompare(action.iconSize, open.iconSize, 0.5, "both toolbar sides share the same icon size")
+          fuzzyCompare(action.width, action.height, 0.5, "icon actions have square hit targets")
+        }
+      }
+
       function test_native_wheel_and_bounds_after_removals() {
         var before = list.contentY
         mouseWheel(list, list.width / 2, list.height / 2, 0, -120)
@@ -217,14 +274,90 @@ ShellRoot {
         check(diagnostics.mapToItem(panel, 0, diagnostics.height).y <= panel.height)
       }
 
+      function test_auxiliary_lists_show_every_entry_and_share_scroll_layout() {
+        panel.height = 320
+        var rules = []
+        for (var i = 0; i < 40; i++) rules.push({ port: 3000 + i, subnet: "192.168.1.0/24", interfaceName: "wlan0" })
+        panel.firewallRules = rules
+        panel.diagnostics = rules.map(function(rule) {
+          return { port: rule.port, process: "node", reason: "no HTTP or HTTPS response" }
+        })
+        var removals = []
+        panel.firewallRemovalConfirmed.connect(function(rule) { removals.push(rule.port) })
+        for (var page = 0; page < 2; page++) {
+          panel.showFirewallRules = page === 0
+          panel.showDiagnostics = page === 1
+          var area = findChild(panel, page === 0 ? "firewallList" : "diagnosticList")
+          tryCompare(area, "count", page === 0 ? 40 : 42)
+          wait(100)
+          var scrollbar = findChild(area, "auxiliaryScrollBar")
+          check(scrollbar.visible && scrollbar.interactive)
+          var initial = area.contentY
+          var thumbCenter = scrollbar.height * (scrollbar.visualPosition + scrollbar.visualSize / 2)
+          mousePress(scrollbar, scrollbar.width / 2, thumbCenter)
+          tryCompare(scrollbar, "pressed", true)
+          mouseMove(scrollbar, scrollbar.width / 2, scrollbar.height * 0.8, 100)
+          mouseRelease(scrollbar, scrollbar.width / 2, scrollbar.height * 0.8)
+          check(area.contentY > initial, "both auxiliary scrollbars support dragging")
+          var lastIndex = page === 0 ? 39 : 41
+          area.positionViewAtIndex(lastIndex, ListView.End)
+          tryVerify(function() { return area.itemAtIndex(lastIndex) !== null })
+          var entry = area.itemAtIndex(lastIndex)
+          var row = page === 0 ? entry : entry.item
+          fuzzyCompare(row.width, area.viewportWidth, 0.5)
+          check(scrollbar.mapToItem(panel, 0, 0).x > row.mapToItem(panel, row.width, 0).x)
+          fuzzyCompare(scrollbar.mapToItem(panel, 0, 0).x - row.mapToItem(panel, row.width, 0).x,
+            Style.space(2), 0.5, "auxiliary lists use the same scrollbar gap")
+          check(scrollbar.mapToItem(panel, scrollbar.width, 0).x <= panel.width)
+          if (page === 0) {
+            equal(row.title, ":3039")
+            var remove = findChild(row, "removeRule")
+            check(remove.iconText !== "")
+            panel.firewallBusy = true
+            equal(remove.enabled, false)
+            panel.firewallBusy = false
+            mouseClick(remove, remove.width / 2, remove.height / 2)
+            equal(panel.pendingAction, "remove-firewall")
+            equal(panel.pendingFirewallRule.port, 3039)
+            equal(removals.length, 0, "Remove still asks for confirmation")
+            panel.confirmPendingAction()
+            equal(removals.length, 1)
+            equal(removals[0], 3039)
+          } else {
+            equal(row.title, ":3039", "listeners beyond the old eight-row limit are reachable")
+            equal(row.trailingText, "node")
+            equal(row.detail, "No response to the HTTP / HTTPS check")
+          }
+        }
+        panel.diagnostics = []
+        tryCompare(findChild(panel, "diagnosticList"), "count", 0)
+        panel.firewallRules = []
+        panel.showDiagnostics = false
+        panel.showFirewallRules = true
+        tryCompare(findChild(panel, "firewallList"), "count", 0)
+      }
+
       function test_keyboard_navigation_actions_and_confirmation() {
         panel.focusNavigation()
         wait(50)
-        keyClick(Qt.Key_K)
+        for (var repeat = 0; repeat < 4; repeat++) {
+          keyClick(Qt.Key_K)
+          keyClick(Qt.Key_Up)
+          keyClick(Qt.Key_P, Qt.ControlModifier)
+        }
+        equal(panel.selectedIndex, 0, "upward navigation stops at the first row")
+        keyClick(Qt.Key_G, Qt.ShiftModifier)
         settled()
         equal(panel.selectedIndex, 49)
         check(list.atYEnd)
-        keyClick(Qt.Key_J)
+        for (repeat = 0; repeat < 4; repeat++) {
+          keyClick(Qt.Key_J)
+          keyClick(Qt.Key_Down)
+          keyClick(Qt.Key_N, Qt.ControlModifier)
+        }
+        equal(panel.selectedIndex, 49, "downward navigation stops at the last row")
+        keyClick(Qt.Key_G)
+        keyClick(Qt.Key_G)
         settled()
         equal(panel.selectedIndex, 0)
         check(list.atYBeginning)
@@ -242,7 +375,7 @@ ShellRoot {
         panel.selectedIndex = 1
         panel.selectedActionIndex = 1
         panel.selectAction(1)
-        equal(panel.selectedActionIndex, RadarModel.ACTIONS.terminal, "skip LAN copy and QR for localhost-only servers")
+        equal(panel.selectedActionIndex, RadarModel.ACTIONS.qr, "disabled QR remains reachable for its explanation")
         check(!panel.actionEnabled(RadarModel.ACTIONS.terminal, { cwd: "" }))
         check(!panel.actionEnabled(RadarModel.ACTIONS.project, { cwd: "" }))
       }
@@ -295,27 +428,431 @@ ShellRoot {
         equal(panel.selectedServer().serverId, "server-1")
       }
 
-      function test_local_and_lan_copy_actions_and_shortcuts() {
+      function test_single_copy_action_uses_local_url() {
         panel.selectedIndex = 0
-        var local = findChild(panel, "serverAction1")
-        var lan = findChild(panel, "serverAction2")
-        equal(local.text, "Copy local")
-        equal(lan.text, "Copy LAN")
-        mouseClick(local, local.width / 2, local.height / 2)
+        var copy = findChild(panel, "serverAction1")
+        equal(copy.text, "Copy")
+        check(copy.iconText !== "")
+        equal(findChild(copy.parent, "copyMenuTrigger"), null)
+        mouseClick(copy, copy.width / 2, copy.height / 2)
         equal(copySpy.count, 1)
         equal(copySpy.signalArguments[0][0].localUrl, "http://localhost:3000")
-        mouseClick(lan, lan.width / 2, lan.height / 2)
-        equal(copyLanSpy.count, 1)
-        equal(copyLanSpy.signalArguments[0][0].lanUrl, "http://192.168.1.2:3000")
+        equal(copyLanSpy.count, 0)
         panel.focusNavigation()
         keyClick(Qt.Key_C, Qt.ControlModifier)
         equal(copySpy.count, 2)
-        keyClick(Qt.Key_C, Qt.ControlModifier | Qt.ShiftModifier)
-        equal(copyLanSpy.count, 2)
         panel.selectedIndex = 1
-        equal(lan.enabled, false)
-        keyClick(Qt.Key_C, Qt.ControlModifier | Qt.ShiftModifier)
-        equal(copyLanSpy.count, 2, "LAN copy is disabled for a loopback-only server")
+        mouseClick(copy, copy.width / 2, copy.height / 2)
+        equal(copySpy.count, 3, "local copying is independent of LAN availability")
+        equal(copySpy.signalArguments[2][0].localUrl, "http://localhost:3001")
+        equal(copyLanSpy.count, 0)
+      }
+
+      function test_include_and_direct_skip_with_keyboard_and_mouse() {
+        var included = []
+        var skipped = []
+        panel.includePortRequested.connect(function(port) { included.push(port) })
+        panel.skipPortRequested.connect(function(port) { skipped.push(port) })
+        panel.diagnostics = [{ port: 4206, process: "bun", reason: "ignored by settings" }]
+        panel.showDiagnostics = true
+        var area = findChild(panel, "diagnosticList")
+        tryCompare(area, "count", 3)
+        settled()
+        var button = findChild(area.itemAtIndex(1), "includePort")
+        check(button.enabled)
+        equal(button.text, "Unskip")
+        mouseClick(button, button.width / 2, button.height / 2)
+        equal(included.length, 1)
+        equal(included[0], 4206)
+        panel.includedPorts = ({4206: true})
+        panel.diagnostics = [{ port: 4206, process: "bun", reason: "no HTTP or HTTPS response" }]
+        settled()
+        button = findChild(area.itemAtIndex(2), "includePort")
+        equal(button.text, "Included")
+        equal(button.enabled, false)
+        panel.showDiagnostics = false
+        panel.selectedIndex = 0
+        panel.selectedActionIndex = RadarModel.ACTIONS.restart
+        panel.focusNavigation()
+        wait(50)
+        keyClick(Qt.Key_Right)
+        equal(panel.selectedActionIndex, RadarModel.ACTIONS.skip)
+        keyClick(Qt.Key_Return)
+        equal(skipped.length, 1)
+        equal(skipped[0], 3000)
+        equal(stopSpy.count, 0, "skipping never stops the process")
+        panel.selectedIndex = 1
+        var skip = findChild(panel, "serverAction8")
+        equal(skip.text, "")
+        var stop = findChild(panel, "serverAction7")
+        check(skip.mapToItem(panel, skip.width, 0).x <= stop.mapToItem(panel, 0, 0).x,
+          "Skip is immediately before Stop")
+        mouseClick(skip, skip.width / 2, skip.height / 2)
+        equal(skipped.length, 2)
+        equal(skipped[1], 3001, "mouse click skips the currently selected port directly")
+        equal(stopSpy.count, 0)
+      }
+
+      function test_skipped_controls_fit_content_without_scrollbar_feedback() {
+        panel.height = Qt.binding(function() { return panel.implicitHeight })
+        panel.showDiagnostics = true
+        panel.diagnostics = [4206, 36811, 8000, 8080].map(function(port) {
+          return { port: port, process: "process-with-a-long-name", reason: "no HTTP or HTTPS response" }
+        })
+        panel.includedPorts = ({8080:true})
+        var area = findChild(panel, "diagnosticList")
+        var bar = findChild(area, "auxiliaryScrollBar")
+        tryCompare(area, "count", 6)
+        settled()
+        tryCompare(bar, "visible", false)
+        fuzzyCompare(area.viewportWidth, panel.width, 0.5)
+        panel.height = 230
+        tryCompare(bar, "visible", true)
+        panel.height = Qt.binding(function() { return panel.implicitHeight })
+        tryCompare(bar, "visible", false)
+      }
+
+      function test_skipped_sections_default_folds_and_keyboard() {
+        var entries = [
+          { port: 4206, process: "bun", reason: "TanStack Devtools event bus" },
+          { port: 8000, process: "api", reason: "ignored by settings" },
+          { port: 5432, process: "postgres", reason: "non-HTTP service port" }
+        ]
+        panel.diagnostics = entries
+        panel.showDiagnostics = true
+        var area = findChild(panel, "diagnosticList")
+        tryCompare(area, "count", 3)
+        settled()
+        var manual = area.itemAtIndex(0).item
+        var automatic = area.itemAtIndex(2).item
+        equal(manual.name, "Manual")
+        equal(manual.count, 1)
+        equal(manual.collapsed, false)
+        equal(automatic.name, "Automatic")
+        equal(automatic.count, 2)
+        equal(automatic.collapsed, true)
+        check(!findChild(manual, "projectStopAll").visible, "section headers do not expose project stop actions")
+        equal(area.itemAtIndex(1).item.title, ":8000")
+        var chevron = findChild(automatic, "projectChevron")
+        equal(chevron.rotation, 0)
+        mouseClick(automatic, automatic.width / 2, automatic.height / 2)
+        tryCompare(area, "count", 5)
+        equal(area.itemAtIndex(2).item, automatic, "folding preserves the header instance for its animation")
+        check(automatic.selected && automatic.hasCursor, "clicking highlights the header like a project")
+        if (!Style.reduceMotion)
+          tryVerify(function() { return chevron.rotation > 0 && chevron.rotation < 90 }, 120, "the shared chevron animates")
+        tryCompare(chevron, "rotation", 90)
+        panel.diagnostics = entries.map(function(entry) { return Object.assign({}, entry) })
+        settled()
+        equal(area.count, 5, "polling does not reset an explicitly opened section")
+        equal(area.itemAtIndex(2).item, automatic, "polling preserves the selected header")
+        automatic = area.itemAtIndex(2).item
+        automatic.forceActiveFocus()
+        keyClick(Qt.Key_Left)
+        tryCompare(area, "count", 3)
+        tryVerify(function() { return area.itemAtIndex(2).item.activeFocus })
+        keyClick(Qt.Key_Right)
+        tryCompare(area, "count", 5)
+        manual = area.itemAtIndex(0).item
+        mouseClick(manual, manual.width / 2, manual.height / 2)
+        tryCompare(area, "count", 4)
+        equal(area.itemAtIndex(0).item, manual)
+        check(manual.selected && manual.hasCursor)
+        check(!automatic.selected, "only the most recently selected header is highlighted")
+        panel.diagnostics = entries.filter(function(entry) { return entry.reason !== "ignored by settings" })
+        settled()
+        equal(area.itemAtIndex(1).item.collapsed, false, "removing the last manual skip opens Automatic")
+        panel.diagnostics = entries
+        settled()
+        equal(area.itemAtIndex(1).item.collapsed, true, "a new manual section closes Automatic by default")
+        panel.diagnostics = []
+        tryCompare(area, "count", 0)
+      }
+
+      function test_skipped_process_names_and_actions_align() {
+        panel.showDiagnostics = true
+        panel.diagnostics = [
+          { port: 3773, process: "t3code", reason: "command and port are not recognized as a development server" },
+          { port: 4206, process: "bun", reason: "TanStack Devtools event bus" },
+          { port: 5432, process: "a-very-long-application-name-that-must-not-push-the-action", reason: "ignored by settings" },
+          { port: 36811, process: "node-MainThread", reason: "no HTTP or HTTPS response" }
+        ]
+        panel.includedPorts = ({36811:true})
+        var area = findChild(panel, "diagnosticList")
+        tryCompare(area, "count", 3)
+        panel.toggleSkippedGroup("automatic")
+        tryCompare(area, "count", 6)
+        for (var size of [12, 18]) {
+          Style.fontBaseSize = size
+          panel.width = panel.implicitWidth
+          panel.height = 650
+          settled()
+          var processX = -1
+          var actionX = -1
+          var actionWidth = -1
+          for (var i = 0; i < 4; i++) {
+            var row = area.itemAtIndex([3, 4, 1, 5][i]).item
+            check(row !== null)
+            var title = findChild(row, "detailTitle")
+            var process = findChild(row, "detailProcess")
+            var action = findChild(row, "includePort")
+            var currentProcessX = process.mapToItem(row, 0, 0).x
+            var currentActionX = action.mapToItem(row, 0, 0).x
+            if (i === 0) { processX = currentProcessX; actionX = currentActionX; actionWidth = action.width }
+            fuzzyCompare(currentProcessX, processX, 0.5, "app names share a left edge beside four- and five-digit ports")
+            fuzzyCompare(currentActionX, actionX, 0.5, "all actions share a column")
+            fuzzyCompare(action.width, actionWidth, 0.5)
+            check(action.width >= action.implicitWidth, "the action label fits inside its button")
+            check(action.mapToItem(row, action.width, 0).x <= row.width, "the complete action stays inside the row")
+            fuzzyCompare(title.mapToItem(row, 0, title.baselineOffset).y,
+              process.mapToItem(row, 0, process.baselineOffset).y, 0.5)
+            check(process.mapToItem(row, process.width, 0).x < currentActionX)
+            if (i === 2) { check(process.truncated); equal(action.text, "Unskip") }
+            else equal(action.text, i === 3 ? "Included" : "Include")
+          }
+          var path = Quickshell.env("LOCALHOST_TEST_ARTIFACTS")
+          if (path) grabImage(panel).save(path + "/skipped-alignment-" + size + ".png")
+        }
+      }
+
+      function test_keyboard_can_inspect_disabled_actions_without_running_them() {
+        var qrRequests = 0
+        var terminals = 0
+        var editors = 0
+        var restarts = 0
+        panel.qrRequested.connect(function() { qrRequests++ })
+        panel.terminalRequested.connect(function() { terminals++ })
+        panel.projectRequested.connect(function() { editors++ })
+        panel.restartRequested.connect(function() { restarts++ })
+        servers.setProperty(1, "cwd", "")
+        servers.setProperty(1, "hint", "Server listens on localhost only.")
+        servers.setProperty(1, "restartReason", "No restart command is configured.")
+        panel.revision++
+        panel.selectedIndex = 1
+        panel.selectedActionIndex = RadarModel.ACTIONS.open
+        panel.focusNavigation()
+        wait(50)
+        keyClick(Qt.Key_L)
+        equal(panel.selectedActionIndex, RadarModel.ACTIONS.copyLocal)
+        keyClick(Qt.Key_Right)
+        equal(panel.selectedActionIndex, RadarModel.ACTIONS.qr)
+        var qr = findChild(panel, "serverAction3")
+        var qrTip = findChild(qr.parent, "disabledActionTip3")
+        equal(qr.enabled, false)
+        equal(qr.hasCursor, true)
+        tryCompare(qrTip, "visible", true)
+        check(qrTip.text.indexOf("localhost only") !== -1)
+        keyClick(Qt.Key_Return)
+        equal(qrRequests, 0)
+        keyClick(Qt.Key_L)
+        equal(panel.selectedActionIndex, RadarModel.ACTIONS.terminal)
+        tryCompare(qrTip, "visible", false)
+        var terminal = findChild(panel, "serverAction4")
+        var terminalTip = findChild(terminal.parent, "disabledActionTip4")
+        tryCompare(terminalTip, "visible", true)
+        check(terminalTip.text.indexOf("directory") !== -1)
+        keyClick(Qt.Key_Return)
+        equal(terminals, 0)
+        keyClick(Qt.Key_Right)
+        equal(panel.selectedActionIndex, RadarModel.ACTIONS.project)
+        keyClick(Qt.Key_Return)
+        equal(editors, 0)
+        keyClick(Qt.Key_Right)
+        equal(panel.selectedActionIndex, RadarModel.ACTIONS.restart)
+        var restart = findChild(panel, "serverAction6")
+        var restartTip = findChild(restart.parent, "disabledActionTip6")
+        tryCompare(restartTip, "visible", true)
+        equal(restartTip.text, "No restart command is configured.")
+        keyClick(Qt.Key_Return)
+        equal(restarts, 0)
+        panel.actionBusy = true
+        keyClick(Qt.Key_Right)
+        equal(panel.selectedActionIndex, RadarModel.ACTIONS.skip)
+        keyClick(Qt.Key_Right)
+        equal(panel.selectedActionIndex, RadarModel.ACTIONS.stop)
+        var stop = findChild(panel, "serverAction7")
+        var stopTip = findChild(stop.parent, "disabledActionTip7")
+        tryCompare(stopTip, "visible", true)
+        check(stopTip.text.indexOf("in progress") !== -1)
+        keyClick(Qt.Key_Return)
+        equal(stopSpy.count, 0)
+        equal(panel.pendingAction, "")
+        keyClick(Qt.Key_H)
+        equal(panel.selectedActionIndex, RadarModel.ACTIONS.skip)
+        keyClick(Qt.Key_H)
+        equal(panel.selectedActionIndex, RadarModel.ACTIONS.restart)
+        keyClick(Qt.Key_Left)
+        equal(panel.selectedActionIndex, RadarModel.ACTIONS.project)
+      }
+
+      function test_qr_sharing_content_copies_lan_and_closes_by_keyboard() {
+        var qr = createTemporaryObject(overlayComponent, tests)
+        qr.open(JSON.stringify({ name: "My web app", framework: "React", url: "http://192.168.1.2:3000" }))
+        tryVerify(function() { return qr.showingQr }, 5000)
+        var view = createTemporaryObject(qrContentComponent, tests, { qrState: qr })
+        check(view !== null)
+        var copies = []
+        var closes = 0
+        var retries = 0
+        view.copyRequested.connect(function() { copies.push(view.url) })
+        view.closeRequested.connect(function() { closes++ })
+        view.retryRequested.connect(function() { retries++ })
+        equal(findChild(view, "qrProjectName").text, "My web app")
+        equal(findChild(view, "qrLanUrl").text, "http://192.168.1.2:3000")
+        var code = findChild(view, "sharingQrCode")
+        check(code.width <= view.width - Style.space(24))
+        equal(code.width, code.rows.length * code.moduleSize, "QR modules remain integer-sized")
+        panel.visible = false
+        waitForRendering(view)
+        wait(150)
+        var capturePath = Quickshell.env("LOCALHOST_TEST_ARTIFACTS")
+        if (capturePath) grabImage(view).save(capturePath + "/qr-sharing.png")
+        var initialHeight = view.height
+        var copy = findChild(view, "copyQrLan")
+        mouseClick(copy, copy.width / 2, copy.height / 2)
+        equal(copies.length, 1)
+        equal(copies[0], "http://192.168.1.2:3000")
+        equal(view.copied, true)
+        equal(findChild(view, "qrStatus"), null)
+        fuzzyCompare(view.height, initialHeight, 0.5)
+        view.forceActiveFocus()
+        keyClick(Qt.Key_C, Qt.ControlModifier)
+        equal(copies.length, 2)
+        equal(findChild(view, "closeQr"), null)
+        view.forceActiveFocus()
+        keyClick(Qt.Key_Escape)
+        equal(closes, 1)
+        qr.error = "Could not generate the QR code"
+        var retry = findChild(view, "retryQr")
+        tryCompare(retry, "visible", true)
+        mouseClick(retry, retry.width / 2, retry.height / 2)
+        equal(retries, 1)
+        qr.close()
+      }
+
+      function test_disabled_qr_explains_why_and_never_shares() {
+        var requests = []
+        panel.qrRequested.connect(function(server) { requests.push(server.serverId) })
+        servers.setProperty(1, "hint", "Server listens on localhost only. Bind it to 0.0.0.0 or a LAN address to share.")
+        panel.revision++
+        panel.selectedIndex = 1
+        var qr = findChild(panel, "serverAction3")
+        var tip = findChild(qr.parent, "disabledActionTip3")
+        tryCompare(qr, "enabled", false)
+        check(qr.opacity < 1, "unavailable QR is visibly disabled")
+        mouseMove(qr.parent, qr.width / 2, qr.height / 2)
+        tryCompare(tip, "visible", true, 2000)
+        check(tip.text.indexOf("localhost only") !== -1)
+        equal(qr.tooltipText, "", "the built-in tooltip must not duplicate the compact tooltip")
+        equal(panel.selectedActionIndex, RadarModel.ACTIONS.open, "disabled hover does not move the action cursor")
+        mouseClick(qr.parent, qr.width / 2, qr.height / 2)
+        equal(requests.length, 0)
+
+        panel.selectedIndex = 0
+        tryCompare(qr, "enabled", true)
+        tryCompare(tip, "visible", false)
+        equal(tip.text, "", "available QR needs no redundant tooltip")
+        equal(qr.tooltipText, "")
+        equal(qr.opacity, 1)
+        mouseClick(qr, qr.width / 2, qr.height / 2)
+        equal(requests.length, 1)
+        equal(requests[0], "server-0")
+      }
+
+      function test_port_filter_toggle_outside_click_and_keyboard() {
+        var filter = findChild(panel, "portFilter")
+        var trigger = findChild(filter, "portFilterTrigger")
+        var popup = findChild(trigger, "portFilterPopup")
+        mouseClick(trigger, trigger.width / 2, trigger.height / 2)
+        tryCompare(filter, "popupOpen", true)
+        mouseClick(trigger, trigger.width / 2, trigger.height / 2)
+        tryCompare(filter, "popupOpen", false)
+        wait(100)
+        equal(filter.popupOpen, false, "the closing click must not reopen the filter")
+
+        mouseClick(trigger, trigger.width / 2, trigger.height / 2)
+        tryCompare(filter, "popupOpen", true)
+        var lan = findChild(popup.contentItem, "portFilterOption2")
+        check(lan.iconText !== "")
+        mouseClick(lan, lan.width / 2, lan.height / 2)
+        tryCompare(panel, "portFilter", "lan")
+        tryCompare(filter, "popupOpen", false)
+        tryCompare(list, "count", 25)
+
+        trigger.forceActiveFocus()
+        keyClick(Qt.Key_Return)
+        tryCompare(filter, "popupOpen", true)
+        keyClick(Qt.Key_Up)
+        keyClick(Qt.Key_Up)
+        keyClick(Qt.Key_Return)
+        tryCompare(panel, "portFilter", "all")
+        tryCompare(filter, "popupOpen", false)
+        equal(panel.searchMode, false)
+        mouseClick(trigger, trigger.width / 2, trigger.height / 2)
+        tryCompare(filter, "popupOpen", true)
+        keyClick(Qt.Key_Escape)
+        tryCompare(filter, "popupOpen", false)
+        mouseClick(trigger, trigger.width / 2, trigger.height / 2)
+        tryCompare(filter, "popupOpen", true)
+        mouseClick(tests, 850, 750)
+        tryCompare(filter, "popupOpen", false)
+      }
+
+      function test_notices_do_not_move_footer_or_resize_popup() {
+        var status = findChild(panel, "footerStatus")
+        var action = findChild(panel, "serverAction0")
+        var hints = status.text
+        var messages = ["Copied http://localhost:3000", "Unable to open server.\n" + "A long explanation ".repeat(20), ""]
+        for (var mode = 0; mode < 2; mode++) {
+          if (mode === 1) panel.height = Qt.binding(function() { return panel.implicitHeight })
+          settled()
+          var actionY = action.mapToItem(panel, 0, 0).y
+          var panelHeight = panel.height
+          var preferredHeight = panel.implicitHeight
+          var listHeight = list.height
+          for (var i = 0; i < messages.length; i++) {
+            panel.notice = messages[i]
+            panel.noticeUrgent = i === 1
+            wait(50)
+            fuzzyCompare(action.mapToItem(panel, 0, 0).y, actionY, 0.5)
+            fuzzyCompare(panel.height, panelHeight, 0.5)
+            fuzzyCompare(panel.implicitHeight, preferredHeight, 0.5)
+            fuzzyCompare(list.height, listHeight, 0.5)
+            check(status.text.indexOf("\n") === -1)
+            if (i === 1) check(status.truncated, "long errors remain on one line")
+          }
+          equal(status.text, hints, "clearing a notice restores the shortcut hint")
+        }
+      }
+
+      function test_header_views_are_separate_from_actions() {
+        var refreshes = 0
+        panel.refreshRequested.connect(function() { refreshes++ })
+        var discovery = findChild(panel, "headerView1")
+        var access = findChild(panel, "headerView2")
+        var serversTab = findChild(panel, "headerView0")
+        mouseClick(discovery, discovery.width / 2, discovery.height / 2)
+        equal(panel.showDiagnostics, true)
+        equal(panel.showFirewallRules, false)
+        mouseClick(discovery, discovery.width / 2, discovery.height / 2)
+        equal(panel.showDiagnostics, true, "clicking the active tab does not toggle views")
+        var refresh = findChild(panel, "refreshServers")
+        fuzzyCompare(refresh.height, discovery.height, 0.5, "refresh has the same height as the view buttons")
+        equal(refresh.text, "")
+        fuzzyCompare(refresh.width, refresh.height, 0.5, "refresh keeps the same-sized square target without a label")
+        mouseClick(refresh, refresh.width / 2, refresh.height / 2)
+        equal(refreshes, 1)
+        equal(panel.showDiagnostics, true)
+        mouseClick(access, access.width / 2, access.height / 2)
+        equal(panel.showFirewallRules, true)
+        equal(panel.showDiagnostics, false)
+        mouseClick(serversTab, serversTab.width / 2, serversTab.height / 2)
+        equal(panel.showFirewallRules, false)
+        var group = findChild(panel, "groupToggle")
+        mouseClick(group, group.width / 2, group.height / 2)
+        equal(panel.groupByProject, true)
+        equal(panel.showDiagnostics, false)
+        equal(panel.showFirewallRules, false)
       }
 
       function test_always_visible_memory_preserves_server_colors() {
@@ -341,6 +878,54 @@ ShellRoot {
         check(memoryBar.visible, "Ctrl+M does not hide the breakdown")
         equal(overview.height, originalHeight)
         verifyViewport()
+      }
+
+      function test_memory_hover_highlights_segment_without_changing_selection() {
+        RadarModel.syncServerModel(servers, fixtures(2))
+        panel.systemMemory = { totalBytes: 100 * 1048576, availableBytes: 40 * 1048576 }
+        panel.revision++
+        tryCompare(list, "count", 2)
+        var bar = findChild(panel, "memoryBar")
+        var selected = panel.selectedServer().serverId
+        mouseMove(tests, 850, 750)
+        tryCompare(bar, "hoveredSegment", -1)
+        waitForRendering(bar)
+        wait(50)
+        // Capture the panel so the software renderer includes the child Canvas.
+        var normal = grabImage(panel)
+        var firstX = Math.floor(bar.width * 0.05)
+        var secondX = Math.floor(bar.width * 0.2)
+        var centerY = Math.floor(bar.height / 2)
+        var origin = bar.mapToItem(panel, 0, 0)
+        function pixel(image, x) {
+          var px = Math.floor(origin.x + x)
+          var py = Math.floor(origin.y + centerY)
+          return [image.red(px, py), image.green(px, py), image.blue(px, py)].join(",")
+        }
+
+        mouseMove(bar, firstX, centerY)
+        tryCompare(bar, "hoveredSegment", 0)
+        waitForRendering(bar)
+        wait(50)
+        var highlighted = grabImage(panel)
+        equal(pixel(highlighted, firstX), pixel(normal, firstX), "hovered server keeps its color")
+        check(pixel(highlighted, secondX) !== pixel(normal, secondX), "other segments dim")
+        equal(panel.selectedServer().serverId, selected, "chart hover does not move server selection")
+
+        mouseMove(bar, bar.width * 0.45, centerY)
+        tryCompare(bar, "hoveredSegment", 2)
+        mouseMove(bar, bar.width * 0.8, centerY)
+        tryCompare(bar, "hoveredSegment", 3)
+        panel.panelActive = false
+        tryCompare(bar, "hoveredSegment", -1)
+        panel.panelActive = true
+        mouseMove(tests, 850, 750)
+        tryCompare(bar, "hoveredSegment", -1)
+        waitForRendering(bar)
+        wait(50)
+        var restored = grabImage(panel)
+        equal(pixel(restored, firstX), pixel(normal, firstX))
+        equal(pixel(restored, secondX), pixel(normal, secondX), "leaving restores the normal chart")
       }
 
       function test_closed_panel_defers_updates() {
@@ -374,6 +959,54 @@ ShellRoot {
         equal(list.itemAtIndex(0).height, before, "long names do not change row geometry")
         var path = Quickshell.env("LOCALHOST_TEST_ARTIFACTS")
         if (path) grabImage(panel).save(path + "/server-panel-scaled.png")
+      }
+
+      function verifyInlineAlignment(item) {
+        var checked = 0
+        if (item.visible && item.label && item.paintedCenterY !== undefined) {
+          var metrics = createTemporaryObject(metricsComponent, tests, { font: item.label.font, text: "H" })
+          var labelCenter = item.label.mapToItem(tests, 0, item.label.baselineOffset
+            + metrics.tightBoundingRect.y + metrics.tightBoundingRect.height / 2).y
+          fuzzyCompare(item.mapToItem(tests, 0, item.paintedCenterY).y, labelCenter, 0.6,
+            "icon aligns to the visible text at font size " + Style.fontBaseSize)
+          checked++
+        }
+        if (item.children) for (var i = 0; i < item.children.length; i++) checked += verifyInlineAlignment(item.children[i])
+        return checked
+      }
+
+      function test_icons_and_project_counts_align_at_multiple_font_sizes() {
+        groupedFixtures(6)
+        servers.setProperty(0, "name", "transactional")
+        servers.setProperty(0, "frameworkId", "react")
+        panel.revision++
+        var qr = createTemporaryObject(qrContentComponent, tests, { qrState: {
+          projectName: "transactional", url: "http://192.168.1.2:3000", error: "",
+          qrSize: 0, qrRows: [], loading: false, showingQr: false
+        } })
+        qr.height = Qt.binding(function() { return qr.implicitHeight })
+        for (var size of [12, 18]) {
+          Style.fontBaseSize = size
+          panel.width = panel.implicitWidth
+          panel.height = 650
+          list.positionViewAtBeginning()
+          settled()
+          check(verifyInlineAlignment(panel) >= 4, "check RAM, sharing and project action icons")
+          equal(verifyInlineAlignment(qr), 1)
+          var header = findChild(list.itemAtIndex(0), "projectHeader")
+          var name = findChild(header, "projectName")
+          var count = findChild(header, "projectCount")
+          fuzzyCompare(name.mapToItem(header, 0, name.baselineOffset).y,
+            count.mapToItem(header, 0, count.baselineOffset).y, 0.6, "project label and count share a baseline")
+          var glyph = findChild(list.itemAtIndex(1), "frameworkGlyph")
+          check(glyph !== null)
+          fuzzyCompare(glyph.paintedCenterX, glyph.width / 2, 0.01)
+          fuzzyCompare(glyph.paintedCenterY, glyph.height / 2, 0.01)
+          var path = Quickshell.env("LOCALHOST_TEST_ARTIFACTS")
+          qr.visible = false
+          if (path) grabImage(panel).save(path + "/alignment-" + size + ".png")
+          qr.visible = true
+        }
       }
 
       function test_project_grouping_filtering_and_shared_actions() {
@@ -431,7 +1064,7 @@ ShellRoot {
         check(header !== null)
         var button = findChild(header, "projectStopAll")
         check(button !== null && button.enabled)
-        equal(button.iconText, "\uf04d")
+        equal(findChild(button, "projectStopIcon").text, "\uf04d")
         mouseClick(button, button.width / 2, button.height / 2)
         equal(projectStopSpy.count, 1)
         equal(projectStopSpy.signalArguments[0][0], "/work/atlas")
@@ -444,7 +1077,7 @@ ShellRoot {
         panel.actionBusy = true
         panel.stoppingProjectRoot = "/work/atlas"
         equal(button.enabled, false)
-        equal(button.iconText, "\uf251")
+        equal(findChild(button, "projectStopIcon").text, "\uf251")
         mouseClick(button, button.width / 2, button.height / 2)
         equal(projectStopSpy.count, 2, "a busy stop cannot be started twice")
         panel.actionBusy = false
@@ -630,8 +1263,11 @@ ShellRoot {
         keyClick(Qt.Key_Up, Qt.ControlModifier)
         equal(panel.selectedProjectRoot, "/work/atlas")
         keyClick(Qt.Key_Up, Qt.ControlModifier)
-        equal(panel.selectedProjectRoot, "/work/tools", "project jumps wrap")
-        keyClick(Qt.Key_Down, Qt.ControlModifier)
+        equal(panel.selectedProjectRoot, "/work/atlas", "project jumps stop at the first project")
+        for (var repeat = 0; repeat < 4; repeat++) keyClick(Qt.Key_Down, Qt.ControlModifier)
+        equal(panel.selectedProjectRoot, "/work/tools", "project jumps stop at the last project")
+        keyClick(Qt.Key_Up, Qt.ControlModifier)
+        keyClick(Qt.Key_Up, Qt.ControlModifier)
         equal(panel.selectedProjectRoot, "/work/atlas")
         keyClick(Qt.Key_Return)
         tryCompare(list, "count", 12)
@@ -653,8 +1289,13 @@ ShellRoot {
         tryCompare(list, "count", 3)
         equal(panel.selectedProjectRoot, "/work/atlas")
         keyClick(Qt.Key_K)
+        equal(panel.selectedProjectRoot, "/work/atlas")
+        keyClick(Qt.Key_G, Qt.ShiftModifier)
         equal(panel.selectedProjectRoot, "/work/tools")
         keyClick(Qt.Key_J)
+        equal(panel.selectedProjectRoot, "/work/tools", "folded project navigation does not wrap")
+        keyClick(Qt.Key_G)
+        keyClick(Qt.Key_G)
         equal(panel.selectedProjectRoot, "/work/atlas")
         keyClick(Qt.Key_Right, Qt.ControlModifier | Qt.ShiftModifier)
         tryCompare(list, "count", 12)
@@ -726,9 +1367,9 @@ ShellRoot {
         keyRelease(Qt.Key_Shift)
         tryCompare(list, "count", 3)
         keyClick(Qt.Key_K, Qt.ShiftModifier)
-        equal(panel.selectedProjectRoot, "/work/tools", "K wraps to the last project")
+        equal(panel.selectedProjectRoot, "/work/atlas", "K stops at the first project")
         keyClick(Qt.Key_J, Qt.ShiftModifier)
-        equal(panel.selectedProjectRoot, "/work/atlas")
+        equal(panel.selectedProjectRoot, "/work/console")
         keyClick(Qt.Key_Z)
         keyClick(Qt.Key_R, Qt.ShiftModifier)
         tryCompare(list, "count", 12)
@@ -789,6 +1430,29 @@ ShellRoot {
         keyClick(Qt.Key_M, Qt.ShiftModifier)
         equal(list.count, 12)
         equal(panel.pendingVimPrefix, "")
+      }
+
+      function test_folded_list_shrinks_and_rows_keep_full_width() {
+        groupedFixtures(9)
+        panel.query = "Project 0"
+        tryCompare(list, "count", 2)
+        panel.height = Qt.binding(function() { return panel.implicitHeight })
+        settled()
+        var expanded = panel.height
+        panel.setProjectCollapsed("/work/atlas", true)
+        tryCompare(list, "count", 1)
+        settled()
+        check(panel.height < expanded, "folding shrinks the popup")
+        check(Math.abs(list.height - list.contentHeight) < 2, "folded headers leave no minimum-height gap")
+        var header = list.itemAtIndex(0)
+        fuzzyCompare(header.x, 0, 0.5)
+        fuzzyCompare(header.width, list.width, 0.5)
+        panel.query = ""
+        panel.height = 320
+        settled()
+        check(list.interactive)
+        var row = list.itemAtIndex(0)
+        fuzzyCompare(row.width, list.width, 0.5, "rows fill the viewport beside the scrollbar")
       }
 
       function test_project_mouse_toggle_and_live_row_updates() {
@@ -929,6 +1593,32 @@ ShellRoot {
         equal(discovery.manualScanQueued, true, "manual refresh during a forced scan schedules another forced scan")
       }
 
+      function test_skipped_ports_survive_scan_and_merge_without_truncation() {
+        var service = createTemporaryObject(serviceComponent, tests, { includeDocker: true })
+        var native = findChild(service, "nativeDiscovery")
+        var docker = findChild(service, "dockerDiscovery")
+        var listeners = []
+        for (var i = 0; i < 45; i++) listeners.push({ pid: 410, port: 4000 + i, process: "helper" })
+        native.pendingListeners = listeners
+        native.metadataOutput = JSON.stringify({ ok: true, processes: [] })
+        native.cacheMetadata()
+        equal(native.diagnostics.length, 45, "metadata exclusions survive both discovery stages")
+        docker.pendingDiagnostics = []
+        docker.pendingContexts = listeners.map(function(listener) {
+          return { id: "container:" + listener.port, source: "docker", process: { cwd: "" },
+            listener: { port: listener.port - 1000, process: "container" } }
+        })
+        docker.pendingSchemes = ({})
+        docker.applyCandidates()
+        service.publishServers()
+        equal(service.diagnostics.length, 90, "both sources retain every exclusion")
+        equal(service.diagnostics[0].port, 3000, "the combined list sorts by port")
+        equal(service.diagnostics[89].port, 4044)
+        service.includeDocker = false
+        service.publishServers()
+        equal(service.diagnostics.length, 45, "disabled sources leave the list")
+      }
+
       function test_project_stop_missing_helper_finishes_and_unlocks() {
         var service = createTemporaryObject(serviceComponent, tests)
         var rows = fixtures(2)
@@ -1063,8 +1753,12 @@ ShellRoot {
         }, 5000, "live RAM history gains samples independently of scans")
         tryCompare(service, "scanning", false, 5000)
         var failedCache = {}
-        failedCache[server.serverId] = { scheme: "", attempts: 2, expiresAt: Date.now() + 15000 }
-        findChild(service, "nativeDiscovery").probeCache = failedCache
+        var nativeDiscovery = findChild(service, "nativeDiscovery")
+        var context = nativeDiscovery.readyContexts.find(function(entry) {
+          return RadarModel.contextId(entry.context) === server.serverId
+        }).context
+        failedCache[RadarModel.probeCacheKey(context)] = { scheme: "", attempts: 2, expiresAt: Date.now() + 15000 }
+        nativeDiscovery.probeCache = failedCache
         service.servers.clear()
         service.refresh()
         tryVerify(function() { return detected() !== null }, 5000,
@@ -1259,16 +1953,6 @@ ShellRoot {
         overlay.close()
       }
 
-      function test_visual_capture() {
-        RadarModel.syncServerModel(servers, fixtures(7))
-        panel.revision++
-        wait(200)
-        var path = Quickshell.env("LOCALHOST_TEST_ARTIFACTS")
-        if (path) {
-          grabImage(panel).save(path + "/server-panel.png")
-        }
-      }
-
       function test_memory_summary_and_row_label() {
         RadarModel.syncServerModel(servers, fixtures(2))
         panel.revision++
@@ -1286,11 +1970,16 @@ ShellRoot {
           + otherSegment.width + freeSegment.width - memoryBar.width) < 2,
           "memory buckets fill the system RAM bar")
         waitForRendering(memoryBar)
-        var barPixels = grabImage(memoryBar)
-        check(barPixels.red(0, 0) !== barPixels.red(0, Math.floor(barPixels.height / 2)),
+        wait(50)
+        var barPixels = grabImage(panel)
+        var barOrigin = memoryBar.mapToItem(panel, 0, 0)
+        var barX = Math.round(barOrigin.x)
+        var barY = Math.round(barOrigin.y)
+        var centerY = Math.round(barOrigin.y + memoryBar.height / 2)
+        var rightX = Math.floor(barOrigin.x + memoryBar.width - 1)
+        check(barPixels.red(barX, barY) !== barPixels.red(barX, centerY),
           "the colored left end follows the rounded outline")
-        check(barPixels.red(barPixels.width - 1, 0)
-          !== barPixels.red(barPixels.width - 1, Math.floor(barPixels.height / 2)),
+        check(barPixels.red(rightX, barY) !== barPixels.red(rightX, centerY),
           "the right end follows the rounded outline")
         var rowMemory = findChild(panel, "serverMemory")
         check(rowMemory !== null)
@@ -1305,6 +1994,12 @@ ShellRoot {
           for (var y = 0; y < pixels.height; y++)
             if (pixels.alpha(x, y) > 0) painted = true
         check(painted, "sparkline has visible pixels")
+        RadarModel.syncServerModel(servers, fixtures(7))
+        panel.revision++
+        tryCompare(list, "count", 7)
+        waitForRendering(panel)
+        var path = Quickshell.env("LOCALHOST_TEST_ARTIFACTS")
+        if (path) grabImage(panel).save(path + "/server-panel.png")
       }
 
       function test_system_memory_remains_when_server_list_is_empty() {
