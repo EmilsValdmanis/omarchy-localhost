@@ -74,16 +74,24 @@ class ProjectMetadataTests(unittest.TestCase):
 
     def test_malformed_and_oversized_manifests_do_not_break_discovery(self):
         (self.root / "package.json").write_text("{broken")
-        (self.root / "pyproject.toml").write_text("x" * (MAX_MANIFEST_BYTES + 1))
+        (self.root / "pyproject.toml").write_text('[project]\nname = "oversized"\n#' + 'x' * MAX_MANIFEST_BYTES)
         project = self.inspector.inspect(str(self.root))
         self.assertEqual(project["dependencies"], [])
         self.assertEqual(project["root"], str(self.root))
+        self.assertNotEqual(project["name"], "oversized")
+
+    def test_deeply_nested_manifest_does_not_break_discovery(self):
+        (self.root / "package.json").write_text('{"nested":' + '[' * 2000 + '0' + ']' * 2000 + '}')
+        project = self.inspector.inspect(str(self.root))
+        self.assertEqual(project["root"], str(self.root))
+        self.assertEqual(project["dependencies"], [])
 
     def test_batch_cache_and_next_scan_observe_metadata_changes(self):
         self.package(self.root, {"name": "first"})
         first = self.inspector.inspect(str(self.root))
         self.package(self.root, {"name": "second"})
-        self.assertIs(self.inspector.inspect(str(self.root)), first)
+        self.assertEqual(first["name"], "first")
+        self.assertEqual(self.inspector.inspect(str(self.root))["name"], "first")
         self.assertEqual(ProjectInspector().inspect(str(self.root))["name"], "second")
 
     def test_symlinks_resolve_to_the_same_project_and_missing_paths_are_ignored(self):

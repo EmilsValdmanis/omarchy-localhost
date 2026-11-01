@@ -43,7 +43,7 @@ class ProjectInspector:
                     raise ValueError("manifest grew while reading")
                 value = tomllib.loads(raw.decode()) if path.suffix == ".toml" else json.loads(raw)
                 self.manifests[path] = value if isinstance(value, dict) else {}
-            except (OSError, ValueError):
+            except (OSError, ValueError, RecursionError):
                 self.manifests[path] = {}
         return self.manifests[path]
 

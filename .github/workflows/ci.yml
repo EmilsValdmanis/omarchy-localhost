@@ -66,6 +66,8 @@ jobs:
           OMARCHY_PATH: ${{ github.workspace }}/.test-omarchy
         run: |
           python3 tests/lint_qml.py
+          python3 -m unittest discover -s tests -p 'test_qml_process_start.py' -v
+          python3 -m unittest discover -s tests -p 'test_service_process_start.py' -v
           python3 tests/run_qml.py
 
   release:

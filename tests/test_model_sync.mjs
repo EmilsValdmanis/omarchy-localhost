@@ -69,10 +69,11 @@ test("successful and failed probe caches both expire", () => {
     listener: { pid, port: 3000 + pid }, process: { startTime: 10 },
   }))
   const ids = contexts.map(context => radar.contextId(context))
+  const keys = contexts.map(context => radar.probeCacheKey(context))
   const cache = {
-    [ids[0]]: { scheme: "http", expiresAt: 101 },
-    [ids[1]]: { scheme: "https", expiresAt: 100 },
-    [ids[2]]: { scheme: "", expiresAt: 101 },
+    [keys[0]]: { scheme: "http", expiresAt: 101 },
+    [keys[1]]: { scheme: "https", expiresAt: 100 },
+    [keys[2]]: { scheme: "", expiresAt: 101 },
   }
   const plan = radar.probePlan(contexts, cache, 100)
   assert.deepEqual(plain(plan.schemes), { [ids[0]]: "http" })

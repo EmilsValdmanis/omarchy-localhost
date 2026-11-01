@@ -62,6 +62,7 @@ Item {
       "localhost-docker", "ps", "--format",
       "[{{json .ID}},{{json .Names}},{{json .Image}},{{json .Ports}},{{json (.Label \"com.docker.compose.project.working_dir\")}},{{json (.Label \"com.docker.compose.service\")}},{{json (.Label \"com.docker.compose.project\")}}]"
     ] : ["ss", "-H", "-ltnp"]
+    sourceProcess.awaitingExit = true
     sourceProcess.running = true
   }
 
@@ -70,8 +71,11 @@ Item {
     var ignored = RadarModel.parsePortSet(ignoredPorts)
     var alwaysInclude = RadarModel.parsePortSet(alwaysIncludePorts)
     pendingListeners = source === "docker" ? [] : RadarModel.parseSs(sourceOutput)
+    var dockerStats = {}
     pendingContexts = source === "docker"
-      ? RadarModel.dockerPublishedContexts(sourceOutput, ignored, alwaysInclude) : []
+      ? RadarModel.dockerPublishedContexts(sourceOutput, ignored, alwaysInclude, dockerStats) : []
+    pendingDiagnostics = source === "docker" ? dockerStats.diagnostics || [] : []
+    if (dockerStats.truncated) addWarning("Docker discovery is incomplete: published ports exceed the discovery limit")
     listenerCount = pendingListeners.length
     var processIds = []
     var paths = []
@@ -89,6 +93,7 @@ Item {
       "python3", helperPath, "inspect", "--pids", processIds.join(","),
       "--uid", String(currentUid), "--paths", JSON.stringify(paths.slice(0, 256)), "--no-resources"
     ]
+    metadataProcess.awaitingExit = true
     metadataProcess.running = true
   }
 
@@ -103,17 +108,16 @@ Item {
         let context = pendingContexts[i]
         context.process.project = (parsed.projects || {})[context.process.cwd] || {}
       }
-      pendingDiagnostics = []
     } else {
       pendingContexts = RadarModel.candidateContexts(pendingListeners, processCache, ignored, alwaysInclude)
       pendingDiagnostics = RadarModel.candidateDiagnostics(
-        pendingListeners, processCache, pendingContexts, ignored, alwaysInclude).slice(0, 30)
+        pendingListeners, processCache, pendingContexts, ignored, alwaysInclude)
     }
     candidateCount = pendingContexts.length
     var nextCache = {}
     for (let c = 0; c < pendingContexts.length; c++) {
-      let id = RadarModel.contextId(pendingContexts[c])
-      if (probeCache[id]) nextCache[id] = probeCache[id]
+      let key = RadarModel.probeCacheKey(pendingContexts[c])
+      if (probeCache[key]) nextCache[key] = probeCache[key]
     }
     probeCache = nextCache
     var plan = RadarModel.probePlan(pendingContexts, probeCache, Date.now(), bypassProbeCache)
@@ -137,7 +141,7 @@ Item {
       let id = RadarModel.contextId(context)
       let preferred = RadarModel.schemeFor(context.process.command)
       let alternate = preferred === "https" ? "http" : "https"
-      ids.push(id)
+      ids.push({ id: id, key: RadarModel.probeCacheKey(context) })
       transfers.push({ id: id, scheme: preferred, preference: 0 })
       args.push(RadarModel.probeUrl(context, preferred))
       transfers.push({ id: id, scheme: alternate, preference: 1 })
@@ -147,6 +151,7 @@ Item {
     probedIds = ids
     probeOutput = ""
     probeProcess.command = args
+    probeProcess.awaitingExit = true
     probeProcess.running = true
   }
 
@@ -155,13 +160,14 @@ Item {
     var nextCache = Object.assign({}, probeCache)
     var now = Date.now()
     for (let i = 0; i < probedIds.length; i++) {
-      let id = probedIds[i]
+      let id = probedIds[i].id
+      let key = probedIds[i].key
       if (accepted[id]) {
         pendingSchemes[id] = accepted[id].scheme
-        nextCache[id] = { scheme: accepted[id].scheme, expiresAt: now + 60000 }
+        nextCache[key] = { scheme: accepted[id].scheme, expiresAt: now + 60000 }
       } else {
-        let attempts = Number((nextCache[id] && nextCache[id].attempts) || 0) + 1
-        nextCache[id] = { scheme: "", attempts: attempts, expiresAt: now + (attempts === 1 ? 3000 : 15000) }
+        let attempts = Number((nextCache[key] && nextCache[key].attempts) || 0) + 1
+        nextCache[key] = { scheme: "", attempts: attempts, expiresAt: now + (attempts === 1 ? 3000 : 15000) }
       }
     }
     probeCache = nextCache
@@ -180,7 +186,7 @@ Item {
         reason: "no HTTP or HTTPS response" })
     }
     readyContexts = discoveryEnabled ? ready : []
-    diagnostics = discoveryEnabled ? details.slice(0, 30) : []
+    diagnostics = discoveryEnabled ? details : []
     finishScan()
   }
 
@@ -212,9 +218,12 @@ Item {
 
   Process {
     id: sourceProcess
+    property bool awaitingExit: false
     stdout: StdioCollector { waitForEnd: true; onStreamFinished: root.sourceOutput = String(text || "") }
     stderr: StdioCollector { waitForEnd: true; onStreamFinished: root.sourceError = String(text || "").trim() }
-    onExited: function(exitCode) {
+    function finish(exitCode) {
+      if (!awaitingExit) return
+      awaitingExit = false
       if (exitCode !== 0) {
         root.readyContexts = []
         root.diagnostics = []
@@ -226,21 +235,38 @@ Item {
         root.finishScan()
       } else { root.scanError = ""; root.resolveMetadata() }
     }
+    onExited: function(exitCode) { finish(exitCode) }
+    onRunningChanged: if (!running && awaitingExit) finish(1)
   }
   Process {
     id: metadataProcess
+    property bool awaitingExit: false
     stdout: StdioCollector { waitForEnd: true; onStreamFinished: root.metadataOutput = String(text || "") }
     stderr: StdioCollector { waitForEnd: true; onStreamFinished: root.metadataError = String(text || "").trim() }
-    onExited: function(exitCode) {
+    function finish(exitCode) {
+      if (!awaitingExit) return
+      awaitingExit = false
       if (!root.discoveryEnabled) { root.finishScan(); return }
       if (exitCode !== 0 && !root.metadataOutput) root.addWarning(root.metadataError || "Process metadata is unavailable")
       root.cacheMetadata()
     }
+    onExited: function(exitCode) { finish(exitCode) }
+    onRunningChanged: if (!running && awaitingExit) finish(1)
   }
   Process {
     id: probeProcess
+    property bool awaitingExit: false
     stdout: StdioCollector { waitForEnd: true; onStreamFinished: root.probeOutput = String(text || "") }
     stderr: StdioCollector {}
-    onExited: function(exitCode) { root.finishProbes() }
+    function finish(failedToStart) {
+      if (!awaitingExit) return
+      awaitingExit = false
+      if (failedToStart) {
+        root.addWarning("Could not start HTTP probes")
+        root.applyCandidates()
+      } else root.finishProbes()
+    }
+    onExited: function(exitCode) { finish(false) }
+    onRunningChanged: if (!running && awaitingExit) finish(true)
   }
 }

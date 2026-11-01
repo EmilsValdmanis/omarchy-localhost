@@ -8,7 +8,7 @@ function isCommonDevPort(port) {
   return COMMON_DEV_PORTS[Number(port)] === true
 }
 
-var ACTIONS = { open: 0, copyLocal: 1, copyLan: 2, qr: 3, terminal: 4, project: 5, restart: 6, stop: 7 }
+var ACTIONS = { open: 0, copyLocal: 1, copyLan: 2, qr: 3, terminal: 4, project: 5, restart: 6, stop: 7, skip: 8 }
 
 function actionUrl(server, shareOverLan) {
   if (!server) return ""
@@ -23,11 +23,11 @@ function sourceColorOffset(key) {
 }
 
 function matchesServerFilter(server, filterId) {
-  var normalized = normalizeServer(server)
+  var source = server || {}
   var selectedFilter = String(filterId || "all")
-  if (selectedFilter === "dev") return isCommonDevPort(normalized.port)
-  if (selectedFilter === "lan") return normalized.lanAvailable
-  if (selectedFilter === "docker") return normalized.source === "docker"
+  if (selectedFilter === "dev") return isCommonDevPort(source.port || 0)
+  if (selectedFilter === "lan") return source.lanAvailable === true
+  if (selectedFilter === "docker") return String(source.source || "process") === "docker"
   return true
 }
 
@@ -380,7 +380,7 @@ function probePlan(contexts, cache, now, bypassCache) {
   for (var i = 0; i < contexts.length; i++) {
     var context = contexts[i]
     var id = contextId(context)
-    var cached = cache[id]
+    var cached = cache[probeCacheKey(context)]
     if (bypassCache || !cached || Number(cached.expiresAt || 0) <= now) pending.push(context)
     else if (cached.scheme) schemes[id] = cached.scheme
   }
@@ -431,6 +431,12 @@ function actionEnabled(index, server) {
     && ((index !== ACTIONS.terminal && index !== ACTIONS.project) || server.cwd !== "")
 }
 
+function lanUnavailableReason(server) {
+  if (!server) return "Select a server to share over LAN."
+  if (actionUrl(server, true)) return ""
+  return String(server.hint || "No LAN URL is available. Check the server's bind address and network connection.")
+}
+
 function parseActionPayload(raw, fallback) {
   try {
     var payload = JSON.parse(String(raw || ""))
@@ -457,6 +463,32 @@ function parsePortSet(specification) {
     for (var port = first; port <= last; port++) ports[port] = true
   }
   return ports
+}
+
+function formatPortSet(ports) {
+  var values = Object.keys(ports).filter(function(port) { return ports[port] }).map(Number).sort(function(a, b) { return a - b })
+  var sections = []
+  for (var i = 0; i < values.length; i++) {
+    var first = values[i]
+    var last = first
+    // Keep each emitted range within parsePortSet's accepted size.
+    while (i + 1 < values.length && values[i + 1] === last + 1 && last - first < 4096) last = values[++i]
+    sections.push(first === last ? String(first) : first + "-" + last)
+  }
+  return sections.join(",")
+}
+
+function portPreferenceSettings(settings, port, include) {
+  port = Number(port)
+  if (!Number.isInteger(port) || port < 1 || port > 65535) return null
+  var next = Object.assign({}, settings || {})
+  var ignored = parsePortSet(next.ignoredPorts)
+  var included = parsePortSet(next.alwaysIncludePorts)
+  if (include) { delete ignored[port]; included[port] = true }
+  else { ignored[port] = true; delete included[port] }
+  next.ignoredPorts = formatPortSet(ignored)
+  next.alwaysIncludePorts = formatPortSet(included)
+  return next
 }
 
 function parseLanInterfaces(raw, addressRaw) {
@@ -591,30 +623,55 @@ function portSpecAllows(spec, port) {
 }
 
 function ufwAllowsPort(raw, interfaceName, subnet, port) {
+  var requested = cidrBounds(subnet)
+  if (!requested) return false
   var lines = String(raw || "").split(/\r?\n/)
   for (var lineIndex = 0; lineIndex < lines.length; lineIndex++) {
     var line = lines[lineIndex].trim()
     if (line.indexOf("-A ufw-user-input ") !== 0) continue
     var fields = line.split(/\s+/)
     var options = {}
+    var understood = true
     for (var fieldIndex = 2; fieldIndex < fields.length; fieldIndex++) {
       var field = fields[fieldIndex]
-      if (field.charAt(0) !== "-") continue
-      var next = fields[fieldIndex + 1]
-      if (next && next.charAt(0) !== "-") {
-        options[field] = next
-        fieldIndex++
-      } else {
-        options[field] = true
+      // Negation changes the meaning of the next match; do not infer access.
+      if (field === "!" || field.charAt(0) !== "-") return false
+      // UFW rate limits use valueless recent flags. Keep parsing so an
+      // unrelated port/interface/subnet can rule this line out, but never
+      // infer unrestricted access from a rule containing these matches.
+      if (field === "--set" || field === "--update") {
+        understood = false
+        continue
       }
+      var next = fields[fieldIndex + 1]
+      if (!next || next.charAt(0) === "-" || next === "!") return false
+      if (field === "-m") {
+        if (next !== "tcp" && next !== "multiport") understood = false
+      } else if (["-p", "-i", "-s", "--dport", "--dports", "-j"].indexOf(field) !== -1) {
+        if (options[field] !== undefined) return false
+        options[field] = next
+      } else understood = false
+      fieldIndex++
     }
 
-    if (options["-j"] !== "ACCEPT") continue
-    if (options["-p"] && options["-p"] !== "tcp") continue
-    if (options["-i"] && options["-i"] !== interfaceName) continue
-    if (options["-s"] && !cidrContainsSubnet(options["-s"], subnet)) continue
-    if (!portSpecAllows(options["--dport"] || options["--dports"], port)) continue
-    return true
+    var protocol = String(options["-p"] || "all").toLowerCase()
+    if (protocol === "udp" || protocol === "icmp" || (/^\d+$/.test(protocol) && protocol !== "0" && protocol !== "6")) continue
+    if (["all", "tcp", "0", "6"].indexOf(protocol) === -1) understood = false
+    if (options["-i"]) {
+      var iface = options["-i"]
+      if (iface.charAt(iface.length - 1) === "+") {
+        if (String(interfaceName).indexOf(iface.slice(0, -1)) !== 0) continue
+      } else if (iface !== interfaceName) continue
+    }
+    var source = options["-s"] ? cidrBounds(options["-s"]) : { first: 0, last: 4294967295 }
+    if (!source) return false
+    if (source.last < requested.first || source.first > requested.last) continue
+    var portSpec = options["--dport"] || options["--dports"]
+    if (portSpec && !/^\d+(?:[:-]\d+)?(?:,\d+(?:[:-]\d+)?)*$/.test(portSpec)) return false
+    if (portSpec && !portSpecAllows(portSpec, port)) continue
+    // A preceding non-ACCEPT rule may deny even part of the requested subnet.
+    if (options["-j"] !== "ACCEPT") return false
+    if (understood && source.first <= requested.first && source.last >= requested.last) return true
   }
   return false
 }
@@ -768,6 +825,9 @@ var FRAMEWORK_RULES = [
 ]
 
 var PROJECT_FRAMEWORKS = [
+  ["@tanstack/react-start", "TanStack Start", "tanstack"],
+  ["@tanstack/solid-start", "TanStack Start", "tanstack"],
+  ["@docusaurus/core", "Docusaurus", "docusaurus"],
   ["@sveltejs/kit", "SvelteKit", "svelte"], ["@astrojs/core", "Astro", "astro"],
   ["astro", "Astro", "astro"], ["next", "Next.js", "next"], ["nuxt", "Nuxt", "nuxt"],
   ["@nestjs/core", "NestJS", "nestjs"], ["@remix-run/react", "Remix", "remix"],
@@ -832,7 +892,38 @@ function inspectorPorts(command) {
   return ports
 }
 
-function candidateRejectionReason(listener, process, framework, ignoredPorts, alwaysIncludePorts) {
+function listenerPortsByPid(listeners) {
+  var ports = {}
+  for (var i = 0; i < listeners.length; i++) {
+    var listener = listeners[i]
+    if (!ports[listener.pid]) ports[listener.pid] = []
+    ports[listener.pid].push(listener.port)
+  }
+  return ports
+}
+
+function frameworkHelperReason(listener, process, framework, siblingPorts) {
+  var ports = siblingPorts || []
+  if (ports.length < 2) return ""
+  var declared = declaredPorts(process.command)
+  // Never suppress a port explicitly selected as the app's endpoint.
+  if (declared.indexOf(listener.port) !== -1) return ""
+  var dependencies = process.project && Array.isArray(process.project.dependencies) ? process.project.dependencies : []
+  if (listener.port === 4206 && dependencies.indexOf("@tanstack/devtools-vite") !== -1
+      && ports.some(function(port) {
+        return port !== listener.port && (declared.length ? declared.indexOf(port) !== -1 : isCommonDevPort(port))
+      })) return "TanStack Devtools event bus"
+  // Functions hosts expose an additional loopback endpoint for their workers.
+  // Require the same host's configured (or default) app port to be listening.
+  var appPorts = declared.length ? declared : [7071]
+  if (framework.id === "azure" && appPorts.indexOf(listener.port) === -1
+      && listener.addresses && listener.addresses.length && listener.addresses.every(isLoopback)
+      && ports.some(function(port) { return appPorts.indexOf(port) !== -1 }))
+    return "Azure Functions worker endpoint"
+  return ""
+}
+
+function candidateRejectionReason(listener, process, framework, ignoredPorts, alwaysIncludePorts, siblingPorts) {
   var ignored = ignoredPorts || {}
   var alwaysInclude = alwaysIncludePorts || {}
   if (!process || !process.command) return "process metadata unavailable"
@@ -845,20 +936,23 @@ function candidateRejectionReason(listener, process, framework, ignoredPorts, al
   if (NON_HTTP_CONTAINER_PORTS[listener.port]) return "non-HTTP service port"
   if (/(?:^|[ /])(?:nodejsWorker|tsserver|typingsInstaller)\.js(?:[ \'"]|$)/i.test(process.command)) return "runtime helper process"
   if (inspectorPorts(process.command).indexOf(listener.port) !== -1) return "debugger port"
+  var helperReason = frameworkHelperReason(listener, process, framework, siblingPorts)
+  if (helperReason) return helperReason
   if (framework.id !== "server") return ""
   if (DEV_COMMAND_PATTERN.test(process.command)) return ""
   if (COMMON_DEV_PORTS[listener.port] || declaredPorts(process.command).indexOf(listener.port) !== -1) return ""
   return "command and port are not recognized as a development server"
 }
 
-function isCandidate(listener, process, framework, ignoredPorts, alwaysIncludePorts) {
+function isCandidate(listener, process, framework, ignoredPorts, alwaysIncludePorts, siblingPorts) {
   return candidateRejectionReason(
-    listener, process, framework, ignoredPorts, alwaysIncludePorts) === ""
+    listener, process, framework, ignoredPorts, alwaysIncludePorts, siblingPorts) === ""
 }
 
 function candidateContexts(listeners, processCache, ignoredPorts, alwaysIncludePorts) {
   var contexts = []
   var frameworks = {}
+  var portsByPid = listenerPortsByPid(listeners)
   for (var index = 0; index < listeners.length; index++) {
     var listener = listeners[index]
     var process = processCache[String(listener.pid)]
@@ -868,15 +962,70 @@ function candidateContexts(listeners, processCache, ignoredPorts, alwaysIncludeP
       framework = frameworkFor(process.command, process.project, process.argv)
       frameworks[listener.pid] = framework
     }
-    if (isCandidate(listener, process, framework, ignoredPorts, alwaysIncludePorts))
+    if (isCandidate(listener, process, framework, ignoredPorts, alwaysIncludePorts, portsByPid[listener.pid]))
       contexts.push({ listener: listener, process: process, framework: framework })
   }
   contexts.sort(function(a, b) { return a.listener.port - b.listener.port || a.listener.pid - b.listener.pid })
   return contexts
 }
 
+function skippedPortGroups(diagnostics) {
+  var groups = { manual: [], automatic: [] }
+  for (var i = 0; i < diagnostics.length; i++) {
+    var entry = diagnostics[i]
+    groups[entry.reason === "ignored by settings" ? "manual" : "automatic"].push(entry)
+  }
+  return groups
+}
+
+function skippedPortEntries(groups, collapsed) {
+  if (!groups.manual.length && !groups.automatic.length) return []
+  var entries = []
+  var occurrences = Object.create(null)
+  for (var id of ["manual", "automatic"]) {
+    entries.push({ entryId: "group:" + id, kind: "header", groupId: id, name: id === "manual" ? "Manual" : "Automatic",
+      count: groups[id].length, collapsed: collapsed[id] === true, port: 0, process: "", reason: "" })
+    if (!collapsed[id]) for (var diagnostic of groups[id]) {
+      var key = JSON.stringify([id, diagnostic.port, diagnostic.process])
+      var occurrence = occurrences[key] || 0
+      occurrences[key] = occurrence + 1
+      entries.push({ entryId: "port:" + key + ":" + occurrence, kind: "port", groupId: id,
+        name: "", count: 0, collapsed: false, port: diagnostic.port,
+        process: diagnostic.process || "Unknown process", reason: diagnostic.reason || "" })
+    }
+  }
+  return entries
+}
+
+function skippedEntriesEqual(left, right) {
+  return left.entryId === right.entryId && left.kind === right.kind && left.groupId === right.groupId
+    && left.name === right.name && left.count === right.count && left.collapsed === right.collapsed
+    && left.port === right.port && left.process === right.process && left.reason === right.reason
+}
+
+function skippedPortPresentation(reason) {
+  var reasons = {
+    "process metadata unavailable": ["Process details unavailable", "\uf059"],
+    "ignored by settings": ["Excluded in settings", "\uf013"],
+    "privileged/system port": ["System port (below 1024)", "\uf108"],
+    "excluded desktop or system process": ["Desktop or system process", "\uf108"],
+    "runtime helper process": ["Runtime helper", "\uf085"],
+    "TanStack Devtools event bus": ["TanStack Devtools · helper endpoint", "\uf085"],
+    "Azure Functions worker endpoint": ["Azure Functions · worker endpoint", "\uf085"],
+    "non-HTTP service port": ["Port usually used by a non-web service", "\uf1c0"],
+    "debugger port": ["Debugger port", "\uf188"],
+    "command and port are not recognized as a development server": ["Not recognized as a dev server", "\uf059"],
+    "listener not selected": ["Not selected for a web check", "\uf05a"],
+    "no HTTP or HTTPS response": ["No response to the HTTP / HTTPS check", "\uf127"]
+  }
+  var key = String(reason || "")
+  var entry = Object.prototype.hasOwnProperty.call(reasons, key) ? reasons[key] : null
+  return { text: entry ? entry[0] : (key || "Reason unavailable"), icon: entry ? entry[1] : "\uf05a" }
+}
+
 function candidateDiagnostics(listeners, processCache, selectedContexts, ignoredPorts, alwaysIncludePorts) {
   var selected = {}
+  var portsByPid = listenerPortsByPid(listeners)
   var contexts = selectedContexts || []
   for (var selectedIndex = 0; selectedIndex < contexts.length; selectedIndex++) {
     var selectedListener = contexts[selectedIndex].listener
@@ -891,7 +1040,7 @@ function candidateDiagnostics(listeners, processCache, selectedContexts, ignored
     var reason = !process || !process.cwd
       ? "process metadata unavailable"
       : candidateRejectionReason(
-        listener, process, framework, ignoredPorts, alwaysIncludePorts)
+        listener, process, framework, ignoredPorts, alwaysIncludePorts, portsByPid[listener.pid])
     if (!reason && !selected[listener.pid + ":" + listener.port])
       reason = "listener not selected"
     if (!reason) continue
@@ -905,10 +1054,19 @@ function candidateDiagnostics(listeners, processCache, selectedContexts, ignored
   return diagnostics
 }
 
-function dockerPublishedContexts(raw, ignoredPorts, alwaysIncludePorts) {
+// Keep discovery responsive even when a container publishes a huge range.
+var MAX_DOCKER_PORTS = 1024
+var MAX_DOCKER_RANGE_PORTS = 128
+
+function dockerPublishedContexts(raw, ignoredPorts, alwaysIncludePorts, stats) {
   var contexts = []
   var ignored = ignoredPorts || {}
   var alwaysInclude = alwaysIncludePorts || {}
+  var records = []
+  var mappingsToExpand = []
+  var count = 0
+  var diagnosticKeys = {}
+  if (stats) { stats.truncated = false; stats.diagnostics = [] }
   var lines = String(raw || "").split(/\r?\n/)
   for (var lineIndex = 0; lineIndex < lines.length; lineIndex++) {
     var line = lines[lineIndex].trim()
@@ -931,7 +1089,9 @@ function dockerPublishedContexts(raw, ignoredPorts, alwaysIncludePorts) {
     var project = String(record[6] || "")
     if (!containerId || !publishedPorts) continue
 
-    var grouped = {}
+    var entry = { containerId: containerId, containerName: containerName, image: image,
+      cwd: cwd, service: service, project: project, grouped: {} }
+    records.push(entry)
     var mappings = publishedPorts.split(/,\s*/)
     for (var mappingIndex = 0; mappingIndex < mappings.length; mappingIndex++) {
       var match = mappings[mappingIndex].match(/^(?:(\[[^\]]+\]|.+):)?(\d+)(?:-(\d+))?->(\d+)(?:-(\d+))?(?:\/tcp)?$/)
@@ -944,36 +1104,85 @@ function dockerPublishedContexts(raw, ignoredPorts, alwaysIncludePorts) {
       if (port < 1 || lastPort > 65535 || containerPort < 1 || lastContainerPort > 65535
           || lastPort < port || lastContainerPort < containerPort
           || lastPort - port !== lastContainerPort - containerPort) continue
-      for (var offset = 0; offset <= lastPort - port; offset++) {
-        var expandedPort = port + offset
-        if (ignored[expandedPort]) continue
-        if (NON_HTTP_CONTAINER_PORTS[containerPort + offset] && !alwaysInclude[expandedPort]) continue
-        if (!grouped[expandedPort]) grouped[expandedPort] = []
-        if (grouped[expandedPort].indexOf(address) === -1) grouped[expandedPort].push(address)
+      mappingsToExpand.push({ entry: entry, address: address, port: port,
+        lastPort: lastPort, containerPort: containerPort })
+    }
+  }
+
+  // Single ports and smaller ranges should not be crowded out by huge ranges.
+  mappingsToExpand.sort(function(a, b) { return (a.lastPort - a.port) - (b.lastPort - b.port) })
+  var explicitPorts = Object.keys(alwaysInclude).filter(function(port) { return alwaysInclude[port] })
+    .map(Number).filter(function(port) { return Number.isInteger(port) && port >= 1 && port <= 65535 })
+  for (var mappingIndex = 0; mappingIndex < mappingsToExpand.length; mappingIndex++) {
+    var mapping = mappingsToExpand[mappingIndex]
+    var grouped = mapping.entry.grouped
+    var selected = {}
+    var selectedCount = 0
+    function addMappedPort(hostPort) {
+      if (selected[hostPort]) return
+      var reason = ignored[hostPort] ? "ignored by settings"
+        : (NON_HTTP_CONTAINER_PORTS[mapping.containerPort + hostPort - mapping.port] && !alwaysInclude[hostPort] ? "non-HTTP service port" : "")
+      if (reason) {
+        var diagnosticKey = mapping.entry.containerId + ":" + hostPort
+        if (stats && !diagnosticKeys[diagnosticKey]) {
+          diagnosticKeys[diagnosticKey] = true
+          if (stats.diagnostics.length < MAX_DOCKER_PORTS)
+            stats.diagnostics.push({ port: hostPort, process: mapping.entry.containerName || mapping.entry.image || "docker", reason: reason })
+          else stats.truncated = true
+        }
+        return
+      }
+      selected[hostPort] = true
+      if (selectedCount >= MAX_DOCKER_RANGE_PORTS) { if (stats) stats.truncated = true; return }
+      selectedCount++
+      if (!grouped[hostPort]) {
+        if (count >= MAX_DOCKER_PORTS) { if (stats) stats.truncated = true; return }
+        grouped[hostPort] = []
+        count++
+      }
+      if (grouped[hostPort].indexOf(mapping.address) === -1) grouped[hostPort].push(mapping.address)
+    }
+    for (var explicitIndex = 0; explicitIndex < explicitPorts.length; explicitIndex++) {
+      var explicitPort = explicitPorts[explicitIndex]
+      if (explicitPort >= mapping.port && explicitPort <= mapping.lastPort) addMappedPort(explicitPort)
+    }
+    // Skip ignored and non-HTTP ports without consuming the candidate budget.
+    var hostPort = mapping.port
+    for (; hostPort <= mapping.lastPort && selectedCount < MAX_DOCKER_RANGE_PORTS; hostPort++)
+      addMappedPort(hostPort)
+    if (stats) for (; hostPort <= mapping.lastPort; hostPort++) {
+      if (!selected[hostPort] && !ignored[hostPort]
+          && (!NON_HTTP_CONTAINER_PORTS[mapping.containerPort + hostPort - mapping.port] || alwaysInclude[hostPort])) {
+        stats.truncated = true
+        break
       }
     }
+  }
 
+  for (var recordIndex = 0; recordIndex < records.length; recordIndex++) {
+    var entry = records[recordIndex]
+    var grouped = entry.grouped
     for (var rawPort in grouped) {
       var hostPort = Number(rawPort)
-      var name = project && service ? project + " / " + service
-        : (service || project || containerName || basename(cwd) || image || "Docker service")
+      var name = entry.project && entry.service ? entry.project + " / " + entry.service
+        : (entry.service || entry.project || entry.containerName || basename(entry.cwd) || entry.image || "Docker service")
       contexts.push({
-        id: "docker:" + containerId + ":" + hostPort,
+        id: "docker:" + entry.containerId + ":" + hostPort,
         source: "docker",
-        containerId: containerId,
-        projectRoot: cwd || (project ? "compose:" + project : "docker:" + containerId),
+        containerId: entry.containerId,
+        projectRoot: entry.cwd || (entry.project ? "compose:" + entry.project : "docker:" + entry.containerId),
         displayName: name,
         listener: {
           pid: 0,
           port: hostPort,
-          process: containerName || image || "docker",
+          process: entry.containerName || entry.image || "docker",
           addresses: grouped[rawPort]
         },
         process: {
           pid: 0,
           uid: -1,
-          command: [image, project, service, containerName].join(" "),
-          cwd: cwd
+          command: [entry.image, entry.project, entry.service, entry.containerName].join(" "),
+          cwd: entry.cwd
         },
         framework: { name: "Docker", id: "docker" }
       })
@@ -986,6 +1195,10 @@ function dockerPublishedContexts(raw, ignoredPorts, alwaysIncludePorts) {
 function contextId(context) {
   return String(context.id || (context.listener.pid + ":" + Number(context.process.startTime || 0)
     + ":" + context.listener.port))
+}
+
+function probeCacheKey(context) {
+  return JSON.stringify([contextId(context), probeHost(context.listener.addresses || []), schemeFor(context.process.command)])
 }
 
 function schemeFor(command) {
@@ -1096,7 +1309,9 @@ function serverFromContext(context, scheme, lanRoute, lanInterfaces) {
     status: lanAvailable ? "Available on LAN" : "Not available on LAN",
     hint: lanAvailable
       ? "Same Wi-Fi network required"
-      : "Server is bound to localhost only. Start it with --host / 0.0.0.0 to test on another device.",
+      : (listener.addresses.length && listener.addresses.every(isLoopback)
+        ? "Server listens on localhost only. Bind it to 0.0.0.0 or a LAN address to share."
+        : "No LAN address is available. Connect to a local network or check the LAN interface setting."),
     memoryBytes: validMemory(process.memoryBytes)
   }
 }
@@ -1137,6 +1352,7 @@ function parseQrAscii(raw) {
 }
 
 var FRAMEWORK_ICONS = {
+  tanstack: "󱁕", docusaurus: "\uf15c",
   hono: "\uf06d", fastify: "\uf0e7",
   next: "", vite: "", svelte: "", astro: "", nuxt: "",
   angular: "", react: "", vue: "", solid: "", qwik: "",

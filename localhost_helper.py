@@ -167,7 +167,10 @@ def parse_docker_memory(value: str) -> int:
     unit = match.group(2).upper()
     power = "KMGTPE".find(unit[0]) + 1 if unit != "B" else 0
     base = 1024 if "I" in unit else 1000
-    return round(float(match.group(1)) * base ** power)
+    try:
+        return round(float(match.group(1)) * base ** power)
+    except (ValueError, OverflowError):
+        return -1
 
 
 def read_system_memory(meminfo_path: Path = Path("/proc/meminfo")) -> dict[str, int]:
