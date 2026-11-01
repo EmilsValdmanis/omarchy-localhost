@@ -11,7 +11,9 @@ for version history and release notes.
 
 > `pnpm dev` → Localhost appears → click **QR** → scan with your phone
 
-![Localhost for Omarchy in Everforest: compact RAM breakdown, memory trends, collapsible project groups, and explicit LAN sharing](preview.png)
+![Localhost for Omarchy in Motion Blur: project groups, RAM trends, server actions, and QR sharing](preview.png)
+
+Preview theme and wallpaper: [Motion Blur by Erik Johansson](https://github.com/erikrjohansson/omarchy-motion-blur-theme) · [MIT notices](THIRD_PARTY_NOTICES.md).
 
 ## Features
 
@@ -19,10 +21,11 @@ for version history and release notes.
 - Collapsible repository and monorepo groups with package-aware framework detection
 - One-click **Stop all** for every server in a repository or monorepo
 - Localhost and LAN URLs with bind-address-aware availability
-- Open locally, copy local or LAN URLs, QR, terminal, editor, restart, and stop actions
+- Open, copy, QR, terminal, editor, restart, skip, and stop actions
 - Search and complete arrow-key or Vim-style navigation
 - Phone-ready QR sharing with optional subnet-scoped UFW rules
-- Discovery diagnostics, port filters, and LAN-rule management
+- Manual and automatic skips with reasons and one-click inclusion
+- Port filters and an **Access** view for Localhost-created LAN rules
 - Process identity verification before stop or restart
 - Native Omarchy styling with no service to install, database, or account
 - Always-visible compact system and server RAM breakdown
@@ -35,7 +38,7 @@ under each name. Click a project header to collapse or expand its servers; its
 count stays visible when collapsed. Fold choices survive scans, closing the
 panel, and switching to the flat list for the current shell session. Search and
 port filters reveal matching servers, then restore your folds when cleared.
-Use the folder button to switch to a flat list sorted by port.
+Turn off **Group** for a flat list sorted by port.
 Click the square **Stop all** icon on a project header to gracefully stop all of
 that project's discovered server processes and Docker containers in one click.
 It includes folded servers and servers hidden by search or port filters. Shared
@@ -46,14 +49,16 @@ failures by server name and port. Processes that refuse to stop retain their
 individual **Force stop** action.
 Click a row to select it, then use the shared action toolbar. Moving the pointer
 over other rows keeps your selection. **Open** and clicking a port use the local
-URL. **Copy local** copies that same URL; **Copy LAN** and **QR** explicitly
-share the network URL. The RAM breakdown stays visible; hover its segments
+URL. **Copy** always copies that same local URL. **QR** shares the network URL,
+which can also be copied from the QR view with its copy button or `Ctrl+C`.
+Horizontal navigation can focus disabled actions to explain why they are unavailable;
+pressing Enter still leaves them inactive. The RAM breakdown stays visible; hover its segments
 for usage details. Server colors stay tied to process or container identity when the
 list changes; ports served by the same process share a color.
 
 LAN-ready servers listen on `0.0.0.0`, `::`, or a LAN interface. Servers bound
-to `127.0.0.1` or `::1` remain available for desktop actions, but **Copy LAN**
-and **QR** are disabled until they are exposed to the local network.
+to `127.0.0.1` or `::1` remain available for desktop actions, but **QR** is
+disabled until they are exposed to the local network.
 
 ## Install
 
@@ -107,14 +112,15 @@ fold projects. Collapsing a selected server's project moves selection to its
 header; hidden servers are skipped and server actions are disabled on headers.
 Folding, Tab, and Home/End shortcuts leave text editing alone while search has focus.
 Use `ctrl+up/down` to jump between projects from search.
+Selection stops at the first and last entries without wrapping.
 Vim commands also work from a selected server: `zc` folds its project and
 selects the header. Uppercase commands use Shift. Escape cancels a pending
 `z` or `g` prefix, and Vim commands do not intercept search input.
 
 ### Optional global shortcut
 
-`SUPER + SHIFT + L` is unassigned in the stock Omarchy 4 keybindings. To use
-it to toggle Localhost, add this to `~/.config/hypr/bindings.lua`:
+To toggle Localhost with `SUPER + SHIFT + L`, add this to
+`~/.config/hypr/bindings.lua` (or choose an unused shortcut):
 
 ```lua
 o.bind("SUPER + SHIFT + L", "Localhost", "omarchy-shell emils.localhost toggle")
@@ -133,7 +139,7 @@ python -m http.server 8000 --bind 0.0.0.0
 Open Localhost and choose **QR**. Your phone must be on the same Wi-Fi or LAN.
 If UFW blocks the port, Localhost can add a persistent inbound TCP rule limited
 to the server URL's interface, subnet, and selected port. Rules created by
-Localhost can be removed from the shield menu.
+Localhost can be removed from **Access**.
 
 LAN discovery resolves the default route's interface address, including routes
 without a source address. Set **LAN interface** to an interface name to choose
@@ -155,6 +161,20 @@ interface and subnet for firewall authorization.
 
 ## How it works
 
+The **Skipped** view explains why detected listening ports were left out of
+**Servers**: settings exclusions, helper or system processes, unrecognized dev
+servers, or failed HTTP/HTTPS checks. Use it when an expected server is missing.
+It reflects the latest scan, rather than keeping an activity history.
+Manual skips appear first in their own collapsible section. Automatic exclusions
+start collapsed when manual skips exist, and open otherwise.
+Use **Include** to check an automatically excluded port, **Unskip** to restore a
+manually skipped port, or select a server and choose
+**Skip** to hide its port without stopping it. These choices persist in
+**Always include ports** and **Ignored ports**, apply to all listeners on that
+port, and can be reversed from Skipped. Included ports still need an HTTP or
+HTTPS response to appear in Servers. The bar stays available while manually
+skipped ports are listening, so they can be restored even with no visible servers.
+
 Localhost reads listening sockets from `ss`, batches process metadata through a
 small Python helper, and probes likely development servers over HTTP and HTTPS.
 It filters helper sockets, databases, and other non-browser services. Published
@@ -162,6 +182,10 @@ Docker ports, including published ranges, have their own metadata and probe
 pipeline: a slow Docker daemon cannot delay native results. Docker background
 discovery runs no faster than every five seconds while the panel is open, or
 15 seconds while closed, and respects a longer configured refresh interval.
+To keep discovery responsive, it probes at most 128 eligible ports per
+published range and 1,024 Docker ports in total, prioritizing smaller mappings.
+The diagnostics show a warning if this limit leaves ports unexamined. Ports in
+Always include are prioritized within a range.
 Manual refresh (Ctrl+R, the refresh button,
 right-clicking the bar icon, or IPC refresh) bypasses HTTP probe caches;
 background scans retain caching.
@@ -183,8 +207,10 @@ usage. Server portions use resident-memory estimates, so their sum may differ
 slightly from physical memory accounting.
 
 Every eligible listening port is checked, including multiple HTTP servers in
-one process and fallback ports chosen when a default is busy. Framework labels
-use executable arguments and dependencies from the nearest `package.json` or
+one process and fallback ports chosen when a default is busy. Known TanStack
+Devtools and Azure Functions worker endpoints are filtered when their main
+server is present. Framework detection uses executable arguments and dependencies
+from the nearest `package.json` or
 `pyproject.toml`. Project metadata is read once per discovery batch without
 executing project code or searching directory trees.
 
@@ -218,7 +244,7 @@ for security reporting.
 
 ## Remove
 
-Remove Localhost-created firewall rules from the shield menu first, then run:
+Remove Localhost-created firewall rules from **Access** first, then run:
 
 ```bash
 omarchy plugin remove emils.localhost
@@ -240,7 +266,9 @@ components live in `qml/`:
 | `qml/RadarModel.js`                                                 | Parse, normalize, filter, and summarize server data    |
 | `qml/ServerPanel.qml`, `qml/ServerRow.qml`, `qml/ServerActions.qml` | Render the server list and controls                    |
 | `qml/ProjectHeader.qml`, `qml/ProjectList.js`                       | Fold project groups and navigate visible entries       |
-| `qml/MemorySparkline.qml`, `qml/PanelScrollArea.qml`                | Shared panel pieces                                    |
+| `qml/DetailRow.qml`, `qml/ProjectHeader.qml`                         | Consistent Skipped and Access rows and group headers   |
+| `qml/MemorySparkline.qml`, `qml/PanelScrollArea.qml`, `qml/ListEdgeFades.qml` | Memory trends and scrolling with animated edge fades |
+| `qml/PaintedGlyph.qml`, `qml/InlineIcon.qml`, `qml/Motion.js` | Icon alignment and motion across supported shell versions |
 | `qml/QrService.qml`, `qml/QrContent.qml`, `qml/QrCode.qml`          | QR state and display                                   |
 | `localhost_helper.py`, `project_metadata.py`                        | Read Linux and Docker metadata; verify process actions |
 | `tests/`                                                            | Model, helper, QML, and preview checks                 |
@@ -271,7 +299,7 @@ needed.
 copy first if you want to replace it with the development install. Keep a moved
 copy outside the active plugin path if you plan to restore it later.
 
-If the installed files say `0.8.0` but the bar still shows the previous UI,
+If the installed files are current but the bar still shows the previous UI,
 run `omarchy restart shell`. A successful `omarchy-shell shell rescanPlugins`
 call or a running watcher alone does not prove that new QML code is live:
 some shell versions recreate the widget using cached components at the same
