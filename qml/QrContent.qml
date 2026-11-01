@@ -1,6 +1,7 @@
 import QtQuick
 import QtQuick.Layouts
 import qs.Commons
+import qs.Commons as Theme
 import qs.Ui
 
 Item {
@@ -104,18 +105,18 @@ Item {
       visible: root.error !== ""
       Layout.fillWidth: true
       spacing: Style.space(8)
-      OpticalGlyph {
+      PaintedGlyph {
         Layout.preferredWidth: Style.space(18)
         Layout.preferredHeight: Style.space(18)
         text: "\uf071"
-        color: Color.urgent
+        color: Theme.Color.urgent
         paintedSize: Style.space(14)
       }
       Text {
         Layout.fillWidth: true
         text: root.error
         textFormat: Text.PlainText
-        color: Color.urgent
+        color: Theme.Color.urgent
         font.family: Style.font.family
         font.pixelSize: Style.font.body
         wrapMode: Text.WordWrap

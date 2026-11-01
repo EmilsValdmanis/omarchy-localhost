@@ -2,6 +2,7 @@ import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
 import qs.Commons
+import qs.Commons as Theme
 
 // Auxiliary views share the server list's virtualized rows, scrollbar padding and fades.
 Item {
@@ -59,7 +60,7 @@ Item {
     textFormat: Text.PlainText
     wrapMode: Text.WordWrap
     horizontalAlignment: Text.AlignHCenter
-    color: Qt.darker(Color.popups.text, 1.4)
+    color: Qt.darker(Theme.Color.popups.text, 1.4)
     font.family: Style.font.family
     font.pixelSize: Style.font.body
   }

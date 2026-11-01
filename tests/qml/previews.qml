@@ -2,6 +2,7 @@ import QtQuick
 import QtTest
 import Quickshell
 import qs.Commons
+import qs.Commons as Theme
 import qs.Ui
 import "Plugin/qml" as PluginUi
 import "Plugin/qml/RadarModel.js" as RadarModel
@@ -11,7 +12,7 @@ ShellRoot {
     visible: true
     implicitWidth: 1600
     implicitHeight: 900
-    color: Color.background
+    color: Theme.Color.background
 
     TestCase {
       id: tests
@@ -26,7 +27,7 @@ ShellRoot {
 
       component Copy: Text {
         textFormat: Text.PlainText
-        color: Color.foreground
+        color: Theme.Color.foreground
         font.family: "iA Writer Quattro S"
         font.italic: false
         font.weight: Font.Normal
@@ -69,7 +70,7 @@ ShellRoot {
         Copy {
           x: 112; y: 220
           text: "for Omarchy"
-          color: Color.accent
+          color: Theme.Color.accent
           font.pixelSize: 22
         }
         Copy {
@@ -95,7 +96,7 @@ ShellRoot {
             Row {
               required property string modelData
               spacing: 17
-              Copy { text: "•"; color: Color.accent; font.pixelSize: 21 }
+              Copy { text: "•"; color: Theme.Color.accent; font.pixelSize: 21 }
               Copy { text: modelData; font.pixelSize: 21 }
             }
           }
@@ -125,7 +126,7 @@ ShellRoot {
             x: 211; y: 95
             text: "192.168.1.42:3000"
             font.family: "JetBrainsMono Nerd Font"
-            color: Color.accent
+            color: Theme.Color.accent
             font.pixelSize: 15
           }
           Copy {
@@ -143,9 +144,9 @@ ShellRoot {
           height: panel.implicitHeight + Style.spacing.popupPadding * 2
           scale: 1.12
           transformOrigin: Item.TopLeft
-          color: Color.popups.background
+          color: Theme.Color.popups.background
           radius: Style.cornerRadius
-          borderSpec: Border.surfaceSpec("popups", "border", Color.popups.border, 2)
+          borderSpec: Border.surfaceSpec("popups", "border", Theme.Color.popups.border, 2)
           PluginUi.ServerPanel {
             id: panel
             anchors.fill: parent
@@ -160,11 +161,11 @@ ShellRoot {
 
       function initTestCase() {
         // A fixed palette makes screenshots reproducible without changing the desktop theme.
-        Color.foreground = "#d3c6aa"
-        Color.background = "#2d353b"
-        Color.accent = "#7fbbb3"
-        Color.urgent = "#e67e80"
-        Color.shellValues = ({ "popups.background": "#21272c", "popups.border": "#475258" })
+        Theme.Color.foreground = "#d3c6aa"
+        Theme.Color.background = "#2d353b"
+        Theme.Color.accent = "#7fbbb3"
+        Theme.Color.urgent = "#e67e80"
+        Theme.Color.shellValues = ({ "popups.background": "#21272c", "popups.border": "#475258" })
         Style.fontBaseSize = 12
         Style.spacingScale = 1
         Style.fontFamily = "JetBrainsMono Nerd Font"

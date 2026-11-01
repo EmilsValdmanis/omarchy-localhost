@@ -1,5 +1,6 @@
 import QtQuick
 import qs.Commons
+import qs.Commons as Theme
 import qs.Ui
 
 // An enabled hover surface around a possibly disabled action. The panel's
@@ -13,8 +14,8 @@ Item {
   property bool available: true
   property bool selected: false
   property bool keyboardHint: false
-  property color foreground: Color.popups.text
-  property color accent: Color.accent
+  property color foreground: Theme.Color.popups.text
+  property color accent: Theme.Color.accent
   signal hovered()
   signal triggered()
 

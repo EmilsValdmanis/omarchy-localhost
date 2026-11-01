@@ -3,6 +3,7 @@ pragma ComponentBehavior: Bound
 import QtQuick
 import QtQuick.Layouts
 import qs.Commons
+import qs.Commons as Theme
 import "RadarModel.js" as RadarModel
 
 RowLayout {
@@ -12,7 +13,7 @@ RowLayout {
   property bool keyboardHints: false
   property bool forceStopAvailable: false
   property bool actionBusy: false
-  property color foreground: Color.popups.text
+  property color foreground: Theme.Color.popups.text
   signal actionHovered(int actionIndex)
   signal actionTriggered(int actionIndex)
   spacing: Style.space(3)
@@ -69,8 +70,8 @@ RowLayout {
       actionIndex: modelData.action
       icon: modelData.icon
       hint: root.hint(actionIndex, modelData.tip)
-      foreground: actionIndex === RadarModel.ACTIONS.stop ? Color.urgent : root.foreground
-      accent: actionIndex === RadarModel.ACTIONS.stop ? Color.urgent : Color.accent
+      foreground: actionIndex === RadarModel.ACTIONS.stop ? Theme.Color.urgent : root.foreground
+      accent: actionIndex === RadarModel.ACTIONS.stop ? Theme.Color.urgent : Theme.Color.accent
       available: root.available(actionIndex)
       selected: root.server !== null && root.selectedActionIndex === actionIndex
       keyboardHint: root.keyboardHints

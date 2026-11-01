@@ -3,6 +3,7 @@ pragma ComponentBehavior: Bound
 import QtQuick
 import QtQuick.Layouts
 import qs.Commons
+import qs.Commons as Theme
 import qs.Ui
 import "RadarModel.js" as RadarModel
 
@@ -11,7 +12,7 @@ CursorSurface {
   required property int index
   required property var server
   property bool selected: false
-  property color memoryColor: Color.accent
+  property color memoryColor: Theme.Color.accent
   readonly property color dim: Qt.darker(foreground, 1.4)
   readonly property string frameworkIcon: RadarModel.frameworkIcon(server.frameworkId)
   readonly property string detail: server.projectPath && server.projectPath !== "." ? server.projectPath : ""
@@ -45,12 +46,12 @@ CursorSurface {
         visible: frameworkHover.hovered
         text: row.server.framework
       }
-      OpticalGlyph {
+      PaintedGlyph {
         objectName: "frameworkGlyph"
         anchors.fill: parent
         visible: row.frameworkIcon !== ""
         text: row.frameworkIcon
-        color: row.selected ? Color.accent : row.foreground
+        color: row.selected ? Theme.Color.accent : row.foreground
         fontFamily: Style.font.family
         fontSize: row.server.frameworkId === "docusaurus" ? Style.font.body : Style.font.heading
         paintedSize: Style.space(row.server.frameworkId === "docusaurus" ? 12 : 16)

@@ -1,17 +1,18 @@
 import QtQuick
 import qs.Commons
+import qs.Commons as Theme
+import "Motion.js" as Motion
 
 Item {
   id: root
   required property Flickable view
-  property color background: Color.popups.background
+  property color background: Theme.Color.popups.background
   Rectangle {
     objectName: "topScrollFade"
     opacity: root.view.visible && !root.view.atYBeginning ? 1 : 0
     visible: opacity > 0
     Behavior on opacity {
-      enabled: !Style.reduceMotion
-      NumberAnimation { duration: Style.duration(160); easing.type: Easing.OutCubic }
+      NumberAnimation { duration: Motion.duration(Style, 160); easing.type: Easing.OutCubic }
     }
     anchors.top: parent.top
     width: parent.width
@@ -26,8 +27,7 @@ Item {
     opacity: root.view.visible && !root.view.atYEnd ? 1 : 0
     visible: opacity > 0
     Behavior on opacity {
-      enabled: !Style.reduceMotion
-      NumberAnimation { duration: Style.duration(160); easing.type: Easing.OutCubic }
+      NumberAnimation { duration: Motion.duration(Style, 160); easing.type: Easing.OutCubic }
     }
     anchors.bottom: parent.bottom
     width: parent.width

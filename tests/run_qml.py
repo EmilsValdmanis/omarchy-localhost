@@ -109,7 +109,9 @@ def main():
             if not os.path.isabs(display):
                 display = str(Path(os.environ["XDG_RUNTIME_DIR"]) / display)
             shutil.copyfile(repo / "tests/qml/wayland.qml", stage / "shell.qml")
-            env.update(QT_QPA_PLATFORM="wayland", WAYLAND_DISPLAY=display)
+            # Omarchy also resolves its Hyprland socket through the real runtime.
+            env.update(QT_QPA_PLATFORM="wayland", WAYLAND_DISPLAY=display,
+                       XDG_RUNTIME_DIR=os.environ.get("XDG_RUNTIME_DIR", str(runtime)))
             smoke = subprocess.run(["quickshell", "-p", str(stage), "--no-color"],
                                    env=env, capture_output=True, text=True, timeout=15)
             output = smoke.stdout + smoke.stderr

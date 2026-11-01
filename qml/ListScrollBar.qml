@@ -1,12 +1,13 @@
 import QtQuick
 import QtQuick.Controls
 import qs.Commons
+import qs.Commons as Theme
 
 // The containing list reserves this track; it never overlays a row or leaves
 // the panel's pointer bounds. Only the thumb is visually narrow.
 ScrollBar {
   id: root
-  property color foreground: Color.popups.text
+  property color foreground: Theme.Color.popups.text
   width: Style.space(10)
   padding: 0
   minimumSize: Math.min(1, Style.space(24) / Math.max(1, height))
