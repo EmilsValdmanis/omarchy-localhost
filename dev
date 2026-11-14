@@ -75,8 +75,6 @@ while IFS= read -r changed_path; do
   case "/$relative_path" in
     */.*|*/__pycache__/*|*/__pycache__) continue ;;
   esac
-  # rsync already includes every saved change; wait for a burst to finish so
-  # saving multiple files causes one restart rather than one per event.
   while IFS= read -r -t 0.2 _changed_path; do :; done
   sync_plugin
   while IFS= read -r synced_path; do

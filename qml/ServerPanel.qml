@@ -6,8 +6,13 @@ import QtQuick.Layouts
 import qs.Commons
 import qs.Commons as Theme
 import qs.Ui
-import "RadarModel.js" as RadarModel
+import "Actions.js" as Actions
+import "Diagnostics.js" as Diagnostics
+import "ListModelSync.js" as ListModelSync
+import "Memory.js" as Memory
 import "ProjectList.js" as ProjectList
+import "Servers.js" as Servers
+import "Sources.js" as Sources
 
 Item {
   id: root
@@ -25,7 +30,7 @@ Item {
   property var includedPorts: ({})
   property var skippedGroupOverrides: ({})
   property string selectedSkippedGroup: ""
-  readonly property var skippedGroups: RadarModel.skippedPortGroups(diagnostics)
+  readonly property var skippedGroups: Diagnostics.skippedPortGroups(diagnostics)
   readonly property bool hasManualSkips: skippedGroups.manual.length > 0
   readonly property var skippedGroupState: ({
     manual: skippedGroupOverrides.manual === true,
@@ -92,13 +97,9 @@ Item {
   readonly property int panelWidth: Style.space(460)
   readonly property int serverCount: servers ? servers.count : 0
   readonly property int resultCount: filteredModel.count
-  readonly property int actionCount: 9
-  readonly property var actionOrder: [RadarModel.ACTIONS.open, RadarModel.ACTIONS.copyLocal, RadarModel.ACTIONS.qr,
-    RadarModel.ACTIONS.terminal, RadarModel.ACTIONS.project, RadarModel.ACTIONS.restart,
-    RadarModel.ACTIONS.skip, RadarModel.ACTIONS.stop]
+  readonly property var actionOrder: Actions.visibleOrder
   readonly property var currentServer: selectedServer()
   readonly property int projectCount: Object.keys(groups).length
-  readonly property real cardInset: 0
   readonly property real scrollBarGap: Style.space(2)
   readonly property int listHeight: Math.min(serverList.contentHeight, Style.space(450))
   readonly property bool hasDiagnostics: scanError !== "" || warnings.length > 0
@@ -124,14 +125,12 @@ Item {
   }
 
   function rebuildSkippedModel() {
-    ProjectList.syncEntries(skippedModel, RadarModel.skippedPortEntries(skippedGroups, skippedGroupState), RadarModel.skippedEntriesEqual)
+    ListModelSync.sync(skippedModel, Diagnostics.skippedPortEntries(skippedGroups, skippedGroupState), "entryId", Diagnostics.skippedEntriesEqual)
   }
 
   onSkippedGroupsChanged: Qt.callLater(rebuildSkippedModel)
   onSkippedGroupStateChanged: Qt.callLater(rebuildSkippedModel)
 
-  // A fresh manual section gets priority; otherwise retain explicit folds
-  // across polling updates. Removing the last manual skip reveals automatic ones.
   onHasManualSkipsChanged: {
     var next = Object.assign({}, skippedGroupOverrides)
     delete next.automatic
@@ -142,16 +141,16 @@ Item {
     var currentRevision = revision
     var rows = []
     if (servers) for (let index = 0; index < servers.count; index++) rows.push(servers.get(index))
-    return RadarModel.memoryBreakdown(rows, systemMemory)
+    return Memory.memoryBreakdown(rows, systemMemory)
   }
 
   function colorForSource(key) {
     var hue = Theme.Color.accent.hslHue
-    return Qt.hsla(((hue < 0 ? 0.48 : hue) + RadarModel.sourceColorOffset(key)) % 1, 0.52, 0.68, 1)
+    return Qt.hsla(((hue < 0 ? 0.48 : hue) + Sources.colorOffset(key)) % 1, 0.52, 0.68, 1)
   }
 
   function colorForServer(server) {
-    return colorForSource(RadarModel.memorySourceKey(server))
+    return colorForSource(Sources.key(server))
   }
 
   function portFilterLabel() {
@@ -172,13 +171,13 @@ Item {
     if (servers) {
       for (let index = 0; index < servers.count; index++) {
         let server = servers.get(index)
-        if (RadarModel.matchesSearch(server, needle, portFilter)) filtered.push(server)
+        if (Servers.matchesSearch(server, needle, portFilter)) filtered.push(server)
       }
     }
-    filtered.sort(function(a, b) { return RadarModel.compareServers(a, b, root.groupByProject) })
-    groups = RadarModel.projectGroups(filtered)
-    if (RadarModel.syncServerModel(filteredModel, filtered)) filteredRevision++
-    if (ProjectList.syncEntries(projectModel, ProjectList.entriesFor(filtered, groups, groupByProject, projectCollapseState())))
+    filtered.sort(function(a, b) { return Servers.compareServers(a, b, root.groupByProject) })
+    groups = Servers.projectGroups(filtered)
+    if (Servers.syncServerModel(filteredModel, filtered)) filteredRevision++
+    if (ListModelSync.sync(projectModel, ProjectList.entriesFor(filtered, groups, groupByProject, projectCollapseState()), "entryId", ProjectList.entriesEqual))
       entryRevision++
     var nextIndex = Math.min(selectedIndex, Math.max(0, filteredModel.count - 1))
     if (nextIndex < 0) nextIndex = 0
@@ -201,13 +200,13 @@ Item {
       let next = filteredModel.get(nextIndex)
       if (groupByProject && isProjectCollapsed(next.projectRoot)) selectProject(next.projectRoot)
     }
-    normalizeSelectedAction(1)
+    normalizeSelectedAction()
   }
 
   function selectedServer() {
     if (selectedProjectRoot) return null
     if (selectedIndex < 0 || selectedIndex >= filteredModel.count) return null
-    return RadarModel.normalizeServer(filteredModel.get(selectedIndex))
+    return Servers.normalizeServer(filteredModel.get(selectedIndex))
   }
 
   function selectionEntryIndex() {
@@ -239,7 +238,7 @@ Item {
     projectStopSelected = false
     selectedIndex = -1
     selectedProjectRoot = projectRoot
-    normalizeSelectedAction(1)
+    normalizeSelectedAction()
     ensureSelectedVisible()
   }
 
@@ -252,7 +251,7 @@ Item {
     else {
       selectedProjectRoot = ""
       selectedIndex = entry.serverIndex
-      normalizeSelectedAction(1)
+      normalizeSelectedAction()
       ensureSelectedVisible()
     }
   }
@@ -332,26 +331,21 @@ Item {
   function select(delta) {
     if (!projectModel.count || showDiagnostics || showFirewallRules) return
     selectEntry(Math.max(0, Math.min(projectModel.count - 1, selectedEntryIndex + delta)))
-    normalizeSelectedAction(delta < 0 ? -1 : 1)
+    normalizeSelectedAction()
     ensureSelectedVisible()
   }
 
   function actionEnabled(actionIndex, server) {
-    if (actionBusy && (actionIndex === RadarModel.ACTIONS.stop || actionIndex === RadarModel.ACTIONS.restart)) return false
-    return RadarModel.actionEnabled(actionIndex, server)
+    return Actions.actionEnabled(actionIndex, server, actionBusy)
   }
 
-  function normalizeSelectedAction(direction) {
+  function normalizeSelectedAction() {
     var server = selectedServer()
     if (!server) {
       selectedActionIndex = 0
       return
     }
-    if (selectedActionIndex !== RadarModel.ACTIONS.copyLan) return
-    for (let step = 0; step < actionCount; step++) {
-      selectedActionIndex = (selectedActionIndex + direction + actionCount) % actionCount
-      if (selectedActionIndex !== RadarModel.ACTIONS.copyLan) return
-    }
+    if (actionOrder.indexOf(selectedActionIndex) < 0) selectedActionIndex = actionOrder[0]
   }
 
   function selectAction(delta) {
@@ -360,13 +354,8 @@ Item {
     if (!server) return
     showActionHint = true
     var position = actionOrder.indexOf(selectedActionIndex)
-    if (position < 0) { normalizeSelectedAction(delta); return }
+    if (position < 0) { normalizeSelectedAction(); return }
     selectedActionIndex = actionOrder[(position + delta + actionOrder.length) % actionOrder.length]
-  }
-
-  function setActionCursor(rowIndex, actionIndex) {
-    selectedIndex = rowIndex
-    selectedActionIndex = actionIndex
   }
 
   function navigateBack() {
@@ -405,15 +394,15 @@ Item {
 
   function activateAction(actionIndex, selected) {
     if (!actionEnabled(actionIndex, selected)) return
-    if (actionIndex === RadarModel.ACTIONS.open) openRequested(selected)
-    else if (actionIndex === RadarModel.ACTIONS.copyLocal) copyRequested(selected)
-    else if (actionIndex === RadarModel.ACTIONS.copyLan) copyLanRequested(selected)
-    else if (actionIndex === RadarModel.ACTIONS.qr) qrRequested(selected)
-    else if (actionIndex === RadarModel.ACTIONS.terminal) terminalRequested(selected)
-    else if (actionIndex === RadarModel.ACTIONS.project) projectRequested(selected)
-    else if (actionIndex === RadarModel.ACTIONS.restart) restartRequested(selected)
-    else if (actionIndex === RadarModel.ACTIONS.skip) skipPortRequested(selected.port)
-    else if (actionIndex === RadarModel.ACTIONS.stop)
+    if (actionIndex === Actions.ACTIONS.open) openRequested(selected)
+    else if (actionIndex === Actions.ACTIONS.copyLocal) copyRequested(selected)
+    else if (actionIndex === Actions.ACTIONS.copyLan) copyLanRequested(selected)
+    else if (actionIndex === Actions.ACTIONS.qr) qrRequested(selected)
+    else if (actionIndex === Actions.ACTIONS.terminal) terminalRequested(selected)
+    else if (actionIndex === Actions.ACTIONS.project) projectRequested(selected)
+    else if (actionIndex === Actions.ACTIONS.restart) restartRequested(selected)
+    else if (actionIndex === Actions.ACTIONS.skip) skipPortRequested(selected.port)
+    else if (actionIndex === Actions.ACTIONS.stop)
       requestStop(selected, selected.serverId === forceStopServerId && selected.source !== "docker")
   }
 
@@ -551,8 +540,7 @@ Item {
       if (confirmDialog.handleKey(event)) event.accepted = true
       return
     }
-    // The panel cursor owns navigation even after a click focused an icon.
-    if (!searchMode) keyCatcher.forceActiveFocus()
+      if (!searchMode) keyCatcher.forceActiveFocus()
     if (handleVimKey(event)) {
       event.accepted = true
       return
@@ -610,7 +598,7 @@ Item {
       event.accepted = true
     } else if (alternate && event.key === Qt.Key_R) {
       let restart = selectedServer()
-      if (actionEnabled(RadarModel.ACTIONS.restart, restart)) restartRequested(restart)
+      if (actionEnabled(Actions.ACTIONS.restart, restart)) restartRequested(restart)
       event.accepted = true
     } else if (event.key === Qt.Key_Delete || (control && event.key === Qt.Key_K && query === "")) {
       let stopped = selectedServer()
@@ -619,7 +607,7 @@ Item {
     } else if (control && event.key === Qt.Key_C && searchField.selectedText.length === 0) {
       let copied = selectedServer()
       let shareOverLan = (event.modifiers & Qt.ShiftModifier) !== 0
-      if (actionEnabled(shareOverLan ? RadarModel.ACTIONS.copyLan : RadarModel.ACTIONS.copyLocal, copied)) {
+      if (actionEnabled(shareOverLan ? Actions.ACTIONS.copyLan : Actions.ACTIONS.copyLocal, copied)) {
         if (shareOverLan) copyLanRequested(copied)
         else copyRequested(copied)
       }
@@ -782,7 +770,7 @@ Item {
           }
           Text {
             objectName: "trackedMemory"
-            text: root.memoryStats.measured ? RadarModel.formatMemory(root.memoryStats.serverBytes) : "—"
+            text: root.memoryStats.measured ? Memory.formatMemory(root.memoryStats.serverBytes) : "—"
             color: root.foreground
             font.family: Style.font.family
             font.pixelSize: Style.font.body
@@ -804,7 +792,7 @@ Item {
           }
           Text {
             objectName: "totalMemory"
-            text: RadarModel.formatMemory(root.memoryStats.totalBytes)
+            text: Memory.formatMemory(root.memoryStats.totalBytes)
             color: root.foreground
             font.family: Style.font.family
             font.pixelSize: Style.font.body
@@ -874,8 +862,6 @@ Item {
               for (let index = 0; index < segments.length; index++) {
                 let segmentWidth = width * segments[index].fraction
                 context.globalAlpha = hoveredSegment < 0 || hoveredSegment === index ? 1 : 0.25
-                // Paint the background with each segment so even available RAM
-                // dims on hover, while preserving the normal layered colors.
                 context.fillStyle = String(hoveredSegment === index && index === segments.length - 1
                   ? Qt.rgba(root.foreground.r, root.foreground.g, root.foreground.b, 0.3)
                   : root.freeMemoryColor)
@@ -905,7 +891,7 @@ Item {
                 PanelToolTip {
                   visible: segmentHover.hovered
                   text: sourceSegment.modelData.name + " · :" + sourceSegment.modelData.port
-                    + " · " + RadarModel.formatMemory(sourceSegment.modelData.bytes)
+                    + " · " + Memory.formatMemory(sourceSegment.modelData.bytes)
                 }
               }
             }
@@ -918,7 +904,7 @@ Item {
               HoverHandler { id: otherHover }
               PanelToolTip {
                 visible: otherHover.hovered
-                text: "Other apps and system · " + RadarModel.formatMemory(root.memoryStats.otherBytes)
+                text: "Other apps and system · " + Memory.formatMemory(root.memoryStats.otherBytes)
               }
             }
             Rectangle {
@@ -930,7 +916,7 @@ Item {
               HoverHandler { id: freeHover }
               PanelToolTip {
                 visible: freeHover.hovered
-                text: "Free / available · " + RadarModel.formatMemory(root.memoryStats.availableBytes)
+                text: "Free / available · " + Memory.formatMemory(root.memoryStats.availableBytes)
               }
             }
           }
@@ -1092,7 +1078,7 @@ Item {
               process: skippedEntry.model ? skippedEntry.model.process : "",
               reason: skippedEntry.model ? skippedEntry.model.reason : ""
             })
-            readonly property var explanation: RadarModel.skippedPortPresentation(diagnostic.reason)
+            readonly property var explanation: Diagnostics.skippedPortPresentation(diagnostic.reason)
             objectName: "discoveryRow"
             title: ":" + diagnostic.port
             detail: explanation.text
@@ -1101,9 +1087,9 @@ Item {
             icon: explanation.icon
             foreground: root.foreground
             includable: true
-            manuallySkipped: diagnostic.reason === "ignored by settings"
+            manuallySkipped: diagnostic.reason === Diagnostics.REASONS.ignored
             included: root.includedPorts[diagnostic.port] === true && !manuallySkipped
-            includeAvailable: diagnostic.reason !== "process metadata unavailable"
+            includeAvailable: diagnostic.reason !== Diagnostics.REASONS.metadataUnavailable
             includeHint: !includeAvailable ? "Process details are unavailable; refresh after the process can be inspected."
               : (included ? "Already included in detection. It must respond to HTTP or HTTPS to appear in Servers."
                 : (manuallySkipped ? "Remove this port from your skipped ports and check it again."
@@ -1153,8 +1139,7 @@ Item {
           required property var model
           readonly property int serverIndex: model.serverIndex
           readonly property bool selected: index === root.selectedEntryIndex
-          x: root.cardInset
-          width: serverList.width - root.cardInset * 2
+          width: serverList.width
           height: item ? (item as Item).implicitHeight : 0
           sourceComponent: model.projectHeader ? projectHeaderComponent : serverRowComponent
 
@@ -1187,7 +1172,7 @@ Item {
               server: {
                 var currentRevision = root.filteredRevision
                 return index >= 0 && index < filteredModel.count
-                  ? RadarModel.normalizeServer(filteredModel.get(index)) : RadarModel.normalizeServer({})
+                  ? Servers.normalizeServer(filteredModel.get(index)) : Servers.normalizeServer({})
               }
               selected: entryDelegate.selected
               foreground: root.foreground
@@ -1198,7 +1183,6 @@ Item {
           }
         }
       }
-
 
       ListEdgeFades { anchors.fill: serverList; view: serverList }
 

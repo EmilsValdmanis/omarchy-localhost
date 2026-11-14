@@ -4,7 +4,7 @@ import QtQuick
 import QtQuick.Layouts
 import qs.Commons
 import qs.Commons as Theme
-import "RadarModel.js" as RadarModel
+import "Actions.js" as Actions
 
 RowLayout {
   id: root
@@ -19,26 +19,21 @@ RowLayout {
   spacing: Style.space(3)
 
   function available(action) {
-    return RadarModel.actionEnabled(action, server)
-      && (!actionBusy || (action !== RadarModel.ACTIONS.restart && action !== RadarModel.ACTIONS.stop))
+    return Actions.actionEnabled(action, server, actionBusy)
   }
 
   function hint(action, normalHint) {
     if (!server) return "Select a server first."
     if (available(action)) return normalHint
-    if (action === RadarModel.ACTIONS.qr) return RadarModel.lanUnavailableReason(server)
-    if (action === RadarModel.ACTIONS.terminal || action === RadarModel.ACTIONS.project)
+    if (action === Actions.ACTIONS.qr) return Actions.lanUnavailableReason(server)
+    if (action === Actions.ACTIONS.terminal || action === Actions.ACTIONS.project)
       return "The project directory is unavailable for this server."
     if (actionBusy) return "Another server action is in progress."
     return server.restartReason || "The restart command could not be verified."
   }
 
   Repeater {
-    model: [
-      { label: "Open", icon: "\uf08e", action: RadarModel.ACTIONS.open, tip: "Open local URL (Enter)" },
-      { label: "Copy", icon: "\uf0c5", action: RadarModel.ACTIONS.copyLocal, tip: "Copy local URL (Ctrl+C)" },
-      { label: "QR", icon: "\uf029", action: RadarModel.ACTIONS.qr, tip: "" }
-    ]
+    model: Actions.primary
     ToolbarAction {
       required property var modelData
       actionIndex: modelData.action
@@ -57,21 +52,15 @@ RowLayout {
   Item { Layout.fillWidth: true }
 
   Repeater {
-    model: [
-      { action: RadarModel.ACTIONS.terminal, icon: "\uf120", tip: "Open terminal here" },
-      { action: RadarModel.ACTIONS.project, icon: "\uf121", tip: "Open in editor" },
-      { action: RadarModel.ACTIONS.restart, icon: "\uf2f9", tip: "Restart server (Alt+R)" },
-      { action: RadarModel.ACTIONS.skip, icon: "\uf05e", tip: "Skip this port without stopping it. Restore it from Skipped." },
-      { action: RadarModel.ACTIONS.stop, icon: root.forceStopAvailable ? "\uf714" : "\uf04d",
-        tip: root.forceStopAvailable ? "Force stop server (Delete)" : "Stop server (Delete)" }
-    ]
+    model: Actions.secondary
     ToolbarAction {
       required property var modelData
       actionIndex: modelData.action
-      icon: modelData.icon
-      hint: root.hint(actionIndex, modelData.tip)
-      foreground: actionIndex === RadarModel.ACTIONS.stop ? Theme.Color.urgent : root.foreground
-      accent: actionIndex === RadarModel.ACTIONS.stop ? Theme.Color.urgent : Theme.Color.accent
+      icon: actionIndex === Actions.ACTIONS.stop && root.forceStopAvailable ? "\uf714" : modelData.icon
+      hint: root.hint(actionIndex, actionIndex === Actions.ACTIONS.stop && root.forceStopAvailable
+        ? "Force stop server (Delete)" : modelData.tip)
+      foreground: actionIndex === Actions.ACTIONS.stop ? Theme.Color.urgent : root.foreground
+      accent: actionIndex === Actions.ACTIONS.stop ? Theme.Color.urgent : Theme.Color.accent
       available: root.available(actionIndex)
       selected: root.server !== null && root.selectedActionIndex === actionIndex
       keyboardHint: root.keyboardHints

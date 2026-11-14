@@ -52,7 +52,7 @@ class DevelopmentWatcherTests(unittest.TestCase):
         self.assertNotIn("rescanPlugins", commands)
 
     def test_cached_components_are_replaced_after_source_changes(self):
-        for path in ("Widget.qml", "qml/ServerPanel.qml", "qml/RadarModel.js", "manifest.json"):
+        for path in ("Widget.qml", "qml/ServerPanel.qml", "qml/Servers.js", "manifest.json"):
             with self.subTest(path=path):
                 result, commands = self.run_watcher(
                     [{"id": "emils.localhost", "enabled": True}], synced_paths=[path], events=[path])
@@ -68,7 +68,7 @@ class DevelopmentWatcherTests(unittest.TestCase):
         self.assertIn("Synced localhost_helper.py", result.stdout)
 
     def test_save_burst_causes_one_restart(self):
-        paths = ["Widget.qml", "qml/ServerPanel.qml", "qml/RadarModel.js"]
+        paths = ["Widget.qml", "qml/ServerPanel.qml", "qml/Servers.js"]
         result, commands = self.run_watcher(
             [{"id": "emils.localhost", "enabled": True}], synced_paths=paths, events=paths)
         self.assertEqual(result.returncode, 0, result.stderr)

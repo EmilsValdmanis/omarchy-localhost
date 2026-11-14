@@ -1,6 +1,5 @@
 import QtQuick
 
-// A single texture, repainted only when the matrix or integer module size changes.
 Canvas {
   id: root
   property var rows: []

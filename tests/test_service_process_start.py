@@ -1,133 +1,158 @@
 """Exercise failed service subprocess starts with Quickshell's Process object."""
 
-import json
-import os
-from pathlib import Path
-import shutil
-import subprocess
-import tempfile
 import unittest
 
-REPO = Path(__file__).resolve().parent.parent
-QUICKSHELL = shutil.which("quickshell")
+from qml_runtime import OMARCHY_SHELL, QUICKSHELL, REPO, QmlRuntime, check_test_result
 
 
 @unittest.skipUnless(QUICKSHELL, "Quickshell is not installed")
 class ServiceProcessStartTests(unittest.TestCase):
     def test_missing_uid_route_and_resource_commands_report_failure(self):
-        with tempfile.TemporaryDirectory(prefix="localhost-service-start-") as directory:
-            root = Path(directory)
-            (root / "Plugin").symlink_to(REPO / "qml", target_is_directory=True)
-            (root / "bin").mkdir()
-            runtime = root / "runtime"
-            runtime.mkdir(mode=0o700)
-            (root / "shell.qml").write_text('''
+        with QmlRuntime() as qml:
+            qml.env["PATH"] = str(qml.bin)
+            result = qml.run('''
 import QtQuick
+import QtTest
 import Quickshell
-import "Plugin" as Plugin
+import "Plugin/qml" as Plugin
 ShellRoot {
   Plugin.RadarService { id: radar; includeDocker: false }
-  Timer {
-    interval: 300; running: true
-    onTriggered: {
+  TestCase {
+    name: "MissingResourceCommands"
+    when: true
+    function test_commands_finish() {
+      tryCompare(radar, "uidError", "Could not determine the current user")
+      tryCompare(radar, "routeWarning", "LAN route information is unavailable")
       radar.currentUid = 1000
       radar.systemMemory = { totalBytes: 100, availableBytes: 50 }
       radar.sampleResources(true)
+      tryCompare(radar, "resourceWarning", "RAM sampling is unavailable")
+      compare(radar.systemMemory.totalBytes, -1)
     }
-  }
-  Timer {
-    interval: 1000; running: true
-    onTriggered: {
-      console.log("SERVICE_RESULT " + JSON.stringify({ uidError: radar.uidError,
-        routeWarning: radar.routeWarning, resourceWarning: radar.resourceWarning,
-        total: radar.systemMemory.totalBytes }))
-      Qt.quit()
-    }
+    onCompletedChanged: if (completed) console.log("SERVICE_TEST_RESULT " + JSON.stringify({
+      tests: 1, failed: qtest_results.failCount, skipped: qtest_results.skipCount
+    }))
   }
 }
 ''')
-            env = dict(os.environ, PATH=str(root / "bin"), QT_QPA_PLATFORM="offscreen",
-                       QT_QPA_PLATFORMTHEME="", QT_QUICK_BACKEND="software", XDG_RUNTIME_DIR=str(runtime))
-            env.pop("DISPLAY", None)
-            env.pop("WAYLAND_DISPLAY", None)
-            result = subprocess.run([QUICKSHELL, "-p", str(root), "--no-color"], env=env,
-                                    capture_output=True, text=True, timeout=15)
-            output = result.stdout + result.stderr
-            line = next((line for line in output.splitlines() if "SERVICE_RESULT " in line), "")
-            self.assertTrue(line, output)
-            state = json.loads(line.split("SERVICE_RESULT ", 1)[1])
-            self.assertEqual(state, {"uidError": "Could not determine the current user",
-                                     "routeWarning": "LAN route information is unavailable",
-                                     "resourceWarning": "RAM sampling is unavailable", "total": -1})
+            check_test_result(result, "SERVICE_TEST_RESULT", 1)
 
     def test_missing_firewall_commands_clear_pending_actions(self):
-        shell = Path(os.environ.get("OMARCHY_PATH", "/usr/share/omarchy")) / "shell"
-        if not (shell / "Ui").is_dir():
-            self.skipTest("Omarchy shell is not installed")
-        with tempfile.TemporaryDirectory(prefix="localhost-firewall-start-") as directory:
-            root = Path(directory)
-            (root / "Plugin").symlink_to(REPO, target_is_directory=True)
-            (root / "Commons").symlink_to(shell / "Commons", target_is_directory=True)
-            ui = root / "Ui"
-            ui.mkdir()
-            for path in (shell / "Ui").iterdir():
-                if path.name != "KeyboardPanel.qml":
-                    (ui / path.name).symlink_to(path, target_is_directory=path.is_dir())
-            # The real panel requires a Wayland layer-shell backend. Firewall
-            # process handling does not depend on window behavior.
-            (ui / "KeyboardPanel.qml").write_text('''
+        with QmlRuntime() as qml:
+            qml.env["PATH"] = str(qml.bin)
+            result = qml.run('''
 import QtQuick
-Item {
-  property var anchorItem; property var bar; property var owner; property var focusTarget
-  property bool open: false; property int contentWidth; property int contentHeight
-  function fittedContentWidth(value, limit) { return Math.min(value, limit) }
-  function fittedContentHeight(value, limit) { return Math.min(value, limit) }
+import QtTest
+import Quickshell
+import "Plugin/qml" as Plugin
+ShellRoot {
+  Plugin.FirewallService { id: firewall }
+  TestCase {
+    id: tests
+    name: "MissingFirewallCommands"
+    when: true
+    property string notice: ""
+    Connections {
+      target: firewall
+      function onNoticeRequested(message, urgent) { tests.notice = message }
+    }
+    function test_commands_finish() {
+      tryCompare(firewall, "rulesUnreadable", true)
+      var server = { lanInterface: "eth0", lanSubnet: "192.168.1.0/24", port: 3000 }
+      firewall.requestQr(server, true)
+      tryCompare(tests, "notice", "Could not check LAN access")
+      compare(firewall.pendingServer, null)
+      compare(firewall.busy, false)
+      firewall.remove({ interfaceName: "eth0", subnet: "192.168.1.0/24", port: 3000 })
+      tryCompare(tests, "notice", "Could not remove the LAN access rule")
+      compare(firewall.pendingRule, null)
+      compare(firewall.mutationBusy, false)
+      firewall.authorize(server)
+      tryCompare(tests, "notice", "LAN access was not authorized")
+      compare(firewall.pendingServer, null)
+      compare(firewall.mutationBusy, false)
+    }
+    onCompletedChanged: if (completed) console.log("FIREWALL_TEST_RESULT " + JSON.stringify({
+      tests: 1, failed: qtest_results.failCount, skipped: qtest_results.skipCount
+    }))
+  }
 }
 ''')
-            (root / "bin").mkdir()
-            runtime = root / "runtime"
-            runtime.mkdir(mode=0o700)
-            (root / "shell.qml").write_text('''
+            check_test_result(result, "FIREWALL_TEST_RESULT", 1)
+
+    def test_port_choices_use_host_settings_and_report_rejected_saves(self):
+        if not (OMARCHY_SHELL / "Ui").is_dir():
+            self.skipTest("Omarchy shell is not installed")
+        with QmlRuntime() as qml:
+            qml.add_omarchy_imports(ui_overrides={"KeyboardPanel.qml": REPO / "tests/qml/KeyboardPanelStub.qml"})
+            qml.env["PATH"] = str(qml.bin)
+            result = qml.run('''
 import QtQuick
+import QtTest
 import Quickshell
 import "Plugin" as Plugin
 ShellRoot {
-  Plugin.Widget { id: widget }
-  Timer { interval: 300; running: true; onTriggered: widget.openQr({
-    lanAvailable: true, lanInterface: "eth0", lanSubnet: "192.168.1.0/24", port: 3000 }) }
-  Timer { interval: 600; running: true; onTriggered: {
-    console.log("CHECK_RESULT " + JSON.stringify({pending: widget.pendingQrServer, notice: widget.notice,
-      unreadable: widget.firewallRulesUnreadable}))
-    widget.removeFirewallRule({interfaceName: "eth0", subnet: "192.168.1.0/24", port: 3000})
-  } }
-  Timer { interval: 1000; running: true; onTriggered: {
-    console.log("REMOVE_RESULT " + JSON.stringify({pending: widget.pendingFirewallRule, notice: widget.notice}))
-    widget.pendingQrServer = {lanInterface: "eth0", lanSubnet: "192.168.1.0/24", port: 3000}
-    widget.authorizeQrPort()
-  } }
-  Timer { interval: 1400; running: true; onTriggered: {
-    console.log("ALLOW_RESULT " + JSON.stringify({pending: widget.pendingQrServer, notice: widget.notice}))
-    Qt.quit()
-  } }
+  QtObject {
+    id: host
+    property bool vertical: false
+    property int barSize: 28
+    property color foreground: "white"
+    property color barForeground: "white"
+    property color background: "black"
+    property color urgent: "red"
+    property string fontFamily: "monospace"
+    property bool foregroundAnimationEnabled: false
+    function hideTooltip(owner) {}
+    property var shell: settingsApi
+  }
+  QtObject {
+    id: settingsApi
+    property bool accepted: true
+    property var saved: null
+    property int calls: 0
+    function updateEntryInline(id, next) {
+      if (id !== "emils.localhost") throw new Error("Wrong plugin settings target")
+      calls++
+      saved = next
+      return accepted
+    }
+  }
+  Plugin.Widget {
+    id: widget
+    bar: host
+    settings: ({ ignoredPorts: "3000-3010", alwaysIncludePorts: "", includeDocker: false })
+  }
+  TestCase {
+    name: "HostPortSettings"
+    when: true
+    function test_host_save() {
+      widget.setPortIncluded(3005, true)
+      compare(settingsApi.saved.ignoredPorts, "3000-3004,3006-3010")
+      compare(settingsApi.saved.alwaysIncludePorts, "3005")
+      compare(settingsApi.saved.includeDocker, false)
+      compare(settingsApi.calls, 1)
+      compare(widget.settings.ignoredPorts, "3000-3010")
+      compare(widget.noticeUrgent, false)
+      verify(widget.notice.indexOf("Checking :3005") === 0)
+      settingsApi.accepted = false
+      widget.setPortIncluded(8000, false)
+      compare(settingsApi.calls, 2)
+      compare(widget.noticeUrgent, true)
+      compare(widget.notice, "Could not save the port preference.")
+      host.shell = null
+      widget.setPortIncluded(8001, false)
+      compare(widget.noticeUrgent, true)
+      compare(widget.notice, "Could not save the port preference.")
+      widget.setPortIncluded(0, false)
+      compare(settingsApi.calls, 2)
+    }
+    onCompletedChanged: if (completed) console.log("HOST_SETTINGS_RESULT " + JSON.stringify({
+      tests: 1, failed: qtest_results.failCount, skipped: qtest_results.skipCount
+    }))
+  }
 }
 ''')
-            env = dict(os.environ, PATH=str(root / "bin"), QT_QPA_PLATFORM="offscreen",
-                       QT_QPA_PLATFORMTHEME="", QT_QUICK_BACKEND="software", XDG_RUNTIME_DIR=str(runtime))
-            env.pop("DISPLAY", None)
-            env.pop("WAYLAND_DISPLAY", None)
-            result = subprocess.run([QUICKSHELL, "-p", str(root), "--no-color"], env=env,
-                                    capture_output=True, text=True, timeout=15)
-            output = result.stdout + result.stderr
-            def result_for(prefix):
-                line = next((line for line in output.splitlines() if prefix in line), "")
-                self.assertTrue(line, output[:5000])
-                return json.loads(line.split(prefix, 1)[1])
-            check = result_for("CHECK_RESULT ")
-            self.assertEqual(check, {"pending": None, "notice": "Could not check LAN access", "unreadable": True})
-            remove = result_for("REMOVE_RESULT ")
-            self.assertEqual(remove, {"pending": None, "notice": "Could not remove the LAN access rule"})
-            allow = result_for("ALLOW_RESULT ")
-            self.assertEqual(allow, {"pending": None, "notice": "LAN access was not authorized"})
+            check_test_result(result, "HOST_SETTINGS_RESULT", 1)
 
 
 if __name__ == "__main__":

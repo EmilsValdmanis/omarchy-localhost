@@ -4,8 +4,8 @@ import QtQuick
 import QtQuick.Layouts
 import qs.Commons
 import qs.Commons as Theme
-import "Motion.js" as Motion
 import qs.Ui
+import "Motion.js" as Motion
 
 CursorSurface {
   id: header

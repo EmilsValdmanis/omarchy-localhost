@@ -5,7 +5,8 @@ import QtQuick.Layouts
 import qs.Commons
 import qs.Commons as Theme
 import qs.Ui
-import "RadarModel.js" as RadarModel
+import "Frameworks.js" as Frameworks
+import "Memory.js" as Memory
 
 CursorSurface {
   id: row
@@ -14,9 +15,9 @@ CursorSurface {
   property bool selected: false
   property color memoryColor: Theme.Color.accent
   readonly property color dim: Qt.darker(foreground, 1.4)
-  readonly property string frameworkIcon: RadarModel.frameworkIcon(server.frameworkId)
+  readonly property string frameworkIcon: Frameworks.frameworkIcon(server.frameworkId)
   readonly property string detail: server.projectPath && server.projectPath !== "." ? server.projectPath : ""
-  readonly property var memoryHistory: RadarModel.parseMemoryHistory(server.memoryHistoryJson)
+  readonly property var memoryHistory: Memory.parseMemoryHistory(server.memoryHistoryJson)
 
   signal rowSelected()
   signal openRequested()
@@ -148,7 +149,7 @@ CursorSurface {
       objectName: "serverMemory"
       Layout.preferredWidth: Style.space(66)
       textFormat: Text.PlainText
-      text: RadarModel.formatMemory(row.server.memoryBytes)
+      text: Memory.formatMemory(row.server.memoryBytes)
       color: row.server.memoryBytes >= 0 ? row.foreground : row.dim
       font.family: Style.font.family
       font.pixelSize: Style.font.caption

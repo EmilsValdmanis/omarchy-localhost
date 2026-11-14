@@ -4,8 +4,12 @@ import Quickshell
 import qs.Commons
 import qs.Commons as Theme
 import "Plugin/qml" as PluginUi
-import "Plugin/qml/RadarModel.js" as RadarModel
+import "Plugin/qml/Actions.js" as Actions
+import "Plugin/qml/Discovery.js" as Discovery
+import "Plugin/qml/Memory.js" as Memory
 import "Plugin/qml/Motion.js" as Motion
+import "Plugin/qml/Servers.js" as Servers
+import "Plugin/qml/Sources.js" as Sources
 
 ShellRoot {
   FloatingWindow {
@@ -63,7 +67,7 @@ ShellRoot {
           [14, 13, 12, 12, 10, 9, 8, 7],
           [9, 11, 8, 12, 10, 11, 9, 10]
         ]
-        for (var i = 0; i < count; i++) rows.push(RadarModel.normalizeServer({
+        for (var i = 0; i < count; i++) rows.push(Servers.normalizeServer({
           serverId: "server-" + i, name: "Project " + i,
           framework: "Vite", frameworkId: "vite", port: 3000 + i,
           pid: 1000 + i, startTime: 100, cwd: "/tmp/project-" + i,
@@ -82,7 +86,7 @@ ShellRoot {
         originalFontSize = Style.fontBaseSize
         failuresBefore = qtest_results.failCount
         servers = createTemporaryObject(modelComponent, tests)
-        RadarModel.syncServerModel(servers, fixtures(50))
+        Servers.syncServerModel(servers, fixtures(50))
         panel = createTemporaryObject(panelComponent, tests, { servers: servers, groupByProject: false })
         check(panel !== null)
         list = findChild(panel, "serverList")
@@ -165,7 +169,7 @@ ShellRoot {
         settled()
         check(list.atYBeginning, "dragging back up reaches the first row")
         verifyViewport()
-        RadarModel.syncServerModel(servers, fixtures(1))
+        Servers.syncServerModel(servers, fixtures(1))
         panel.revision++
         tryCompare(list, "count", 1)
         tryCompare(scrollbar, "visible", false, 2000, "no scrollbar is shown when the rows fit")
@@ -174,7 +178,7 @@ ShellRoot {
 
       function test_toolbar_actions_use_consistent_buttons() {
         panel.selectedIndex = 0
-        panel.selectedActionIndex = RadarModel.ACTIONS.terminal
+        panel.selectedActionIndex = Actions.ACTIONS.terminal
         mouseMove(tests, 850, 750)
         settled()
         var open = findChild(panel, "serverAction0")
@@ -240,7 +244,7 @@ ShellRoot {
         tryCompare(list, "count", 50)
         settled()
         verifyViewport()
-        RadarModel.syncServerModel(servers, fixtures(2))
+        Servers.syncServerModel(servers, fixtures(2))
         panel.revision++
         tryCompare(list, "count", 2)
         settled()
@@ -282,7 +286,7 @@ ShellRoot {
         for (var i = 0; i < 40; i++) rules.push({ port: 3000 + i, subnet: "192.168.1.0/24", interfaceName: "wlan0" })
         panel.firewallRules = rules
         panel.diagnostics = rules.map(function(rule) {
-          return { port: rule.port, process: "node", reason: "no HTTP or HTTPS response" }
+          return { port: rule.port, process: "node", reason: "no-response" }
         })
         var removals = []
         panel.firewallRemovalConfirmed.connect(function(rule) { removals.push(rule.port) })
@@ -377,13 +381,13 @@ ShellRoot {
         panel.selectedIndex = 1
         panel.selectedActionIndex = 1
         panel.selectAction(1)
-        equal(panel.selectedActionIndex, RadarModel.ACTIONS.qr, "disabled QR remains reachable for its explanation")
-        check(!panel.actionEnabled(RadarModel.ACTIONS.terminal, { cwd: "" }))
-        check(!panel.actionEnabled(RadarModel.ACTIONS.project, { cwd: "" }))
+        equal(panel.selectedActionIndex, Actions.ACTIONS.qr, "disabled QR remains reachable for its explanation")
+        check(!panel.actionEnabled(Actions.ACTIONS.terminal, { cwd: "" }))
+        check(!panel.actionEnabled(Actions.ACTIONS.project, { cwd: "" }))
       }
 
       function test_mouse_selection_stays_on_target_when_moving_to_toolbar() {
-        RadarModel.syncServerModel(servers, fixtures(5))
+        Servers.syncServerModel(servers, fixtures(5))
         panel.revision++
         tryCompare(list, "count", 5)
         settled()
@@ -455,7 +459,7 @@ ShellRoot {
         var skipped = []
         panel.includePortRequested.connect(function(port) { included.push(port) })
         panel.skipPortRequested.connect(function(port) { skipped.push(port) })
-        panel.diagnostics = [{ port: 4206, process: "bun", reason: "ignored by settings" }]
+        panel.diagnostics = [{ port: 4206, process: "bun", reason: "ignored" }]
         panel.showDiagnostics = true
         var area = findChild(panel, "diagnosticList")
         tryCompare(area, "count", 3)
@@ -467,18 +471,18 @@ ShellRoot {
         equal(included.length, 1)
         equal(included[0], 4206)
         panel.includedPorts = ({4206: true})
-        panel.diagnostics = [{ port: 4206, process: "bun", reason: "no HTTP or HTTPS response" }]
+        panel.diagnostics = [{ port: 4206, process: "bun", reason: "no-response" }]
         settled()
         button = findChild(area.itemAtIndex(2), "includePort")
         equal(button.text, "Included")
         equal(button.enabled, false)
         panel.showDiagnostics = false
         panel.selectedIndex = 0
-        panel.selectedActionIndex = RadarModel.ACTIONS.restart
+        panel.selectedActionIndex = Actions.ACTIONS.restart
         panel.focusNavigation()
         wait(50)
         keyClick(Qt.Key_Right)
-        equal(panel.selectedActionIndex, RadarModel.ACTIONS.skip)
+        equal(panel.selectedActionIndex, Actions.ACTIONS.skip)
         keyClick(Qt.Key_Return)
         equal(skipped.length, 1)
         equal(skipped[0], 3000)
@@ -499,7 +503,7 @@ ShellRoot {
         panel.height = Qt.binding(function() { return panel.implicitHeight })
         panel.showDiagnostics = true
         panel.diagnostics = [4206, 36811, 8000, 8080].map(function(port) {
-          return { port: port, process: "process-with-a-long-name", reason: "no HTTP or HTTPS response" }
+          return { port: port, process: "process-with-a-long-name", reason: "no-response" }
         })
         panel.includedPorts = ({8080:true})
         var area = findChild(panel, "diagnosticList")
@@ -516,9 +520,9 @@ ShellRoot {
 
       function test_skipped_sections_default_folds_and_keyboard() {
         var entries = [
-          { port: 4206, process: "bun", reason: "TanStack Devtools event bus" },
-          { port: 8000, process: "api", reason: "ignored by settings" },
-          { port: 5432, process: "postgres", reason: "non-HTTP service port" }
+          { port: 4206, process: "bun", reason: "devtools" },
+          { port: 8000, process: "api", reason: "ignored" },
+          { port: 5432, process: "postgres", reason: "non-http" }
         ]
         panel.diagnostics = entries
         panel.showDiagnostics = true
@@ -561,7 +565,7 @@ ShellRoot {
         equal(area.itemAtIndex(0).item, manual)
         check(manual.selected && manual.hasCursor)
         check(!automatic.selected, "only the most recently selected header is highlighted")
-        panel.diagnostics = entries.filter(function(entry) { return entry.reason !== "ignored by settings" })
+        panel.diagnostics = entries.filter(function(entry) { return entry.reason !== "ignored" })
         settled()
         equal(area.itemAtIndex(1).item.collapsed, false, "removing the last manual skip opens Automatic")
         panel.diagnostics = entries
@@ -574,10 +578,10 @@ ShellRoot {
       function test_skipped_process_names_and_actions_align() {
         panel.showDiagnostics = true
         panel.diagnostics = [
-          { port: 3773, process: "t3code", reason: "command and port are not recognized as a development server" },
-          { port: 4206, process: "bun", reason: "TanStack Devtools event bus" },
-          { port: 5432, process: "a-very-long-application-name-that-must-not-push-the-action", reason: "ignored by settings" },
-          { port: 36811, process: "node-MainThread", reason: "no HTTP or HTTPS response" }
+          { port: 3773, process: "t3code", reason: "unrecognized" },
+          { port: 4206, process: "bun", reason: "devtools" },
+          { port: 5432, process: "a-very-long-application-name-that-must-not-push-the-action", reason: "ignored" },
+          { port: 36811, process: "node-MainThread", reason: "no-response" }
         ]
         panel.includedPorts = ({36811:true})
         var area = findChild(panel, "diagnosticList")
@@ -631,13 +635,13 @@ ShellRoot {
         servers.setProperty(1, "restartReason", "No restart command is configured.")
         panel.revision++
         panel.selectedIndex = 1
-        panel.selectedActionIndex = RadarModel.ACTIONS.open
+        panel.selectedActionIndex = Actions.ACTIONS.open
         panel.focusNavigation()
         wait(50)
         keyClick(Qt.Key_L)
-        equal(panel.selectedActionIndex, RadarModel.ACTIONS.copyLocal)
+        equal(panel.selectedActionIndex, Actions.ACTIONS.copyLocal)
         keyClick(Qt.Key_Right)
-        equal(panel.selectedActionIndex, RadarModel.ACTIONS.qr)
+        equal(panel.selectedActionIndex, Actions.ACTIONS.qr)
         var qr = findChild(panel, "serverAction3")
         var qrTip = findChild(qr.parent, "disabledActionTip3")
         equal(qr.enabled, false)
@@ -647,7 +651,7 @@ ShellRoot {
         keyClick(Qt.Key_Return)
         equal(qrRequests, 0)
         keyClick(Qt.Key_L)
-        equal(panel.selectedActionIndex, RadarModel.ACTIONS.terminal)
+        equal(panel.selectedActionIndex, Actions.ACTIONS.terminal)
         tryCompare(qrTip, "visible", false)
         var terminal = findChild(panel, "serverAction4")
         var terminalTip = findChild(terminal.parent, "disabledActionTip4")
@@ -656,11 +660,11 @@ ShellRoot {
         keyClick(Qt.Key_Return)
         equal(terminals, 0)
         keyClick(Qt.Key_Right)
-        equal(panel.selectedActionIndex, RadarModel.ACTIONS.project)
+        equal(panel.selectedActionIndex, Actions.ACTIONS.project)
         keyClick(Qt.Key_Return)
         equal(editors, 0)
         keyClick(Qt.Key_Right)
-        equal(panel.selectedActionIndex, RadarModel.ACTIONS.restart)
+        equal(panel.selectedActionIndex, Actions.ACTIONS.restart)
         var restart = findChild(panel, "serverAction6")
         var restartTip = findChild(restart.parent, "disabledActionTip6")
         tryCompare(restartTip, "visible", true)
@@ -669,9 +673,9 @@ ShellRoot {
         equal(restarts, 0)
         panel.actionBusy = true
         keyClick(Qt.Key_Right)
-        equal(panel.selectedActionIndex, RadarModel.ACTIONS.skip)
+        equal(panel.selectedActionIndex, Actions.ACTIONS.skip)
         keyClick(Qt.Key_Right)
-        equal(panel.selectedActionIndex, RadarModel.ACTIONS.stop)
+        equal(panel.selectedActionIndex, Actions.ACTIONS.stop)
         var stop = findChild(panel, "serverAction7")
         var stopTip = findChild(stop.parent, "disabledActionTip7")
         tryCompare(stopTip, "visible", true)
@@ -680,11 +684,11 @@ ShellRoot {
         equal(stopSpy.count, 0)
         equal(panel.pendingAction, "")
         keyClick(Qt.Key_H)
-        equal(panel.selectedActionIndex, RadarModel.ACTIONS.skip)
+        equal(panel.selectedActionIndex, Actions.ACTIONS.skip)
         keyClick(Qt.Key_H)
-        equal(panel.selectedActionIndex, RadarModel.ACTIONS.restart)
+        equal(panel.selectedActionIndex, Actions.ACTIONS.restart)
         keyClick(Qt.Key_Left)
-        equal(panel.selectedActionIndex, RadarModel.ACTIONS.project)
+        equal(panel.selectedActionIndex, Actions.ACTIONS.project)
       }
 
       function test_qr_sharing_content_copies_lan_and_closes_by_keyboard() {
@@ -746,7 +750,7 @@ ShellRoot {
         tryCompare(tip, "visible", true, 2000)
         check(tip.text.indexOf("localhost only") !== -1)
         equal(qr.tooltipText, "", "the built-in tooltip must not duplicate the compact tooltip")
-        equal(panel.selectedActionIndex, RadarModel.ACTIONS.open, "disabled hover does not move the action cursor")
+        equal(panel.selectedActionIndex, Actions.ACTIONS.open, "disabled hover does not move the action cursor")
         mouseClick(qr.parent, qr.width / 2, qr.height / 2)
         equal(requests.length, 0)
 
@@ -873,7 +877,7 @@ ShellRoot {
         servers.insert(0, row)
         panel.revision++
         equal(String(panel.colorForServer(servers.get(1))), color)
-        equal(String(panel.colorForSource(RadarModel.memorySourceKey(servers.get(1)))), color)
+        equal(String(panel.colorForSource(Sources.key(servers.get(1)))), color)
         panel.focusNavigation()
         keyClick(Qt.Key_M, Qt.ControlModifier)
         wait(100)
@@ -883,7 +887,7 @@ ShellRoot {
       }
 
       function test_memory_hover_highlights_segment_without_changing_selection() {
-        RadarModel.syncServerModel(servers, fixtures(2))
+        Servers.syncServerModel(servers, fixtures(2))
         panel.systemMemory = { totalBytes: 100 * 1048576, availableBytes: 40 * 1048576 }
         panel.revision++
         tryCompare(list, "count", 2)
@@ -932,7 +936,7 @@ ShellRoot {
 
       function test_closed_panel_defers_updates() {
         panel.panelActive = false
-        RadarModel.syncServerModel(servers, fixtures(3))
+        Servers.syncServerModel(servers, fixtures(3))
         panel.revision++
         wait(100)
         equal(list.count, 50)
@@ -1018,7 +1022,7 @@ ShellRoot {
           rows[i].projectRoot = i % 2 ? "/work/console" : "/work/atlas"
           rows[i].projectPath = "apps/" + rows[i].name
         }
-        RadarModel.syncServerModel(servers, rows)
+        Servers.syncServerModel(servers, rows)
         panel.revision++
         tryCompare(list, "count", 8)
         settled()
@@ -1052,7 +1056,7 @@ ShellRoot {
           rows[i].projectPath = "apps/" + rows[i].name
         }
         panel.groupByProject = true
-        RadarModel.syncServerModel(servers, rows)
+        Servers.syncServerModel(servers, rows)
         panel.revision++
         tryCompare(list, "count", count + 3)
         settled()
@@ -1212,7 +1216,7 @@ ShellRoot {
         var remaining = []
         for (var i = 0; i < servers.count; i++)
           if (servers.get(i).projectRoot !== "/work/atlas") remaining.push(servers.get(i))
-        RadarModel.syncServerModel(servers, remaining)
+        Servers.syncServerModel(servers, remaining)
         panel.revision++
         settled()
         equal(panel.projectStopSelected, false, "removing the selected project clears its action cursor")
@@ -1252,7 +1256,7 @@ ShellRoot {
         keyClick(Qt.Key_Right)
         equal(panel.selectedServer().serverId, "server-1")
         keyClick(Qt.Key_Right)
-        equal(panel.selectedActionIndex, RadarModel.ACTIONS.copyLocal, "server arrows still select actions")
+        equal(panel.selectedActionIndex, Actions.ACTIONS.copyLocal, "server arrows still select actions")
         keyClick(Qt.Key_Left, Qt.ControlModifier)
         equal(panel.selectedProjectRoot, "/work/console", "folding a selected child selects its header")
         tryCompare(list, "count", 6)
@@ -1323,9 +1327,9 @@ ShellRoot {
         panel.focusNavigation()
         wait(50)
         keyClick(Qt.Key_L)
-        equal(panel.selectedActionIndex, RadarModel.ACTIONS.copyLocal)
+        equal(panel.selectedActionIndex, Actions.ACTIONS.copyLocal)
         keyClick(Qt.Key_H)
-        equal(panel.selectedActionIndex, RadarModel.ACTIONS.open)
+        equal(panel.selectedActionIndex, Actions.ACTIONS.open)
         keyClick(Qt.Key_Z)
         keyClick(Qt.Key_C)
         tryCompare(list, "count", 9)
@@ -1537,7 +1541,7 @@ ShellRoot {
         tryCompare(list, "count", 9)
         equal(panel.selectedProjectRoot, "/work/atlas")
         panel.panelActive = false
-        servers.append(RadarModel.normalizeServer({ serverId: "new", projectRoot: "/work/atlas", port: 3010 }))
+        servers.append(Servers.normalizeServer({ serverId: "new", projectRoot: "/work/atlas", port: 3010 }))
         panel.revision++
         wait(50)
         equal(panel.resultCount, 9)
@@ -1602,8 +1606,7 @@ ShellRoot {
         var listeners = []
         for (var i = 0; i < 45; i++) listeners.push({ pid: 410, port: 4000 + i, process: "helper" })
         native.pendingListeners = listeners
-        native.metadataOutput = JSON.stringify({ ok: true, processes: [] })
-        native.cacheMetadata()
+        native.cacheMetadata(JSON.stringify({ ok: true, processes: [] }), "")
         equal(native.diagnostics.length, 45, "metadata exclusions survive both discovery stages")
         docker.pendingDiagnostics = []
         docker.pendingContexts = listeners.map(function(listener) {
@@ -1626,7 +1629,7 @@ ShellRoot {
         var rows = fixtures(2)
         rows[0].pid = 2147483647
         rows[1].pid = 2147483646
-        RadarModel.syncServerModel(service.servers, rows)
+        Servers.syncServerModel(service.servers, rows)
         var process = findChild(service, "serverActionProcess")
         function missingHelper() {
           if (process.command[1] === service.helperPath)
@@ -1652,13 +1655,13 @@ ShellRoot {
         var rows = fixtures(2)
         rows[0].pid = 2147483647
         rows[1].pid = 2147483646
-        rows.push(RadarModel.normalizeServer(Object.assign({}, rows[0], {
+        rows.push(Servers.normalizeServer(Object.assign({}, rows[0], {
           serverId: "docker-api", source: "docker", containerId: "abc123def456", port: 9000
         })))
-        rows.push(RadarModel.normalizeServer(Object.assign({}, rows[0], {
+        rows.push(Servers.normalizeServer(Object.assign({}, rows[0], {
           serverId: "shared-port", port: 3002
         })))
-        RadarModel.syncServerModel(service.servers, rows)
+        Servers.syncServerModel(service.servers, rows)
         var process = findChild(service, "serverActionProcess")
         var commands = []
         var succeed = false
@@ -1668,7 +1671,7 @@ ShellRoot {
           commands.push(command)
           var successful = succeed || command[2] === "docker-action"
           var payload = successful ? { ok: true, message: "Stopped" }
-            : { ok: false, error: "The server did not stop cleanly; use Force stop if needed" }
+            : { ok: false, error: "Graceful stop failed", forceStopAvailable: true }
           process.command = ["python3", "-c", "print(" + JSON.stringify(JSON.stringify(payload)) + ")"]
         }
         process.commandChanged.connect(helperResponse)
@@ -1684,22 +1687,22 @@ ShellRoot {
         equal(commands[2][2], "docker-action")
         equal(commands[2][6], "abc123def456")
         equal(actionSpy.signalArguments[3][1], false)
-        check(service.forceStopSourceKeys[RadarModel.memorySourceKey(rows[0])],
+        check(service.forceStopSourceKeys[Sources.key(rows[0])],
           "the first failed process retains Force stop: " + JSON.stringify(service.forceStopSourceKeys))
-        check(service.forceStopSourceKeys[RadarModel.memorySourceKey(rows[1])],
+        check(service.forceStopSourceKeys[Sources.key(rows[1])],
           "both failed processes retain Force stop")
-        check(service.forceStopSourceKeys[RadarModel.memorySourceKey(rows[3])],
+        check(service.forceStopSourceKeys[Sources.key(rows[3])],
           "another port on the same process also offers Force stop")
         succeed = true
         service.forceStop(rows[0])
         equal(service.actionBusy, true, "controls lock before the helper finishes starting")
         tryCompare(service, "actionBusy", false, 5000)
         equal(commands[3][4], "force-stop")
-        check(!service.forceStopSourceKeys[RadarModel.memorySourceKey(rows[0])],
+        check(!service.forceStopSourceKeys[Sources.key(rows[0])],
           "successful force stop clears that process's recovery state")
-        check(service.forceStopSourceKeys[RadarModel.memorySourceKey(rows[1])],
+        check(service.forceStopSourceKeys[Sources.key(rows[1])],
           "stopping one process preserves the other's Force stop")
-        RadarModel.syncServerModel(service.servers, rows)
+        Servers.syncServerModel(service.servers, rows)
         check(service.stopProject("/tmp/fixtures"))
         tryCompare(service, "actionBusy", false, 5000)
         equal(commands.length, 7)
@@ -1719,7 +1722,7 @@ ShellRoot {
         function detected() {
           for (var i = 0; i < service.servers.count; i++) {
             var server = service.servers.get(i)
-            if (server.port === port) return RadarModel.normalizeServer(server)
+            if (server.port === port) return Servers.normalizeServer(server)
           }
           return null
         }
@@ -1747,19 +1750,19 @@ ShellRoot {
           if (candidate.pid === server.pid) shared.push(candidate)
         }
         check(shared.length >= 2, "fixture process exposes two ports")
-        equal(RadarModel.memorySummary(shared).totalBytes, server.memoryBytes,
+        equal(Memory.memorySummary(shared).totalBytes, server.memoryBytes,
           "shared process RAM is counted once")
         tryVerify(function() {
           var refreshed = detected()
-          return refreshed && RadarModel.parseMemoryHistory(refreshed.memoryHistoryJson).length >= 2
+          return refreshed && Memory.parseMemoryHistory(refreshed.memoryHistoryJson).length >= 2
         }, 5000, "live RAM history gains samples independently of scans")
         tryCompare(service, "scanning", false, 5000)
         var failedCache = {}
         var nativeDiscovery = findChild(service, "nativeDiscovery")
         var context = nativeDiscovery.readyContexts.find(function(entry) {
-          return RadarModel.contextId(entry.context) === server.serverId
+          return Discovery.contextId(entry.context) === server.serverId
         }).context
-        failedCache[RadarModel.probeCacheKey(context)] = { scheme: "", attempts: 2, expiresAt: Date.now() + 15000 }
+        failedCache[Discovery.probeCacheKey(context)] = { scheme: "", attempts: 2, expiresAt: Date.now() + 15000 }
         nativeDiscovery.probeCache = failedCache
         service.servers.clear()
         service.refresh()
@@ -1767,12 +1770,12 @@ ShellRoot {
           "manual refresh discovers a ready server despite a cached failed probe")
         // A stale first target must not prevent the real fixture from stopping.
         // Two ports on that fixture must still produce only one stop action.
-        var stale = RadarModel.normalizeServer({ serverId: "stale", pid: 2147483647,
+        var stale = Servers.normalizeServer({ serverId: "stale", pid: 2147483647,
           startTime: 1, projectRoot: server.projectRoot, localUrl: server.localUrl })
-        var other = RadarModel.normalizeServer({ serverId: "other-project", pid: 2147483646,
+        var other = Servers.normalizeServer({ serverId: "other-project", pid: 2147483646,
           startTime: 1, projectRoot: "/unrelated", localUrl: server.localUrl })
         var targets = [stale, server, Object.assign({}, server, { serverId: "second-port", port: secondPort }), other]
-        RadarModel.syncServerModel(service.servers, targets)
+        Servers.syncServerModel(service.servers, targets)
         actionSpy.target = service
         actionSpy.clear()
         check(service.stopProject(server.projectRoot))
@@ -1818,10 +1821,10 @@ ShellRoot {
         service.finishResourceSample(JSON.stringify({ ok: true, processes: [
           { pid: 410, uid: service.currentUid, startTime: 100, memoryBytes: 1048576 }
         ], containers: {}, systemMemory: { totalBytes: 10000000, availableBytes: 5000000 } }), false, 0)
-        equal(RadarModel.parseMemoryHistory(service.servers.get(0).memoryHistoryJson).length, 1)
+        equal(Memory.parseMemoryHistory(service.servers.get(0).memoryHistoryJson).length, 1)
         service.publishServers()
         service.publishServers()
-        equal(RadarModel.parseMemoryHistory(service.servers.get(0).memoryHistoryJson).length, 1,
+        equal(Memory.parseMemoryHistory(service.servers.get(0).memoryHistoryJson).length, 1,
           "discovery does not duplicate a stale RAM sample")
         service.panelActive = true
         equal(service.nativeResourceIntervalMs, 2000)
@@ -1884,9 +1887,9 @@ ShellRoot {
         service.finishResourceSample(JSON.stringify({ ok: true, containers: { abc123def456: 4194304 } }), true, 0)
         equal(service.servers.get(1).memoryBytes, 4194304, "partial samples retain successful readings")
         equal(service.servers.get(2).memoryBytes, -1, "missing container readings become unavailable")
-        equal(RadarModel.parseMemoryHistory(service.servers.get(2).memoryHistoryJson).length, 0)
+        equal(Memory.parseMemoryHistory(service.servers.get(2).memoryHistoryJson).length, 0)
         var rows = [service.servers.get(0), service.servers.get(1), service.servers.get(2)]
-        equal(RadarModel.memoryBreakdown(rows, service.systemMemory).serverBytes, 5242880,
+        equal(Memory.memoryBreakdown(rows, service.systemMemory).serverBytes, 5242880,
           "unavailable readings are excluded from the RAM total")
 
         var failures = [
@@ -1901,12 +1904,12 @@ ShellRoot {
           equal(service.servers.get(2).memoryBytes, -1)
           equal(service.servers.get(0).memoryBytes, 1048576, "Docker failures preserve native readings")
           equal(service.systemMemory.totalBytes, 10000000, "Docker failures preserve system totals")
-          equal(RadarModel.parseMemoryHistory(service.servers.get(1).memoryHistoryJson).length, 0)
+          equal(Memory.parseMemoryHistory(service.servers.get(1).memoryHistoryJson).length, 0)
         }
 
         service.finishResourceSample(dockerSample, true, 0)
         equal(service.servers.get(1).memoryBytes, 2097152, "a later successful sample recovers")
-        equal(RadarModel.parseMemoryHistory(service.servers.get(1).memoryHistoryJson).length, 1)
+        equal(Memory.parseMemoryHistory(service.servers.get(1).memoryHistoryJson).length, 1)
         service.finishResourceSample(nativeSample, false, 1)
         equal(service.servers.get(0).memoryBytes, -1, "native failures also invalidate previous readings")
         equal(service.systemMemory.totalBytes, -1)
@@ -1956,7 +1959,7 @@ ShellRoot {
       }
 
       function test_memory_summary_and_row_label() {
-        RadarModel.syncServerModel(servers, fixtures(2))
+        Servers.syncServerModel(servers, fixtures(2))
         panel.revision++
         tryCompare(list, "count", 2)
         tryCompare(findChild(panel, "totalMemory"), "text", "16.00 GiB")
@@ -1996,7 +1999,7 @@ ShellRoot {
           for (var y = 0; y < pixels.height; y++)
             if (pixels.alpha(x, y) > 0) painted = true
         check(painted, "sparkline has visible pixels")
-        RadarModel.syncServerModel(servers, fixtures(7))
+        Servers.syncServerModel(servers, fixtures(7))
         panel.revision++
         tryCompare(list, "count", 7)
         waitForRendering(panel)
