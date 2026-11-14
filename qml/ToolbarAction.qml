@@ -3,8 +3,6 @@ import qs.Commons
 import qs.Commons as Theme
 import qs.Ui
 
-// An enabled hover surface around a possibly disabled action. The panel's
-// keyboard cursor can inspect it without making the action executable.
 Item {
   id: root
   property int actionIndex: 0

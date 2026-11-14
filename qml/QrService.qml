@@ -1,6 +1,5 @@
 import QtQuick
-import Quickshell.Io
-import "RadarModel.js" as RadarModel
+import "Qr.js" as Qr
 
 // QR process state is independent of the Wayland overlay's window lifetime.
 Item {
@@ -9,7 +8,6 @@ Item {
 
   property bool opened: false
   property bool loading: false
-  property bool expectedStop: false
   property bool pendingGenerate: false
   property string projectName: "Localhost"
   property string framework: "Development server"
@@ -37,10 +35,7 @@ Item {
   function close() {
     opened = false
     pendingGenerate = false
-    if (qrProcess.running) {
-      expectedStop = true
-      qrProcess.running = false
-    }
+    qrProcess.cancel()
     loading = false
     qrSize = 0
     qrRows = []
@@ -49,22 +44,19 @@ Item {
   }
 
   function generate() {
-    if (qrProcess.running) {
+    loading = true
+    error = ""
+    if (qrProcess.busy) {
       pendingGenerate = true
-      expectedStop = true
-      qrProcess.running = false
+      qrProcess.cancel()
       return
     }
     pendingGenerate = false
-    expectedStop = false
-    loading = true
-    qrProcess.command = ["qrencode", "--type", "ASCII", "--margin", "4", "--output", "-", url]
-    qrProcess.awaitingExit = true
-    qrProcess.running = true
+    qrProcess.start(["qrencode", "--type", "ASCII", "--margin", "4", "--output", "-", url])
   }
 
   function applyQr(raw) {
-    var payload = RadarModel.parseQrAscii(raw)
+    var payload = Qr.parseQrAscii(raw)
     if (payload.size <= 0 || payload.rows.length !== payload.size) {
       qrSize = 0
       qrRows = []
@@ -76,36 +68,14 @@ Item {
     error = ""
   }
 
-  Process {
+  CommandProcess {
     id: qrProcess
-    property bool awaitingExit: false
-
-    stdout: StdioCollector {
-      waitForEnd: true
-      onStreamFinished: if (root.opened && !root.expectedStop) root.applyQr(text)
-    }
-
-    stderr: StdioCollector {
-      waitForEnd: true
-      onStreamFinished: {
-        if (root.expectedStop) return
-        var detail = String(text || "").trim()
-        if (detail !== "") root.error = detail
-      }
-    }
-
-    function finish(exitCode) {
-      if (!awaitingExit) return
-      awaitingExit = false
+    onCompleted: function(exitCode, failedToStart, canceled) {
+      if (root.pendingGenerate && root.opened) { root.generate(); return }
+      if (canceled || !root.opened) return
       root.loading = false
-      if (root.expectedStop) {
-        root.expectedStop = false
-        if (root.pendingGenerate && root.opened) root.generate()
-        return
-      }
-      if (exitCode !== 0 && root.error === "") root.error = "Could not generate the QR code"
+      if (exitCode === 0) root.applyQr(output)
+      else root.error = errorOutput || "Could not generate the QR code"
     }
-    onExited: function(exitCode) { finish(exitCode) }
-    onRunningChanged: if (!running && awaitingExit && !root.expectedStop) finish(1)
   }
 }

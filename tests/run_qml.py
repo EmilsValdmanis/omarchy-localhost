@@ -14,7 +14,8 @@ import selectors
 import shutil
 import subprocess
 import sys
-import tempfile
+
+from qml_runtime import OMARCHY_SHELL, QUICKSHELL, REPO, QmlRuntime, output_of
 
 
 def main():
@@ -22,32 +23,21 @@ def main():
     parser.add_argument("--wayland-smoke", action="store_true", help="also load both hidden entry points on the current Wayland display")
     parser.add_argument("--previews", action="store_true", help="regenerate the combined README/marketplace preview from the actual components")
     args = parser.parse_args()
-    repo = Path(__file__).resolve().parent.parent
-    shell = Path(os.environ.get("OMARCHY_PATH", "/usr/share/omarchy")) / "shell"
-    if not shutil.which("quickshell") or not (shell / "Ui").is_dir():
+    repo = REPO
+    if not QUICKSHELL or not (OMARCHY_SHELL / "Ui").is_dir():
         sys.exit("UI tests require Quickshell and the Omarchy shell")
     artifacts = Path(os.environ.get("LOCALHOST_TEST_ARTIFACTS", "/tmp/localhost-test-artifacts"))
     artifacts.mkdir(parents=True, exist_ok=True)
-    with tempfile.TemporaryDirectory(prefix="localhost-qml-") as directory:
-        stage = Path(directory)
-        for module in ("Commons", "Ui"):
-            (stage / module).symlink_to(shell / module, target_is_directory=True)
-        (stage / "Plugin").symlink_to(repo, target_is_directory=True)
+    with QmlRuntime() as qml:
+        stage = qml.root
+        qml.add_omarchy_imports()
         shutil.copyfile(repo / "tests/qml/shell.qml", stage / "shell.qml")
-        runtime = stage / "runtime"
-        runtime.mkdir(mode=0o700)
-        env = dict(os.environ, QT_QPA_PLATFORM="offscreen", QT_QPA_PLATFORMTHEME="",
-                   QT_QUICK_BACKEND="software", XDG_RUNTIME_DIR=str(runtime),
-                   LOCALHOST_TEST_ARTIFACTS=str(artifacts.resolve()))
-        env.pop("WAYLAND_DISPLAY", None)
-        env.pop("DISPLAY", None)
+        env = qml.env
+        env["LOCALHOST_TEST_ARTIFACTS"] = str(artifacts.resolve())
         # Exercise Docker latency without connecting to the user's daemon.
-        fixture_bin = stage / "bin"
-        fixture_bin.mkdir()
-        docker_stub = fixture_bin / "docker"
+        docker_stub = qml.bin / "docker"
         docker_stub.write_text("#!/usr/bin/env bash\nif [[ ${1:-} == ps ]]; then sleep 2.5; echo 'fixture slow Docker daemon' >&2; exit 1; fi\n")
         docker_stub.chmod(0o755)
-        env["PATH"] = str(fixture_bin) + os.pathsep + env["PATH"]
         if args.previews:
             config_home = Path(os.environ.get("XDG_CONFIG_HOME", str(Path.home() / ".config")))
             theme = Path(os.environ.get("LOCALHOST_PREVIEW_THEME", str(config_home / "omarchy/themes/motion-blur"))).expanduser()
@@ -62,9 +52,8 @@ def main():
             env["LOCALHOST_PREVIEW_DIR"] = str(destination)
             env["LOCALHOST_PREVIEW_WALLPAPER"] = wallpaper.resolve().as_uri()
             shutil.copyfile(repo / "tests/qml/previews.qml", stage / "shell.qml")
-            preview = subprocess.run(["quickshell", "-p", str(stage), "--no-color"],
-                                     env=env, capture_output=True, text=True, timeout=30)
-            output = preview.stdout + preview.stderr
+            preview = qml.run(timeout=30)
+            output = output_of(preview)
             print(output, end="")
             if preview.returncode or 'LOCALHOST_PREVIEWS {"failed":0}' not in output or re.search(r"TypeError|ReferenceError|Binding loop|Unable to assign", output):
                 sys.exit("Preview rendering failed")
@@ -84,8 +73,7 @@ def main():
             env.update(LOCALHOST_TEST_PORT=str(ports[0]), LOCALHOST_TEST_SECOND_PORT=str(ports[1]),
                        LOCALHOST_TEST_PID=str(fixture.pid), LOCALHOST_TEST_PROJECT_ROOT=str(repo))
             try:
-                result = subprocess.run(["quickshell", "-p", str(stage), "--no-color"],
-                                        env=env, capture_output=True, text=True, timeout=90)
+                result = qml.run(timeout=90)
             except subprocess.TimeoutExpired as error:
                 print(error.stdout or b"")
                 sys.exit("UI tests timed out")
@@ -94,7 +82,7 @@ def main():
                 fixture.terminate()
             fixture.wait(timeout=5)
             fixture.stdout.close()
-        output = result.stdout + result.stderr
+        output = output_of(result)
         (artifacts / "qml.log").write_text(output)
         print(output, end="")
         summaries = re.findall(r"LOCALHOST_RESULT (\{[^\n]+\})", output)
@@ -116,10 +104,9 @@ def main():
             shutil.copyfile(repo / "tests/qml/wayland.qml", stage / "shell.qml")
             # Omarchy also resolves its Hyprland socket through the real runtime.
             env.update(QT_QPA_PLATFORM="wayland", WAYLAND_DISPLAY=display,
-                       XDG_RUNTIME_DIR=os.environ.get("XDG_RUNTIME_DIR", str(runtime)))
-            smoke = subprocess.run(["quickshell", "-p", str(stage), "--no-color"],
-                                   env=env, capture_output=True, text=True, timeout=15)
-            output = smoke.stdout + smoke.stderr
+                       XDG_RUNTIME_DIR=os.environ.get("XDG_RUNTIME_DIR", str(qml.runtime)))
+            smoke = qml.run()
+            output = output_of(smoke)
             (artifacts / "wayland.log").write_text(output)
             print(output, end="")
             if (smoke.returncode

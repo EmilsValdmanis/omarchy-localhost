@@ -261,22 +261,29 @@ components live in `qml/`:
 
 | Path                                                                | Responsibility                                         |
 | ------------------------------------------------------------------- | ------------------------------------------------------ |
-| `qml/RadarService.qml`                                              | Merge discovery results; run actions and RAM sampling |
-| `qml/RadarDiscovery.qml`                                            | Independently discover and probe native or Docker servers |
-| `qml/RadarModel.js`                                                 | Parse, normalize, filter, and summarize server data    |
-| `qml/ServerPanel.qml`, `qml/ServerRow.qml`, `qml/ServerActions.qml` | Render the server list and controls                    |
-| `qml/ProjectHeader.qml`, `qml/ProjectList.js`                       | Fold project groups and navigate visible entries       |
-| `qml/DetailRow.qml`, `qml/ProjectHeader.qml`                         | Consistent Skipped and Access rows and group headers   |
-| `qml/MemorySparkline.qml`, `qml/PanelScrollArea.qml`, `qml/ListEdgeFades.qml` | Memory trends and scrolling with animated edge fades |
-| `qml/PaintedGlyph.qml`, `qml/InlineIcon.qml`, `qml/Motion.js` | Icon alignment and motion across supported shell versions |
-| `qml/QrService.qml`, `qml/QrContent.qml`, `qml/QrCode.qml`          | QR state and display                                   |
-| `localhost_helper.py`, `project_metadata.py`                        | Read Linux and Docker metadata; verify process actions |
-| `tests/`                                                            | Model, helper, QML, and preview checks                 |
+| `qml/RadarService.qml` | Merge independent discovery and RAM samples; control servers |
+| `qml/RadarDiscovery.qml`, `qml/Discovery.js` | Discover, classify, and probe native and Docker listeners |
+| `qml/CommandProcess.qml` | Collect subprocess output and complete exits, cancellations, and failed starts once |
+| `qml/Servers.js`, `qml/ListModelSync.js` | Normalize server rows and preserve model delegates during updates |
+| `qml/Actions.js` | Toolbar metadata, navigation order, and action availability |
+| `qml/Ports.js`, `qml/Diagnostics.js` | Port preferences and skipped-listener explanations |
+| `qml/Sources.js`, `qml/Paths.js` | Stable process/container identity and path naming |
+| `qml/Network.js`, `qml/Frameworks.js`, `qml/Memory.js` | Network addresses, framework identification, and RAM accounting |
+| `qml/FirewallService.qml`, `qml/Firewall.js` | LAN authorization and managed UFW rules |
+| `qml/ServerPanel.qml`, `qml/ServerRow.qml`, `qml/ServerActions.qml` | Server list and controls |
+| `qml/ProjectHeader.qml`, `qml/ProjectList.js` | Project folding and visible navigation entries |
+| `qml/DetailRow.qml`, `qml/PortFilter.qml` | Skipped and Access rows; port filter controls |
+| `qml/MemorySparkline.qml`, `qml/PanelScrollArea.qml`, `qml/ListEdgeFades.qml` | Memory trends and list scrolling |
+| `qml/PaintedGlyph.qml`, `qml/InlineIcon.qml`, `qml/Motion.js` | Icon alignment and motion across shell versions |
+| `qml/QrService.qml`, `qml/Qr.js`, `qml/QrContent.qml`, `qml/QrCode.qml` | QR generation, parsing, and display |
+| `localhost_helper.py`, `project_metadata.py` | Linux/Docker metadata and verified process actions |
+| `tests/` | Feature models, helper behavior, and isolated native QML checks |
 
-Data flows from `RadarService` through `RadarModel` into `ServerPanel`. The
-Python helper reads OS data; QML handles presentation and interactions. Keep
-the manifest entry points at the root and update imports and tests when moving
-internal components.
+`Widget` adapts shell settings, IPC, and UI signals to the services. The services
+own workflows; JavaScript feature modules handle data and policy without importing
+QML. Metadata discovery and resource sampling use separate helper commands. Keep
+the manifest entry points at the root. Refactor decisions and retained external
+constraints are recorded in [REFACTOR_DECISIONS.md](REFACTOR_DECISIONS.md).
 
 Run the development watcher from the repository root:
 

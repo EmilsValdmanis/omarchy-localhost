@@ -4,7 +4,6 @@ import QtQuick.Layouts
 import qs.Commons
 import qs.Commons as Theme
 
-// Auxiliary views share the server list's virtualized rows, scrollbar padding and fades.
 Item {
   id: root
   property alias model: list.model

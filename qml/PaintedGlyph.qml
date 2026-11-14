@@ -2,7 +2,6 @@ import QtQuick
 import qs.Commons
 import qs.Commons as Theme
 
-// Fit the visible glyph bounds, independent of the icon font's ascent/descent.
 Item {
   id: root
   property string text: ""

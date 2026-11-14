@@ -34,7 +34,6 @@ class ProjectInspector:
     def manifest(self, path: Path) -> dict:
         if path not in self.manifests:
             try:
-                # Bound both file size and read size; never read devices/FIFOs.
                 if not path.is_file() or path.stat().st_size > MAX_MANIFEST_BYTES:
                     raise ValueError("not a small manifest")
                 with path.open("rb") as stream:

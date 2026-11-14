@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import argparse
 from contextlib import contextmanager
+from dataclasses import dataclass
 import http.client
 import ipaddress
 import json
@@ -40,21 +41,32 @@ RESTART_READY_TIMEOUT = 10.0
 class LocalhostError(RuntimeError):
     """An expected failure that can be shown directly in the plugin UI."""
 
+    def __init__(self, message: str, *, force_stop_available: bool = False):
+        super().__init__(message)
+        self.force_stop_available = force_stop_available
+
+
+@dataclass(frozen=True)
+class RestartedServer:
+    process: subprocess.Popen[bytes]
+    log_path: Path
+    collector: subprocess.Popen[bytes] | None
+
 
 def json_print(payload: dict[str, Any]) -> None:
     print(json.dumps(payload, ensure_ascii=False, separators=(",", ":")))
 
 
-def proc_directory(pid: int, proc_root: Path = Path("/proc")) -> Path:
-    return proc_root / str(pid)
+def proc_directory(pid: int) -> Path:
+    return Path("/proc") / str(pid)
 
 
-def read_process_stat(pid: int, proc_root: Path = Path("/proc")) -> tuple[str, int]:
+def read_process_stat(pid: int) -> tuple[str, int]:
     """Return Linux process state and start time from proc(5) stat fields."""
 
     try:
-        raw = (proc_directory(pid, proc_root) / "stat").read_text(errors="replace")
-    except (FileNotFoundError, PermissionError, ProcessLookupError, OSError) as error:
+        raw = (proc_directory(pid) / "stat").read_text(errors="replace")
+    except OSError as error:
         raise LocalhostError(f"PID {pid} is no longer running") from error
 
     closing = raw.rfind(")")
@@ -72,9 +84,8 @@ def read_process_stat(pid: int, proc_root: Path = Path("/proc")) -> tuple[str, i
 def read_null_separated(path: Path, *, errors: str = "replace") -> list[str]:
     try:
         values = path.read_bytes().split(b"\0")
-    except (FileNotFoundError, PermissionError, ProcessLookupError, OSError):
+    except OSError:
         return []
-    # Empty argv entries are real arguments; only remove the final terminator.
     if values and values[-1] == b"":
         values.pop()
     return [value.decode(errors=errors) for value in values]
@@ -83,33 +94,29 @@ def read_null_separated(path: Path, *, errors: str = "replace") -> list[str]:
 def inspect_process(
     pid: int,
     expected_uid: int,
-    proc_root: Path = Path("/proc"),
-    include_memory: bool = True,
 ) -> dict[str, Any] | None:
-    directory = proc_directory(pid, proc_root)
+    directory = proc_directory(pid)
     try:
         uid = directory.stat().st_uid
-    except (FileNotFoundError, PermissionError, ProcessLookupError, OSError):
+    except OSError:
         return None
     if uid != expected_uid:
         return None
 
     try:
-        _state, start_time = read_process_stat(pid, proc_root)
+        _state, start_time = read_process_stat(pid)
     except LocalhostError:
         return None
 
     argv = read_null_separated(directory / "cmdline")
     try:
         cwd = os.readlink(directory / "cwd")
-    except (FileNotFoundError, PermissionError, ProcessLookupError, OSError):
+    except OSError:
         cwd = ""
     try:
         executable = os.readlink(directory / "exe")
-    except (FileNotFoundError, PermissionError, ProcessLookupError, OSError):
+    except OSError:
         executable = ""
-
-    memory_bytes = read_process_memory(directory) if include_memory else -1
 
     restart_reason = ""
     try:
@@ -125,7 +132,6 @@ def inspect_process(
         "cwd": cwd,
         "executable": executable,
         "startTime": start_time,
-        "memoryBytes": memory_bytes,
         "restartAvailable": not restart_reason,
         "restartReason": restart_reason,
     }
@@ -136,7 +142,7 @@ def read_process_memory(directory: Path) -> int:
         for line in (directory / "status").read_text(errors="replace").splitlines():
             if line.startswith("VmRSS:"):
                 return int(line.split()[1]) * 1024
-    except (FileNotFoundError, PermissionError, ProcessLookupError, OSError, ValueError, IndexError):
+    except (OSError, ValueError, IndexError):
         pass
 
     return -1
@@ -220,14 +226,12 @@ def inspect_container_memory(container_ids: Sequence[str]) -> dict[str, int]:
 def inspect_processes(
     pids: Sequence[int],
     expected_uid: int,
-    proc_root: Path = Path("/proc"),
     inspector: ProjectInspector | None = None,
-    include_memory: bool = True,
 ) -> list[dict[str, Any]]:
     inspector = inspector or ProjectInspector()
     processes = []
     for pid in dict.fromkeys(pids):
-        process = inspect_process(pid, expected_uid, proc_root, include_memory=include_memory)
+        process = inspect_process(pid, expected_uid)
         if process and process["cwd"] and process["command"]:
             process["project"] = inspector.inspect(process["cwd"])
             processes.append(process)
@@ -237,22 +241,21 @@ def inspect_processes(
 def verified_process_directory(
     pid: int,
     expected_start_time: int,
-    proc_root: Path = Path("/proc"),
 ) -> Path:
     if pid <= 1 or pid in {os.getpid(), os.getppid()}:
         raise LocalhostError("Refusing to signal this process")
     if expected_start_time <= 0:
         raise LocalhostError("The process identity is incomplete; refresh and try again")
 
-    directory = proc_directory(pid, proc_root)
+    directory = proc_directory(pid)
     try:
         owner_uid = directory.stat().st_uid
-    except (FileNotFoundError, PermissionError, ProcessLookupError, OSError) as error:
+    except OSError as error:
         raise LocalhostError(f"PID {pid} is no longer running") from error
     if owner_uid != os.geteuid():
         raise LocalhostError("Localhost only controls processes owned by your user")
 
-    _state, current_start_time = read_process_stat(pid, proc_root)
+    _state, current_start_time = read_process_stat(pid)
     if current_start_time != expected_start_time:
         raise LocalhostError("The process changed since it was discovered; refresh and try again")
     return directory
@@ -291,11 +294,15 @@ def wait_for_handle_exit(handle: int, timeout: float = 1.5) -> bool:
     return bool(poller.poll(round(timeout * 1000)))
 
 
+def stop_process_handle(handle: int, pid: int, force: bool = False) -> None:
+    send_process_signal(handle, pid, signal.SIGKILL if force else signal.SIGTERM)
+    if not force and not wait_for_handle_exit(handle):
+        raise LocalhostError("The server did not stop cleanly; use Force stop if needed", force_stop_available=True)
+
+
 def signal_process(pid: int, expected_start_time: int, force: bool = False) -> None:
     with verified_process_handle(pid, expected_start_time) as (handle, _directory):
-        send_process_signal(handle, pid, signal.SIGKILL if force else signal.SIGTERM)
-        if not force and not wait_for_handle_exit(handle):
-            raise LocalhostError("The server did not stop cleanly; use Force stop if needed")
+        stop_process_handle(handle, pid, force)
 
 
 def read_restart_context(directory: Path) -> tuple[list[str], dict[str, str], str, str]:
@@ -314,7 +321,7 @@ def read_restart_context(directory: Path) -> tuple[list[str], dict[str, str], st
 
     try:
         cwd = os.readlink(directory / "cwd")
-    except (FileNotFoundError, PermissionError, ProcessLookupError, OSError) as error:
+    except OSError as error:
         raise LocalhostError("Could not recover the server directory") from error
     try:
         executable = os.readlink(directory / "exe")
@@ -336,7 +343,6 @@ def validate_restart_command(
     if "/" in command:
         resolved = command if os.path.isabs(command) else os.path.join(cwd, command)
     else:
-        # Resolve relative PATH entries against the server's working directory.
         search_path = os.pathsep.join(
             entry if os.path.isabs(entry) else os.path.join(cwd, entry)
             for entry in environment.get("PATH", os.defpath).split(os.pathsep)
@@ -403,10 +409,6 @@ def listening_endpoints(directory: Path) -> set[tuple[str, int]]:
     return endpoints
 
 
-def listening_ports(directory: Path) -> set[int]:
-    return {port for _host, port in listening_endpoints(directory)}
-
-
 def owned_probe_host(directory: Path, endpoint: tuple[str, str, int]) -> str | None:
     _scheme, host, port = endpoint
     addresses = sorted(address for address, bound_port in listening_endpoints(directory) if bound_port == port)
@@ -442,21 +444,21 @@ def restart_endpoint(url: str) -> tuple[str, str, int]:
 
 
 def wait_for_restart_ready(
-    restarted: subprocess.Popen[bytes], endpoint: tuple[str, str, int], log_path: Path,
+    server: RestartedServer, endpoint: tuple[str, str, int],
     timeout: float = RESTART_READY_TIMEOUT,
 ) -> None:
+    restarted = server.process
     scheme, host, port = endpoint
     deadline = time.monotonic() + timeout
     ready_since = None
     while time.monotonic() < deadline:
         if restarted.poll() is not None:
-            collector = getattr(restarted, "_localhost_log_collector", None)
-            if collector is not None:
+            if server.collector is not None:
                 try:
-                    collector.wait(timeout=2)
+                    server.collector.wait(timeout=2)
                 except subprocess.TimeoutExpired:
                     pass
-            raise LocalhostError(f"The replacement exited with status {restarted.returncode}; see {log_path}")
+            raise LocalhostError(f"The replacement exited with status {restarted.returncode}; see {server.log_path}")
         ready = False
         if owned_probe_host(proc_directory(restarted.pid), endpoint):
             connection = (
@@ -478,17 +480,15 @@ def wait_for_restart_ready(
         else:
             ready_since = None
         time.sleep(0.05)
-    raise LocalhostError(f"The replacement did not become HTTP-ready within {timeout:g}s; see {log_path}")
+    raise LocalhostError(f"The replacement did not become HTTP-ready within {timeout:g}s; see {server.log_path}")
 
 
-def prune_restart_logs(state_root: Path, keep: int = MAX_RESTART_LOGS) -> None:
-    """Keep only the newest restart logs so repeated restarts cannot fill the disk."""
-
+def prune_restart_logs(state_root: Path) -> None:
     try:
         logs = sorted(state_root.glob("restart-*.log"))
     except OSError:
         return
-    for stale in logs[:-keep]:
+    for stale in logs[:-MAX_RESTART_LOGS]:
         try:
             stale.unlink()
         except OSError:
@@ -496,7 +496,6 @@ def prune_restart_logs(state_root: Path, keep: int = MAX_RESTART_LOGS) -> None:
 
 
 def write_bounded_log(log_fd: int, data: bytes, limit: int = MAX_RESTART_LOG_BYTES) -> None:
-    """Keep recent output in one file without ever extending it beyond the cap."""
     if limit <= 0:
         raise ValueError("The log limit must be positive")
     if os.fstat(log_fd).st_nlink == 0:
@@ -507,7 +506,6 @@ def write_bounded_log(log_fd: int, data: bytes, limit: int = MAX_RESTART_LOG_BYT
         data = data[-limit:]
         os.lseek(log_fd, 0, os.SEEK_SET)
     elif size + len(data) > limit:
-        # Drop the oldest half when full, amortizing compaction for chatty servers.
         keep = min(limit // 2, limit - len(data))
         os.lseek(log_fd, size - keep, os.SEEK_SET)
         tail = os.read(log_fd, keep)
@@ -579,7 +577,7 @@ def start_log_relay(log_fd: int) -> tuple[subprocess.Popen[bytes], int]:
 
 def restart_process(
     pid: int, expected_start_time: int, url: str
-) -> tuple[subprocess.Popen[bytes], Path]:
+) -> RestartedServer:
     endpoint = restart_endpoint(url)
     with verified_process_handle(pid, expected_start_time) as (handle, directory):
         context = read_restart_context(directory)
@@ -608,9 +606,7 @@ def restart_process(
                     raise LocalhostError("The original process no longer owns the server's listening port")
                 if relay.poll() is not None:
                     raise LocalhostError("The restart log collector exited before launch")
-                send_process_signal(handle, pid, signal.SIGTERM)
-                if not wait_for_handle_exit(handle):
-                    raise LocalhostError("The server did not stop cleanly; use Force stop if needed")
+                stop_process_handle(handle, pid)
                 restarted = subprocess.Popen(
                     argv,
                     cwd=cwd,
@@ -621,12 +617,10 @@ def restart_process(
                     start_new_session=True,
                     close_fds=True,
                 )
-                restarted._localhost_log_collector = relay
             except (OSError, ValueError) as error:
                 raise LocalhostError(f"Could not restart the server: {error}; see {log_path}") from error
             finally:
                 os.close(output_fd)
-                # Closing the pipe also ends the collector when preflight/launch fails.
                 if restarted is None:
                     try:
                         relay.wait(timeout=3)
@@ -634,8 +628,9 @@ def restart_process(
                         relay.kill()
                         relay.wait(timeout=3)
     prune_restart_logs(state_root)
-    wait_for_restart_ready(restarted, endpoint, log_path)
-    return restarted, log_path
+    server = RestartedServer(restarted, log_path, relay)
+    wait_for_restart_ready(server, endpoint)
+    return server
 
 
 def run_command(
@@ -691,8 +686,6 @@ def build_parser() -> argparse.ArgumentParser:
     inspect_parser.add_argument("--pids", required=True)
     inspect_parser.add_argument("--uid", required=True, type=int)
     inspect_parser.add_argument("--paths", default="[]", help="JSON array of Compose working directories")
-    inspect_parser.add_argument("--containers", default="", help="Comma-separated container IDs to sample")
-    inspect_parser.add_argument("--no-resources", action="store_true", help="Discover metadata without sampling RAM or Docker stats")
 
     resource_parser = subparsers.add_parser("resources", help="Sample RAM independently of discovery")
     resource_parser.add_argument("--pids", required=True)
@@ -730,12 +723,9 @@ def main(argv: Sequence[str] | None = None) -> int:
                 raise LocalhostError("Invalid project paths")
             processes = inspect_processes(
                 comma_separated_pids(arguments.pids), arguments.uid, inspector=inspector,
-                include_memory=not arguments.no_resources,
             )
             json_print({"ok": True, "processes": processes,
-                        "projects": {path: inspector.inspect(path) for path in dict.fromkeys(paths)},
-                        "containers": {} if arguments.no_resources else inspect_container_memory(arguments.containers.split(",")),
-                        "systemMemory": {} if arguments.no_resources else read_system_memory()})
+                        "projects": {path: inspector.inspect(path) for path in dict.fromkeys(paths)}})
         elif arguments.command == "resources":
             json_print({"ok": True,
                         "processes": sample_process_resources(comma_separated_pids(arguments.pids), arguments.uid),
@@ -743,12 +733,12 @@ def main(argv: Sequence[str] | None = None) -> int:
                         "systemMemory": {} if arguments.no_system else read_system_memory()})
         elif arguments.command == "process-action":
             if arguments.action == "restart":
-                restarted, log_path = restart_process(arguments.pid, arguments.start_time, arguments.url)
+                server = restart_process(arguments.pid, arguments.start_time, arguments.url)
                 json_print({
                     "ok": True,
                     "message": "Server restarted",
-                    "pid": restarted.pid,
-                    "log": str(log_path),
+                    "pid": server.process.pid,
+                    "log": str(server.log_path),
                 })
             else:
                 signal_process(
@@ -772,7 +762,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             relay_restart_log(arguments.input_fd, arguments.log_fd, arguments.ready_fd)
         return 0
     except LocalhostError as error:
-        json_print({"ok": False, "error": str(error)})
+        json_print({"ok": False, "error": str(error), "forceStopAvailable": error.force_stop_available})
         return 1
 
 

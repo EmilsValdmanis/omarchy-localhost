@@ -5,7 +5,7 @@ import qs.Commons
 import qs.Commons as Theme
 import qs.Ui
 import "Plugin/qml" as PluginUi
-import "Plugin/qml/RadarModel.js" as RadarModel
+import "Plugin/qml/Servers.js" as Servers
 
 ShellRoot {
   FloatingWindow {
@@ -60,7 +60,6 @@ ShellRoot {
         Copy {
           id: title
           x: 108
-          // Align the visible lettering, not the font's ascent box, with the panel.
           y: card.y - baselineOffset - titleMetrics.tightBoundingRect(text).y
           text: "Localhost"
           font.pixelSize: 84
@@ -69,7 +68,6 @@ ShellRoot {
         }
         Item {
           x: 112
-          // Keep the visible subtitle 20px below the title's lettering.
           y: title.y + title.baselineOffset + titleMetrics.tightBoundingRect(title.text).y + titleMetrics.tightBoundingRect(title.text).height
             + 20 - attribution.baselineOffset - attributionMetrics.tightBoundingRect(attribution.text).y
           width: attribution.width + 12 + omarchyLogo.width
@@ -182,7 +180,6 @@ ShellRoot {
       }
 
       function initTestCase() {
-        // Load the preview theme only in this isolated Quickshell instance.
         Theme.Color.loadColors(Quickshell.env("LOCALHOST_PREVIEW_COLORS"))
         Theme.Color.shellValues = Theme.Color.parseShell(Quickshell.env("LOCALHOST_PREVIEW_SHELL"))
         Style.applyShellValues(Theme.Color.shellValues)
@@ -211,7 +208,7 @@ ShellRoot {
         var processIds = [4124, 4203, 4268, 4102, 4249, 4289]
         for (var i = 0; i < demo.length; i++) {
           var row = demo[i]
-          servers.append(RadarModel.normalizeServer({
+          servers.append(Servers.normalizeServer({
             serverId: "demo-" + i, name: row[0], framework: row[1], frameworkId: row[2],
             pid: processIds[i], startTime: 100,
             port: row[3], projectRoot: "/work/" + row[4], projectPath: row[5],

@@ -32,15 +32,18 @@ class ProcessInspectionTests(unittest.TestCase):
                     self.assertTrue(Path(recovered[0]).is_symlink())
                     self.assertEqual(recovered[1:], ["-c", "pass"])
 
-    def test_discovery_can_skip_all_resource_sampling(self):
+    def test_discovery_never_samples_resources(self):
         with mock.patch.object(helper, "read_process_memory") as memory, \
                 mock.patch.object(helper, "read_system_memory") as system, \
                 mock.patch.object(helper, "inspect_container_memory") as containers, redirect_stdout(io.StringIO()) as output:
-            self.assertEqual(helper.main(["inspect", "--pids", str(os.getpid()), "--uid", str(os.geteuid()), "--no-resources"]), 0)
+            self.assertEqual(helper.main(["inspect", "--pids", str(os.getpid()), "--uid", str(os.geteuid())]), 0)
         memory.assert_not_called()
         system.assert_not_called()
         containers.assert_not_called()
-        self.assertEqual(json.loads(output.getvalue())["processes"][0]["memoryBytes"], -1)
+        payload = json.loads(output.getvalue())
+        self.assertNotIn("memoryBytes", payload["processes"][0])
+        self.assertNotIn("systemMemory", payload)
+        self.assertNotIn("containers", payload)
 
     def test_resource_samples_do_not_recover_commands_or_projects(self):
         with mock.patch.object(helper, "read_restart_context", side_effect=AssertionError("expensive discovery")):
@@ -61,7 +64,6 @@ class ProcessInspectionTests(unittest.TestCase):
         self.assertEqual(process["pid"], os.getpid())
         self.assertEqual(process["uid"], os.geteuid())
         self.assertGreater(process["startTime"], 0)
-        self.assertGreater(process["memoryBytes"], 0)
         self.assertTrue(process["command"])
         self.assertTrue(process["cwd"])
 
@@ -143,6 +145,7 @@ class ProcessActionTests(unittest.TestCase):
             time.sleep(0.01)
         self.start_time = helper.read_process_stat(self.child.pid)[1]
         self.restarted = None
+        self.collector = None
         self.state_directory = tempfile.TemporaryDirectory()
 
     def start_http_server(self, *, interpreter=sys.executable, prelude=""):
@@ -179,9 +182,8 @@ class ProcessActionTests(unittest.TestCase):
             self.restarted.kill()
         if self.restarted:
             self.restarted.wait(timeout=2)
-            collector = getattr(self.restarted, "_localhost_log_collector", None)
-            if collector:
-                collector.wait(timeout=2)
+        if self.collector:
+            self.collector.wait(timeout=2)
         self.state_directory.cleanup()
 
     def test_rejects_stale_process_identity(self):
@@ -202,9 +204,10 @@ class ProcessActionTests(unittest.TestCase):
             (state_root / f"restart-{stamp:019d}.log").write_text("old log")
 
         with mock.patch.dict(os.environ, {"XDG_STATE_HOME": self.state_directory.name}):
-            self.restarted, log_path = helper.restart_process(
+            server = helper.restart_process(
                 self.child.pid, self.start_time, self.url
             )
+        self.restarted, self.collector, log_path = server.process, server.collector, server.log_path
         self.child.wait(timeout=2)
 
         self.assertGreater(self.restarted.pid, 1)
@@ -213,7 +216,7 @@ class ProcessActionTests(unittest.TestCase):
         self.assertEqual(len(list(state_root.glob("restart-*.log"))), helper.MAX_RESTART_LOGS)
         self.assertFalse((state_root / f"restart-{0:019d}.log").exists())
         self.assertEqual(log_path.stat().st_mode & 0o777, 0o600)
-        self.assertIn(self.port, helper.listening_ports(Path(f"/proc/{self.restarted.pid}")))
+        self.assertIn(("127.0.0.1", self.port), helper.listening_endpoints(Path(f"/proc/{self.restarted.pid}")))
 
     def test_restart_preserves_virtualenv_dependencies(self):
         environment = Path(self.state_directory.name) / "venv"
@@ -227,12 +230,13 @@ class ProcessActionTests(unittest.TestCase):
         self.assertTrue(helper.inspect_process(self.child.pid, os.geteuid())["restartAvailable"])
 
         with mock.patch.dict(os.environ, {"XDG_STATE_HOME": self.state_directory.name}):
-            self.restarted, _log = helper.restart_process(self.child.pid, self.start_time, self.url)
+            server = helper.restart_process(self.child.pid, self.start_time, self.url)
+        self.restarted, self.collector = server.process, server.collector
 
         self.child.wait(timeout=2)
         self.assertIsNone(self.restarted.poll())
         self.assertEqual(helper.read_null_separated(Path(f"/proc/{self.restarted.pid}/cmdline"))[0], str(interpreter))
-        self.assertIn(self.port, helper.listening_ports(Path(f"/proc/{self.restarted.pid}")))
+        self.assertIn(("127.0.0.1", self.port), helper.listening_endpoints(Path(f"/proc/{self.restarted.pid}")))
 
     def test_log_directory_failure_preserves_original_server(self):
         self.start_http_server()
@@ -242,7 +246,7 @@ class ProcessActionTests(unittest.TestCase):
             with self.assertRaisesRegex(helper.LocalhostError, "prepare the restart log"):
                 helper.restart_process(self.child.pid, self.start_time, self.url)
         self.assertIsNone(self.child.poll())
-        self.assertIn(self.port, helper.listening_ports(Path(f"/proc/{self.child.pid}")))
+        self.assertIn(("127.0.0.1", self.port), helper.listening_endpoints(Path(f"/proc/{self.child.pid}")))
 
     def test_log_open_failure_preserves_original_server(self):
         self.start_http_server()
@@ -365,8 +369,9 @@ class ProcessActionTests(unittest.TestCase):
         self.start_http_server()
         self.script.write_text("import time\ntime.sleep(0.3)\n" + self.script.read_text())
         with mock.patch.dict(os.environ, {"XDG_STATE_HOME": self.state_directory.name}):
-            self.restarted, _log = helper.restart_process(self.child.pid, self.start_time, self.url)
-        self.assertIn(self.port, helper.listening_ports(Path(f"/proc/{self.restarted.pid}")))
+            server = helper.restart_process(self.child.pid, self.start_time, self.url)
+        self.restarted, self.collector = server.process, server.collector
+        self.assertIn(("127.0.0.1", self.port), helper.listening_endpoints(Path(f"/proc/{self.restarted.pid}")))
         connection = http.client.HTTPConnection("127.0.0.1", self.port, timeout=2)
         try:
             connection.request("HEAD", "/")
@@ -378,7 +383,8 @@ class ProcessActionTests(unittest.TestCase):
         self.start_http_server()
         self.restarted = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(60)"])
         with self.assertRaisesRegex(helper.LocalhostError, "did not become HTTP-ready"):
-            helper.wait_for_restart_ready(self.restarted, helper.restart_endpoint(self.url), Path("fixture.log"), timeout=0.2)
+            server = helper.RestartedServer(self.restarted, Path("fixture.log"), None)
+            helper.wait_for_restart_ready(server, helper.restart_endpoint(self.url), timeout=0.2)
 
     def test_handle_is_acquired_before_verification_and_used_for_signal(self):
         events = []
@@ -427,8 +433,14 @@ class ProcessActionTests(unittest.TestCase):
         self.assertEqual(self.child.stdout.readline().strip(), "ready")
         self.start_time = helper.read_process_stat(self.child.pid)[1]
 
-        with self.assertRaisesRegex(helper.LocalhostError, "did not stop cleanly"):
-            helper.signal_process(self.child.pid, self.start_time)
+        with redirect_stdout(io.StringIO()) as output:
+            status = helper.main(["process-action", "--action", "stop", "--pid", str(self.child.pid),
+                                  "--start-time", str(self.start_time)])
+        self.assertEqual(status, 1)
+        payload = json.loads(output.getvalue())
+        self.assertFalse(payload["ok"])
+        self.assertTrue(payload["forceStopAvailable"])
+        self.assertIn("did not stop cleanly", payload["error"])
         self.assertIsNone(self.child.poll())
 
         helper.signal_process(self.child.pid, self.start_time, force=True)

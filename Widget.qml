@@ -6,7 +6,11 @@ import Quickshell.Io
 import qs.Commons
 import qs.Ui
 import "qml" as Internal
-import "qml/RadarModel.js" as RadarModel
+import "qml/Actions.js" as Actions
+import "qml/Diagnostics.js" as Diagnostics
+import "qml/Paths.js" as Paths
+import "qml/Ports.js" as Ports
+import "qml/Sources.js" as Sources
 
 BarWidget {
   id: root
@@ -14,13 +18,6 @@ BarWidget {
 
   property string notice: ""
   property bool noticeUrgent: false
-  property var pendingQrServer: null
-  property var pendingFirewallRule: null
-  property var managedFirewallRules: []
-  property bool firewallRulesUnreadable: false
-  property string firewallCheckOutput: ""
-  property string firewallRulesOutput: ""
-  property string firewallError: ""
 
   readonly property int serverCount: radar.serverCount
   // Keep the existing setting key so saved preferences survive the badge removal.
@@ -29,14 +26,10 @@ BarWidget {
   readonly property string glyph: "\uf0ac"
   readonly property bool showWhenEmpty: setting("showWhenEmpty", false)
   readonly property bool hasManagedSkippedPorts: {
-    var included = RadarModel.parsePortSet(setting("alwaysIncludePorts", ""))
-    return radar.diagnostics.some(function(entry) { return entry.reason === "ignored by settings" || included[entry.port] === true })
+    var included = Ports.parsePortSet(setting("alwaysIncludePorts", ""))
+    return radar.diagnostics.some(function(entry) { return entry.reason === Diagnostics.REASONS.ignored || included[entry.port] === true })
   }
   readonly property bool opened: card.open
-  readonly property var firewallStatusCommand: [
-    "bash", "-c",
-    "if ! command -v ufw >/dev/null || ! systemctl is-active --quiet ufw; then echo inactive; exit 0; fi; echo active; cat /etc/ufw/user.rules 2>/dev/null || echo unreadable"
-  ]
 
   visible: serverCount > 0 || showWhenEmpty || hasManagedSkippedPorts
   implicitWidth: button.implicitWidth
@@ -55,7 +48,7 @@ BarWidget {
 
   function setPortIncluded(port, include) {
     var settingsApi = portSettingsApi(bar)
-    var next = RadarModel.portPreferenceSettings(root.settings, port, include)
+    var next = Ports.portPreferenceSettings(root.settings, port, include)
     if (!next) return
     var changed = next.ignoredPorts !== String(setting("ignoredPorts", ""))
       || next.alwaysIncludePorts !== String(setting("alwaysIncludePorts", ""))
@@ -70,12 +63,12 @@ BarWidget {
   }
 
   function openServer(server) {
-    var url = RadarModel.actionUrl(server, false)
+    var url = Actions.actionUrl(server, false)
     if (url) Quickshell.execDetached(["omarchy-launch-browser", url])
   }
 
   function copyServer(server, shareOverLan) {
-    var url = RadarModel.actionUrl(server, shareOverLan === true)
+    var url = Actions.actionUrl(server, shareOverLan === true)
     if (!url) return
     Quickshell.execDetached(["wl-copy", url])
     showNotice("Copied " + url, false)
@@ -100,71 +93,13 @@ BarWidget {
       showNotice("Bind the server to 0.0.0.0 to share it over the LAN", true)
       return
     }
-    if (firewallCheckProcess.running || firewallAllowProcess.running || firewallRemoveProcess.running) {
-      showNotice("LAN access setup is already running", false)
-      return
-    }
-
-    pendingQrServer = server
-    if (!setting("authorizeFirewallForQr", true)
-        || server.lanInterface === "" || server.lanSubnet === "") {
-      let directServer = pendingQrServer
-      pendingQrServer = null
-      showQr(directServer)
-      return
-    }
-
-    firewallCheckOutput = ""
-    firewallError = ""
-    showNotice("Checking LAN access…", false)
-    firewallCheckProcess.awaitingExit = true
-    firewallCheckProcess.running = true
-  }
-
-  function authorizeQrPort() {
-    var server = pendingQrServer
-    if (!server) return
-    firewallError = ""
-    showNotice("Authorizing LAN access for :" + server.port + "…", false)
-    firewallAllowProcess.command = [
-      "pkexec", "/usr/bin/ufw", "allow", "in", "on", server.lanInterface,
-      "from", server.lanSubnet, "to", "any", "port", String(server.port),
-      "proto", "tcp", "comment", "omarchy-localhost"
-    ]
-    firewallAllowProcess.awaitingExit = true
-    firewallAllowProcess.running = true
-  }
-
-  function cancelFirewallAuthorization() {
-    pendingQrServer = null
-    showNotice("LAN access was not changed", false)
-  }
-
-  function refreshFirewallRules() {
-    if (firewallRulesProcess.running) return
-    firewallRulesOutput = ""
-    firewallRulesProcess.awaitingExit = true
-    firewallRulesProcess.running = true
-  }
-
-  function removeFirewallRule(rule) {
-    if (!rule || firewallRemoveProcess.running || firewallAllowProcess.running) return
-    pendingFirewallRule = rule
-    firewallError = ""
-    firewallRemoveProcess.command = [
-      "pkexec", "/usr/bin/ufw", "--force", "delete", "allow", "in", "on",
-      String(rule.interfaceName), "from", String(rule.subnet), "to", "any",
-      "port", String(rule.port), "proto", "tcp", "comment", "omarchy-localhost"
-    ]
-    firewallRemoveProcess.awaitingExit = true
-    showNotice("Removing LAN access for :" + rule.port + "…", false)
-    firewallRemoveProcess.running = true
+    firewall.requestQr(server, setting("authorizeFirewallForQr", true))
   }
 
   function openPanel() {
     card.open = true
     radar.scan()
-    refreshFirewallRules()
+    firewall.refresh()
   }
 
   function closePanel() { card.open = false }
@@ -202,14 +137,12 @@ BarWidget {
     }
   }
 
-  Component.onCompleted: refreshFirewallRules()
-
   IpcHandler {
     target: root.moduleName
     function open(): string { root.openPanel(); return "ok" }
     function close(): string { root.closePanel(); return "ok" }
     function toggle(): string { root.togglePanel(); return "ok" }
-    function refresh(): string { radar.refresh(); root.refreshFirewallRules(); return "ok" }
+    function refresh(): string { radar.refresh(); firewall.refresh(); return "ok" }
     function status(): string {
       var detectedServers = []
       for (let index = 0; index < radar.servers.count; index++) {
@@ -239,118 +172,17 @@ BarWidget {
         lanIp: radar.lanIp,
         lanInterface: radar.lanInterface,
         lanSubnet: radar.lanSubnet,
-        managedFirewallRules: root.managedFirewallRules,
-        firewallRulesUnreadable: root.firewallRulesUnreadable
+        managedFirewallRules: firewall.managedRules,
+        firewallRulesUnreadable: firewall.rulesUnreadable
       })
     }
   }
 
-  Process {
-    id: firewallCheckProcess
-    property bool awaitingExit: false
-    command: root.firewallStatusCommand
-    stdout: StdioCollector {
-      waitForEnd: true
-      onStreamFinished: root.firewallCheckOutput = String(text || "")
-    }
-    stderr: StdioCollector {
-      waitForEnd: true
-      onStreamFinished: root.firewallError = String(text || "").trim()
-    }
-    function finish(exitCode) {
-      if (!awaitingExit) return
-      awaitingExit = false
-      var server = root.pendingQrServer
-      if (!server) return
-      if (exitCode !== 0) {
-        root.pendingQrServer = null
-        root.showNotice(root.firewallError || "Could not check LAN access", true)
-        return
-      }
-      var active = root.firewallCheckOutput.indexOf("active\n") === 0
-      var rules = active ? root.firewallCheckOutput.slice(7) : ""
-      var unreadable = rules.split(/\r?\n/).indexOf("unreadable") !== -1
-      if (!active || (!unreadable && exitCode === 0 && RadarModel.ufwAllowsPort(
-          rules, server.lanInterface, server.lanSubnet, server.port))) {
-        root.pendingQrServer = null
-        root.showQr(server)
-        return
-      }
-      if (unreadable)
-        root.showNotice("UFW rules could not be read; confirming LAN access for :" + server.port, false)
-      panel.requestFirewallAuthorization(server)
-    }
-    onExited: function(exitCode) { finish(exitCode) }
-    onRunningChanged: if (!running && awaitingExit) finish(1)
-  }
-
-  Process {
-    id: firewallRulesProcess
-    property bool awaitingExit: false
-    command: root.firewallStatusCommand
-    stdout: StdioCollector {
-      waitForEnd: true
-      onStreamFinished: root.firewallRulesOutput = String(text || "")
-    }
-    function finish(exitCode) {
-      if (!awaitingExit) return
-      awaitingExit = false
-      var active = exitCode === 0 && root.firewallRulesOutput.indexOf("active\n") === 0
-      var body = active ? root.firewallRulesOutput.slice(7) : ""
-      var unreadable = body.split(/\r?\n/).indexOf("unreadable") !== -1
-      root.firewallRulesUnreadable = exitCode !== 0 || (active && unreadable)
-      root.managedFirewallRules = active && !unreadable
-        ? RadarModel.parseManagedUfwRules(body, "omarchy-localhost")
-        : []
-    }
-    onExited: function(exitCode) { finish(exitCode) }
-    onRunningChanged: if (!running && awaitingExit) finish(1)
-  }
-
-  Process {
-    id: firewallAllowProcess
-    property bool awaitingExit: false
-    stderr: StdioCollector {
-      waitForEnd: true
-      onStreamFinished: root.firewallError = String(text || "").trim()
-    }
-    function finish(exitCode) {
-      if (!awaitingExit) return
-      awaitingExit = false
-      var server = root.pendingQrServer
-      root.pendingQrServer = null
-      root.refreshFirewallRules()
-      if (exitCode === 0 && server) {
-        root.showNotice("LAN access allowed for :" + server.port, false)
-        root.showQr(server)
-      } else {
-        root.showNotice(root.firewallError || "LAN access was not authorized", true)
-      }
-    }
-    onExited: function(exitCode) { finish(exitCode) }
-    onRunningChanged: if (!running && awaitingExit) finish(1)
-  }
-
-  Process {
-    id: firewallRemoveProcess
-    property bool awaitingExit: false
-    stderr: StdioCollector {
-      waitForEnd: true
-      onStreamFinished: root.firewallError = String(text || "").trim()
-    }
-    function finish(exitCode) {
-      if (!awaitingExit) return
-      awaitingExit = false
-      var rule = root.pendingFirewallRule
-      root.pendingFirewallRule = null
-      root.refreshFirewallRules()
-      if (exitCode === 0 && rule)
-        root.showNotice("Removed LAN access for :" + rule.port, false)
-      else
-        root.showNotice(root.firewallError || "Could not remove the LAN access rule", true)
-    }
-    onExited: function(exitCode) { finish(exitCode) }
-    onRunningChanged: if (!running && awaitingExit) finish(1)
+  Internal.FirewallService {
+    id: firewall
+    onNoticeRequested: function(message, urgent) { root.showNotice(message, urgent) }
+    onAuthorizationRequested: function(server) { panel.requestFirewallAuthorization(server) }
+    onQrReady: function(server) { root.showQr(server) }
   }
 
   WidgetButton {
@@ -369,7 +201,7 @@ BarWidget {
     onPressed: function(mouseButton) {
       if (mouseButton === Qt.RightButton) {
         radar.refresh()
-        root.refreshFirewallRules()
+        firewall.refresh()
       } else root.togglePanel()
     }
 
@@ -423,12 +255,12 @@ BarWidget {
       scanError: radar.scanError
       warnings: radar.warnings
       diagnostics: radar.diagnostics
-      includedPorts: RadarModel.parsePortSet(root.setting("alwaysIncludePorts", ""))
+      includedPorts: Ports.parsePortSet(root.setting("alwaysIncludePorts", ""))
       scanSummary: radar.scanSummary
       scanning: radar.scanning
-      firewallRules: root.managedFirewallRules
-      firewallBusy: firewallAllowProcess.running || firewallRemoveProcess.running
-      forceStopServerId: currentServer && radar.forceStopSourceKeys[RadarModel.memorySourceKey(currentServer)]
+      firewallRules: firewall.managedRules
+      firewallBusy: firewall.mutationBusy
+      forceStopServerId: currentServer && radar.forceStopSourceKeys[Sources.key(currentServer)]
         ? currentServer.serverId : ""
 
       onCloseRequested: root.closePanel()
@@ -436,7 +268,7 @@ BarWidget {
       onSkipPortRequested: function(port) { root.setPortIncluded(port, false) }
       onRefreshRequested: {
         radar.refresh()
-        root.refreshFirewallRules()
+        firewall.refresh()
       }
       onOpenRequested: function(server) { root.openServer(server) }
       onCopyRequested: function(server) { root.copyServer(server, false) }
@@ -454,15 +286,14 @@ BarWidget {
       stoppingProjectRoot: radar.stoppingProjectRoot
       onProjectStopRequested: function(projectRoot) {
         if (radar.stopProject(projectRoot))
-          root.showNotice("Stopping all servers in " + RadarModel.basename(projectRoot) + "…", false)
+          root.showNotice("Stopping all servers in " + Paths.basename(projectRoot) + "…", false)
       }
       onForceStopRequested: function(server) { radar.forceStop(server) }
       onFirewallAuthorizationConfirmed: function(server) {
-        root.pendingQrServer = server
-        root.authorizeQrPort()
+        firewall.authorize(server)
       }
-      onFirewallAuthorizationCanceled: root.cancelFirewallAuthorization()
-      onFirewallRemovalConfirmed: function(rule) { root.removeFirewallRule(rule) }
+      onFirewallAuthorizationCanceled: firewall.cancelAuthorization()
+      onFirewallRemovalConfirmed: function(rule) { firewall.remove(rule) }
     }
   }
 }
