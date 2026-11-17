@@ -10,10 +10,11 @@ import "Compose.js" as Compose
 PanelToolTip {
   id: tooltip
   required property string details
+  property string serviceName: ""
   objectName: "composeDependencyTooltip"
   x: parent ? (parent.width - width) / 2 : 0
-  width: Style.space(232)
-  padding: Style.space(12)
+  width: Math.min(implicitWidth, Style.space(232))
+  padding: Style.space(8)
   text: "Docker Compose\n" + (details || "Service status unavailable")
 
   component Caption: Text {
@@ -26,29 +27,33 @@ PanelToolTip {
   contentItem: ColumnLayout {
     spacing: Style.space(5)
     Caption {
-      text: "Docker Compose"
-      font.pixelSize: Style.font.body
-      font.bold: true
-      Layout.bottomMargin: Style.space(2)
-    }
-    Caption {
       visible: tooltip.details === ""
       text: "Service status unavailable"
     }
     Repeater {
       objectName: "composeServiceRows"
-      model: tooltip.visible ? Compose.tooltipRows(tooltip.details) : []
+      model: tooltip.visible ? Compose.tooltipRows(tooltip.details, tooltip.serviceName) : []
       RowLayout {
         id: dependency
         required property var modelData
         Layout.fillWidth: true
-        spacing: Style.space(12)
+        spacing: Style.space(6)
+        InlineIcon {
+          label: nameLabel
+          text: dependency.modelData.isOwner ? "\uf1b2" : "\uf0c1"
+          color: dependency.modelData.isOwner ? Theme.Color.accent : tooltip.panelForeground
+          Accessible.ignored: true
+        }
         Caption {
+          id: nameLabel
           objectName: "dependencyName"
           Layout.fillWidth: true
+          Layout.rightMargin: Style.space(10)
           text: dependency.modelData.name
+          Accessible.name: (dependency.modelData.isOwner ? "Service " : "Dependency ") + text
           wrapMode: Text.WrapAnywhere
           font.pixelSize: Style.font.bodySmall
+          font.bold: dependency.modelData.isOwner
         }
         Rectangle {
           readonly property color tint: Compose.hasProblem(dependency.modelData.status)

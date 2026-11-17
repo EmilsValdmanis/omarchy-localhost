@@ -37,19 +37,20 @@ function serviceStates(inventory, container) {
 
 // Project summaries include the owning service for each hidden row.
 // Split at the last space to preserve replica labels such as "worker [2]".
-function tooltipRows(details) {
+function tooltipRows(details, serviceName) {
   var rows = []
   for (var line of details.split("\n")) {
     if (!line) continue
     var parts = line.split(" → ")
     var owner = parts.length > 1 ? parts[0] : ""
-    var service = owner.split(" / ").pop()
+    var service = owner ? owner.split(" / ").pop() : serviceName
     for (var item of parts[parts.length - 1].split(" · ")) {
       var split = item.lastIndexOf(" ")
       var name = item.slice(0, split)
+      var isOwner = name.split(" ")[0] === service
       if (owner)
-        name = name.split(" ")[0] === service ? owner + name.slice(service.length) : owner + " → " + name
-      rows.push({ name: name, status: item.slice(split + 1) })
+        name = isOwner ? owner + name.slice(service.length) : owner + " → " + name
+      rows.push({ name: name, status: item.slice(split + 1), isOwner: isOwner })
     }
   }
   return rows
