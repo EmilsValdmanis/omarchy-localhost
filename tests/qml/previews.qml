@@ -106,7 +106,7 @@ ShellRoot {
           Repeater {
             model: [
               "Automatic server & framework detection",
-              "Project groups & one-click stop all",
+              "Git branches for active worktrees",
               "Docker, Compose & custom port skips",
               "Live RAM usage & server trends",
               "Open locally, share over LAN",
@@ -191,9 +191,9 @@ ShellRoot {
           ["@atlas/web", "TanStack Start", "tanstack", 3000, "atlas", "apps/web", true],
           ["@atlas/docs", "Docusaurus", "docusaurus", 3001, "atlas", "apps/docs", true],
           ["@atlas/api", "FastAPI", "fastapi", 8000, "atlas", "services/api", true],
-          ["@storefront/admin", "React", "react", 5173, "storefront", "apps/admin", false],
-          ["@storefront/ui", "Storybook", "storybook", 6006, "storefront", "packages/ui", false],
-          ["@storefront/api", "Hono", "hono", 8787, "storefront", "apps/api", true]
+          ["@atlas/web", "TanStack Start", "tanstack", 3002, "worktrees/atlas", "apps/web", false],
+          ["@atlas/ui", "Storybook", "storybook", 6006, "worktrees/atlas", "packages/ui", false],
+          ["@atlas/api", "FastAPI", "fastapi", 8001, "worktrees/atlas", "services/api", true]
         ]
         var trends = [
           [0.80, 0.83, 0.81, 0.88, 0.91, 0.97, 0.95, 1],
@@ -212,6 +212,7 @@ ShellRoot {
             serverId: "demo-" + i, name: row[0], framework: row[1], frameworkId: row[2],
             pid: processIds[i], startTime: 100,
             port: row[3], projectRoot: "/work/" + row[4], projectPath: row[5],
+            gitCommonDir: "/work/atlas/.git", gitBranch: row[4] === "atlas" ? "main" : "checkout-redesign",
             memoryBytes: [445, 186, 92, 612, 205, 150][i] * 1048576,
             memoryHistory: trends[i].map(function(factor) {
               return Math.round([445, 186, 92, 612, 205, 150][i] * factor * 1048576)
@@ -232,6 +233,8 @@ ShellRoot {
         tryCompare(wallpaper, "status", Image.Ready)
         compare(panel.resultCount, 6)
         compare(panel.projectCount, 2)
+        compare(panel.groups["/work/atlas"].branch, "main")
+        compare(panel.groups["/work/worktrees/atlas"].branch, "checkout-redesign")
         var hues = []
         for (var index = 0; index < servers.count; index++) {
           var hue = panel.colorForServer(servers.get(index)).hslHue

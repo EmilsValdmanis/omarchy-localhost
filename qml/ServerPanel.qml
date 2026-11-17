@@ -168,14 +168,16 @@ Item {
     var previousHeader = selectedProjectRoot !== ""
     var needle = query.trim().toLowerCase()
     var filtered = []
+    var activeServers = []
     if (servers) {
       for (let index = 0; index < servers.count; index++) {
         let server = servers.get(index)
+        activeServers.push(server)
         if (Servers.matchesSearch(server, needle, portFilter)) filtered.push(server)
       }
     }
     filtered.sort(function(a, b) { return Servers.compareServers(a, b, root.groupByProject) })
-    groups = Servers.projectGroups(filtered)
+    groups = Servers.projectGroups(filtered, activeServers)
     if (Servers.syncServerModel(filteredModel, filtered)) filteredRevision++
     if (ListModelSync.sync(projectModel, ProjectList.entriesFor(filtered, groups, groupByProject, projectCollapseState()), "entryId", ProjectList.entriesEqual))
       entryRevision++
@@ -710,7 +712,7 @@ Item {
       TextField {
         id: searchField
         Layout.fillWidth: true
-        placeholderText: "Search projects or ports…"
+        placeholderText: "Search projects, branches or ports…"
         foreground: root.foreground
         text: root.query
         onTextChanged: {
@@ -1148,6 +1150,7 @@ Item {
             ProjectHeader {
               projectRoot: entryDelegate.model.projectRoot
               name: entryDelegate.model.name
+              branch: entryDelegate.model.branch
               count: entryDelegate.model.count
               collapsed: entryDelegate.model.collapsed
               selected: entryDelegate.selected

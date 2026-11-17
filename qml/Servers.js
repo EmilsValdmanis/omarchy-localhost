@@ -36,6 +36,8 @@ function normalizeServer(server) {
     hint: String(source.hint || ""),
     projectRoot: String(source.projectRoot || source.cwd || source.serverId || source.id || "Other servers"),
     projectPath: String(source.projectPath || ""),
+    gitBranch: String(source.gitBranch || ""),
+    gitCommonDir: String(source.gitCommonDir || ""),
     memoryBytes: Memory.validMemory(source.memoryBytes),
     memoryHistoryJson: JSON.stringify(Memory.parseMemoryHistory(source.memoryHistoryJson || source.memoryHistory))
   }
@@ -53,7 +55,7 @@ function matchesSearch(server, query, filterId) {
   if (!matchesServerFilter(server, filterId)) return false
   if (!query) return true
   return [server.name, server.framework, server.frameworkId, server.port,
-    server.cwd, server.projectRoot, server.projectPath, server.localUrl, server.lanUrl, server.source, server.containerId]
+    server.cwd, server.projectRoot, server.projectPath, server.gitBranch, server.localUrl, server.lanUrl, server.source, server.containerId]
     .join(" ").toLowerCase().indexOf(query) !== -1
 }
 
@@ -66,12 +68,20 @@ function compareServers(left, right, grouped) {
   return left.port - right.port || left.name.localeCompare(right.name) || left.serverId.localeCompare(right.serverId)
 }
 
-function projectGroups(servers) {
+function projectGroups(servers, activeServers) {
+  var roots = new Map()
+  for (var row of activeServers || servers) {
+    if (!row.gitCommonDir) continue
+    if (!roots.has(row.gitCommonDir)) roots.set(row.gitCommonDir, new Set())
+    roots.get(row.gitCommonDir).add(row.projectRoot)
+  }
   var groups = Object.create(null)
   for (var i = 0; i < servers.length; i++) {
     var server = servers[i]
     var key = server.projectRoot
-    if (!groups[key]) groups[key] = { name: Paths.basename(key).replace(/^compose:/, ""), count: 0 }
+    if (!groups[key]) groups[key] = { name: Paths.basename(key).replace(/^compose:/, ""), branch: "", count: 0 }
+    if (server.gitBranch && roots.has(server.gitCommonDir) && roots.get(server.gitCommonDir).size > 1)
+      groups[key].branch = server.gitBranch
     groups[key].count++
   }
   return groups

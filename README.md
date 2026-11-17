@@ -11,7 +11,7 @@ for version history and release notes.
 
 > `pnpm dev` → Localhost appears → click **QR** → scan with your phone
 
-![Localhost for Omarchy in Motion Blur: project groups, RAM trends, server actions, and QR sharing](preview.png)
+![Localhost showing Atlas servers on the main and checkout-redesign branches, RAM trends, and QR sharing](preview.png)
 
 Preview theme and wallpaper: [Motion Blur by Erik Johansson](https://github.com/erikrjohansson/omarchy-motion-blur-theme) · [MIT notices](THIRD_PARTY_NOTICES.md).
 
@@ -34,7 +34,9 @@ Preview theme and wallpaper: [Motion Blur by Erik Johansson](https://github.com/
 - Restart logs capped at 1 MiB each, keeping recent output
 
 Servers in the same repository or workspace appear together, with package paths
-under each name. Click a project header to collapse or expand its servers; its
+under each name. When servers are running in two or more worktrees of the same
+Git repository, each project header shows its checked-out branch. Search by
+branch in either list view, even with only one active worktree. Click a project header to collapse or expand its servers; its
 count stays visible when collapsed. Fold choices survive scans, closing the
 panel, and switching to the flat list for the current shell session. Search and
 port filters reveal matching servers, then restore your folds when cleared.
@@ -82,7 +84,7 @@ optional and only runs when Docker is available.
 
 | Key                                  | Action                                                 |
 | ------------------------------------ | ------------------------------------------------------ |
-| `/` or click search                  | Search by project, framework, port, path, or container |
+| `/` or click search                  | Search by project, branch, framework, port, path, or container |
 | `up/down`, `j/k`, `ctrl+p/ctrl+n`    | Select a visible server or project header              |
 | `left/right`, `h/l`                  | Select an action; on a header, reach **Stop all**      |
 | `enter`                              | Run the selected action, or toggle a project header   |
