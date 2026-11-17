@@ -53,6 +53,7 @@ CursorSurface {
       }
       ComposeDependencyTooltip {
         id: dependencies
+        serviceName: row.server.name.split(" / ").pop()
         visible: frameworkHover.hovered && frameworkItem.showDependencies
         details: row.server.dependencyStates
       }
