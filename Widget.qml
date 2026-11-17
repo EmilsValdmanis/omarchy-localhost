@@ -33,7 +33,7 @@ BarWidget {
   }
   readonly property bool opened: card.open
 
-  visible: serverCount > 0 || showWhenEmpty || hasManagedSkippedPorts
+  visible: serverCount > 0 || showWhenEmpty || hasManagedSkippedPorts || radar.actionName === "restart" || !!radar.failedRestart
   implicitWidth: button.implicitWidth
   implicitHeight: button.implicitHeight
 
@@ -137,7 +137,18 @@ BarWidget {
     selectedLanInterface: String(root.setting("lanInterface", "") || "")
     panelActive: card.open
     onActionFinished: function(action, successful, detail, serverId) {
+      if (action === "restart" && !successful && radar.failedRestart && radar.failedRestart.serverId === serverId) return
       if (radar.stoppingProjectRoot === "") root.showNotice(detail, !successful)
+    }
+  }
+
+  Internal.CommandProcess {
+    id: restartLogCheck
+    onCompleted: function(exitCode) {
+      if (exitCode === 0)
+        Quickshell.execDetached(["omarchy-launch-editor", command[2]])
+      else
+        root.showNotice("The restart log is no longer available.", true)
     }
   }
 
@@ -267,6 +278,9 @@ BarWidget {
       lanIp: radar.lanIp
       notice: root.notice
       noticeUrgent: root.noticeUrgent
+      failedRestart: radar.failedRestart
+      onOpenRestartLogRequested: function(path) { restartLogCheck.start(["test", "-r", path]) }
+      onDismissRestartFailureRequested: radar.failedRestart = null
       scanError: radar.scanError
       warnings: radar.warnings
       diagnostics: radar.diagnostics

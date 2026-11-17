@@ -24,6 +24,7 @@ Item {
   property string lanIp: ""
   property string notice: ""
   property bool noticeUrgent: false
+  property var failedRestart: null
   property string scanError: ""
   property var warnings: []
   property var diagnostics: []
@@ -87,6 +88,8 @@ Item {
   signal terminalRequested(var server)
   signal projectRequested(var server)
   signal restartRequested(var server)
+  signal openRestartLogRequested(string path)
+  signal dismissRestartFailureRequested()
   signal stopRequested(var server)
   signal projectStopRequested(string projectRoot)
   signal forceStopRequested(var server)
@@ -558,6 +561,9 @@ Item {
     var plainNavigation = !searchMode && event.modifiers === Qt.NoModifier
     if (event.key === Qt.Key_Escape) {
       navigateBack()
+      event.accepted = true
+    } else if (event.modifiers === Qt.ControlModifier && event.key === Qt.Key_L && failedRestart) {
+      openRestartLogRequested(failedRestart.logPath)
       event.accepted = true
     } else if (!searchMode && control && groupByProject
                && (event.key === Qt.Key_Left || event.key === Qt.Key_Right)) {
@@ -1250,6 +1256,67 @@ Item {
       foreground: root.foreground
       onActionHovered: function(actionIndex) { root.showActionHint = false; root.selectedActionIndex = actionIndex }
       onActionTriggered: function(actionIndex) { root.activateAction(actionIndex, root.currentServer) }
+    }
+
+    Rectangle {
+      id: restartFailure
+      objectName: "restartFailureNotice"
+      Layout.fillWidth: true
+      implicitHeight: failureRow.implicitHeight + Style.space(14)
+      visible: !!root.failedRestart
+      radius: Style.cornerRadius
+      color: Qt.alpha(Theme.Color.urgent, 0.07)
+      border.color: Qt.alpha(Theme.Color.urgent, 0.28)
+      RowLayout {
+        id: failureRow
+        anchors.fill: parent
+        anchors.margins: Style.space(7)
+        spacing: Style.space(7)
+        ColumnLayout {
+          Layout.fillWidth: true
+          spacing: Style.space(2)
+          Text {
+            Layout.fillWidth: true
+            text: root.failedRestart ? "Restart failed · " + root.failedRestart.label : ""
+            textFormat: Text.PlainText
+            font.family: Style.font.family
+            font.pixelSize: Style.font.caption
+            font.bold: true
+            color: Theme.Color.urgent
+            wrapMode: Text.Wrap
+          }
+          Text {
+            Layout.fillWidth: true
+            text: root.failedRestart ? root.failedRestart.message : ""
+            textFormat: Text.PlainText
+            font.family: Style.font.family
+            font.pixelSize: Style.font.caption
+            color: root.foreground
+            wrapMode: Text.Wrap
+          }
+        }
+        Button {
+          objectName: "openRestartLog"
+          text: "Open log"
+          iconText: "\uf121"
+          focusable: true
+          foreground: root.foreground
+          fontSize: Style.font.caption
+          horizontalPadding: Style.space(7)
+          verticalPadding: Style.space(5)
+          tooltipText: "Open restart log in editor (Ctrl+L)"
+          Accessible.name: tooltipText
+          onClicked: if (root.failedRestart) root.openRestartLogRequested(root.failedRestart.logPath)
+        }
+        PanelActionButton {
+          objectName: "dismissRestartFailure"
+          iconText: "\uf00d"
+          focusable: true
+          tooltipText: "Dismiss restart failure"
+          Accessible.name: tooltipText
+          onClicked: root.dismissRestartFailureRequested()
+        }
+      }
     }
 
     Text {
