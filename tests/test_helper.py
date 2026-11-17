@@ -333,6 +333,22 @@ class ProcessActionTests(unittest.TestCase):
         self.assertEqual(len(collectors), 1)
         self.assertIsNotNone(collectors[0].poll())
 
+    def test_launch_error_after_stop_is_saved_in_restart_log(self):
+        cwd = Path(self.state_directory.name) / "launch-dir"
+        cwd.mkdir()
+        self.start_http_server(prelude=f"import os\nos.chdir({str(cwd)!r})\n")
+        stop = helper.stop_process_handle
+
+        def stop_then_remove_directory(handle, pid):
+            stop(handle, pid)
+            cwd.rmdir()
+
+        with mock.patch.dict(os.environ, {"XDG_STATE_HOME": self.state_directory.name}), \
+                mock.patch.object(helper, "stop_process_handle", side_effect=stop_then_remove_directory):
+            with self.assertRaisesRegex(helper.LocalhostError, "Could not restart the server") as raised:
+                helper.restart_process(self.child.pid, self.start_time, self.url)
+        self.assertEqual(raised.exception.log_path.read_text().strip(), str(raised.exception))
+
     def test_missing_entry_point_disables_restart_and_preserves_original(self):
         self.start_http_server()
         self.script.unlink()

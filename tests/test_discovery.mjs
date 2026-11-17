@@ -31,20 +31,30 @@ test("Compose dependency health follows declared services and current replicas",
   const [context] = Discovery.classifyDockerPorts(rows.join("\n")).contexts
   assert.equal(Discovery.classifyDockerPorts(rows.join("\n")).contexts.length, 1)
   assert.equal(Discovery.serverFromContext(context, "http", {}).dependencyStates,
-    "cache running\nmigrate completed\npostgres unhealthy\nredis exited\nworker [1] healthy\nworker [2] paused")
+    "web running\ncache running\nmigrate completed\npostgres unhealthy\nredis exited\nworker [1] healthy\nworker [2] paused")
   const recovered = [web, container("postgres", "running", "Up 1 minute (healthy)"),
     container("redis", "running", "Up 10 seconds (health: starting)")]
   assert.equal(Discovery.classifyDockerPorts(recovered.join("\n")).contexts[0].dependencyStates,
-    "cache unknown\nmigrate unknown\npostgres healthy\nredis starting\nworker unknown")
+    "web running\ncache unknown\nmigrate unknown\npostgres healthy\nredis starting\nworker unknown")
   const failures = [web, container("migrate", "exited", "Exited (1) yesterday"),
     container("worker", "restarting", "Restarting (1)"), container("cache", "dead", "Dead")]
   assert.equal(Discovery.classifyDockerPorts(failures.join("\n")).contexts[0].dependencyStates,
-    "cache dead\nmigrate exited\npostgres unknown\nredis unknown\nworker restarting")
+    "web running\ncache dead\nmigrate exited\npostgres unknown\nredis unknown\nworker restarting")
 })
 
 function listener(port) {
   return { pid: 410, port, process: "node", addresses: ["127.0.0.1"] }
 }
+
+test("published Compose one-offs can be skipped independently of the service", () => {
+  const rows = ["False", "True"].map((oneOff, i) => JSON.stringify([
+    "id-" + i, "shop-web-" + i, "web", "127.0.0.1:" + (8080 + i) + "->80/tcp",
+    "/work/shop", "web", "shop", "running", "Up 1 minute", "", oneOff, "1",
+  ]))
+  const [service, oneOff] = Discovery.classifyDockerPorts(rows.join("\n")).contexts
+  assert.equal(service.serviceKey, 'compose:["/work/shop","shop","web"]')
+  assert.equal(oneOff.serviceKey, "")
+})
 
 test("skipped Docker ports remain available for inclusion without duplicate address rows", () => {
   const raw = JSON.stringify(["abcdef123456", "api", "image", "0.0.0.0:8000->8000/tcp, [::]:8000->8000/tcp, 0.0.0.0:15432->5432/tcp", "/work", "api", "demo"])
@@ -291,7 +301,7 @@ test("discovers published Docker Compose HTTP ports", () => {
     id: "docker:ed3fec6359f3:8000",
     source: "docker",
     containerId: "ed3fec6359f3",
-    dependencyStates: "",
+    dependencyStates: "app unknown",
     displayName: "api / app",
     projectRoot: "/work/betterat/apps/api",
     serviceKey: 'compose:["/work/betterat/apps/api","api","app"]',
@@ -321,7 +331,7 @@ test("does not HTTP-probe remapped database ports", () => {
     id: "docker:b49bb7bdabef:15672",
     source: "docker",
     containerId: "b49bb7bdabef",
-    dependencyStates: "",
+    dependencyStates: "queue unknown",
     displayName: "api / queue",
     projectRoot: "/work/api",
     serviceKey: 'compose:["/work/api","api","queue"]',

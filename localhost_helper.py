@@ -675,7 +675,12 @@ def restart_process(
                     close_fds=True,
                 )
             except (OSError, ValueError) as error:
-                raise LocalhostError(f"Could not restart the server: {error}; see {log_path}") from error
+                message = f"Could not restart the server: {error}"
+                try:
+                    write_bounded_log(log_file.fileno(), (message + "\n").encode(errors="replace"))
+                except OSError:
+                    pass
+                raise LocalhostError(message, log_path=log_path) from error
             finally:
                 os.close(output_fd)
                 if restarted is None:

@@ -212,7 +212,7 @@ ShellRoot {
             serverId: "demo-" + i, name: row[0], framework: row[1], frameworkId: row[2],
             pid: i === 2 ? 0 : processIds[i], startTime: i === 2 ? 0 : 100,
             source: i === 2 ? "docker" : "process", containerId: i === 2 ? "aebcde000033" : "",
-            dependencyStates: i === 2 ? "postgres healthy\nredis exited" : "",
+            dependencyStates: i === 2 ? "api running\npostgres healthy\nredis exited" : "",
             port: row[3], projectRoot: "/work/" + row[4], projectPath: row[5],
             gitCommonDir: "/work/atlas/.git", gitBranch: row[4] === "atlas" ? "main" : "checkout-redesign",
             memoryBytes: [445, 186, 92, 612, 205, 150][i] * 1048576,
@@ -236,7 +236,7 @@ ShellRoot {
         compare(panel.resultCount, 6)
         compare(panel.projectCount, 2)
         compare(panel.groups["/work/atlas"].branch, "main")
-        compare(panel.groups["/work/atlas"].dependencyStates, "atlas / api → postgres healthy · redis exited")
+        compare(panel.groups["/work/atlas"].dependencyStates, "atlas / api → api running · postgres healthy · redis exited")
         compare(panel.groups["/work/worktrees/atlas"].branch, "checkout-redesign")
         var hues = []
         for (var index = 0; index < servers.count; index++) {

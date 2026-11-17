@@ -40,7 +40,7 @@ CursorSurface {
   Accessible.role: Accessible.Button
   Accessible.name: name + (branch ? ", branch " + branch : "") + ", " + count + " " + countNoun + (count === 1 ? "" : "s")
   Accessible.description: (projectRoot ? projectRoot + " · " : "") + (collapsed ? "Collapsed" : "Expanded")
-    + (dependencyStates ? ". Compose dependencies: " + dependencyStates.split("\n").join(", ") : "")
+    + (dependencyStates ? ". Docker Compose: " + dependencyStates.split("\n").join(", ") : "")
   Accessible.checkable: true
   Accessible.checked: !collapsed
   Accessible.focusable: true
@@ -77,7 +77,9 @@ CursorSurface {
     PanelSectionHeader {
       id: projectName
       objectName: "projectName"
-      Layout.maximumWidth: header.branch ? header.width * 0.42 : header.width
+      Layout.fillWidth: true
+      Layout.minimumWidth: 0
+      Layout.maximumWidth: Math.ceil(implicitWidth)
       Layout.alignment: Qt.AlignVCenter
       // Section labels reserve extra top padding for clipped list headings.
       // This row already has vertical space; center the label and count together.
@@ -89,7 +91,9 @@ CursorSurface {
     Text {
       objectName: "projectBranch"
       visible: header.branch !== ""
-      Layout.maximumWidth: header.width * 0.40
+      Layout.fillWidth: true
+      Layout.minimumWidth: 0
+      Layout.maximumWidth: Math.ceil(implicitWidth)
       Layout.alignment: Qt.AlignVCenter
       textFormat: Text.PlainText
       text: "\uf126 " + header.branch
@@ -143,7 +147,7 @@ CursorSurface {
         delay: stopButton.hasCursor || stopButton.activeFocus ? 0 : 400
         text: header.stopHint
         width: Math.min(implicitWidth, Style.space(400))
-        x: stopButton.width - width
+        x: (stopButton.width - width) / 2
       }
       InlineIcon {
         objectName: "projectStopIcon"
