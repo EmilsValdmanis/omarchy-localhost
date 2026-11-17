@@ -92,6 +92,15 @@ def read_null_separated(path: Path, *, errors: str = "replace") -> list[str]:
     return [value.decode(errors=errors) for value in values]
 
 
+def read_process_cwd(directory: Path) -> tuple[str, bool]:
+    link = directory / "cwd"
+    target = os.readlink(link)
+    # Linux appends this suffix to unlinked paths. It is also a legal directory name.
+    if target.endswith(" (deleted)") and link.stat().st_nlink == 0:
+        return target.removesuffix(" (deleted)"), True
+    return target, False
+
+
 def inspect_process(
     pid: int,
     expected_uid: int,
@@ -111,9 +120,9 @@ def inspect_process(
 
     argv = read_null_separated(directory / "cmdline")
     try:
-        cwd = os.readlink(directory / "cwd")
+        cwd, cwd_deleted = read_process_cwd(directory)
     except OSError:
-        cwd = ""
+        cwd, cwd_deleted = "", False
     try:
         executable = os.readlink(directory / "exe")
     except OSError:
@@ -131,6 +140,7 @@ def inspect_process(
         "command": shlex.join(argv),
         "argv": argv,
         "cwd": cwd,
+        "cwdDeleted": cwd_deleted,
         "executable": executable,
         "startTime": start_time,
         "restartAvailable": not restart_reason,
@@ -234,7 +244,7 @@ def inspect_processes(
     for pid in dict.fromkeys(pids):
         process = inspect_process(pid, expected_uid)
         if process and process["cwd"] and process["command"]:
-            process["project"] = inspector.inspect(process["cwd"])
+            process["project"] = {} if process["cwdDeleted"] else inspector.inspect(process["cwd"])
             process["serviceKey"], process["serviceEntry"] = native_service(process)
             processes.append(process)
     return processes
@@ -364,9 +374,11 @@ def read_restart_context(directory: Path) -> tuple[list[str], dict[str, str], st
         raise LocalhostError("Could not recover the server environment")
 
     try:
-        cwd = os.readlink(directory / "cwd")
+        cwd, deleted = read_process_cwd(directory)
     except OSError as error:
         raise LocalhostError("Could not recover the server directory") from error
+    if deleted:
+        raise LocalhostError("The server's working directory was deleted")
     try:
         executable = os.readlink(directory / "exe")
     except OSError as error:

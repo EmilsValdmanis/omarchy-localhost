@@ -108,9 +108,10 @@ Item {
     if (!arraysEqual(warnings, nextWarnings)) warnings = nextWarnings
     var listeners = nativeDiscovery.listenerCount
     var candidates = nativeDiscovery.candidateCount + (includeDocker ? dockerDiscovery.candidateCount : 0)
+    var browserReady = nextServers.filter(function(server) { return !!server.localUrl }).length
     scanSummary = listeners + " owned listener" + (listeners === 1 ? "" : "s")
       + " · " + candidates + " candidate" + (candidates === 1 ? "" : "s")
-      + " · " + nextServers.length + " browser-ready"
+      + " · " + browserReady + " browser-ready"
     sampleResources(false)
   }
 

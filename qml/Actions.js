@@ -41,8 +41,9 @@ function projectStopTargets(servers, projectRoot) {
 function actionEnabled(index, server, busy) {
   return !!server && (!busy || (index !== ACTIONS.restart && index !== ACTIONS.stop))
     && ((index !== ACTIONS.copyLan && index !== ACTIONS.qr) || actionUrl(server, true) !== "")
-    && (index !== ACTIONS.restart || server.source === "docker" || server.restartAvailable === true)
-    && ((index !== ACTIONS.terminal && index !== ACTIONS.project) || server.cwd !== "")
+    && ((index !== ACTIONS.open && index !== ACTIONS.copyLocal) || !!server.localUrl)
+    && (index !== ACTIONS.restart || (!server.cwdDeleted && (server.source === "docker" || server.restartAvailable === true)))
+    && ((index !== ACTIONS.terminal && index !== ACTIONS.project) || (!!server.cwd && !server.cwdDeleted))
 }
 
 function lanUnavailableReason(server) {

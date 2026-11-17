@@ -95,7 +95,7 @@ Item {
         context.process.project = (parsed.projects || {})[context.process.cwd] || {}
       }
     } else {
-      let classified = Discovery.classifyListeners(pendingListeners, parsed.processes, ignored, alwaysInclude)
+      let classified = Discovery.classifyListeners(pendingListeners, parsed.processes, ignored, alwaysInclude, readyContexts)
       pendingContexts = classified.contexts
       pendingDiagnostics = classified.diagnostics
     }
@@ -160,10 +160,12 @@ Item {
   function applyCandidates() {
     var ready = []
     var details = pendingDiagnostics.slice()
+    var previousIds = new Set(readyContexts.map(function(entry) { return Discovery.contextId(entry.context) }))
     for (let i = 0; i < pendingContexts.length; i++) {
       let context = pendingContexts[i]
-      let scheme = pendingSchemes[Discovery.contextId(context)] || ""
-      if (scheme) ready.push({ context: context, scheme: scheme })
+      let id = Discovery.contextId(context)
+      let scheme = pendingSchemes[id] || ""
+      if (scheme || (context.process.cwdDeleted && previousIds.has(id))) ready.push({ context: context, scheme: scheme })
       else details.push({ port: context.listener.port,
         process: String(context.listener.process || context.displayName || "unknown"),
         reason: Diagnostics.REASONS.noResponse })

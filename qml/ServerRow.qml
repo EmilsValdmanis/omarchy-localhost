@@ -115,11 +115,11 @@ CursorSurface {
       }
       Text {
         objectName: "serverPath"
-        visible: row.detail !== ""
+        visible: row.server.cwdDeleted || row.detail !== ""
         Layout.fillWidth: true
         textFormat: Text.PlainText
-        text: row.detail
-        color: row.dim
+        text: row.server.cwdDeleted ? "Working directory deleted" : row.detail
+        color: row.server.cwdDeleted ? Theme.Color.urgent : row.dim
         font.family: Style.font.family
         font.pixelSize: Style.font.caption
         elide: Text.ElideMiddle
@@ -164,7 +164,8 @@ CursorSurface {
       horizontalPadding: Style.space(7)
       verticalPadding: Style.space(4)
       foreground: row.foreground
-      tooltipText: "Open " + row.server.localUrl
+      enabled: !!row.server.localUrl
+      tooltipText: enabled ? "Open " + row.server.localUrl : row.server.hint
       onClicked: row.openRequested()
     }
   }

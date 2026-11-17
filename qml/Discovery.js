@@ -108,6 +108,7 @@ function parseProcessPayload(raw, currentUid) {
         uid: uid,
         command: command,
         cwd: cwd,
+        cwdDeleted: row.cwdDeleted === true,
         executable: String(row.executable || ""),
         startTime: startTime,
         restartAvailable: row.restartAvailable === true,
@@ -216,17 +217,29 @@ function candidateRejectionReason(listener, process, framework, ignoredPorts, al
   if (inspectorPorts(process.command).indexOf(listener.port) !== -1) return Diagnostics.REASONS.debugger
   var helperReason = frameworkHelperReason(listener, process, framework, siblingPorts)
   if (helperReason) return helperReason
+  if (process.cwdDeleted) return ""
   if (framework.id !== "server") return ""
   if (DEV_COMMAND_PATTERN.test(process.command)) return ""
   if (Ports.COMMON_DEV_PORTS[listener.port] || declaredPorts(process.command).indexOf(listener.port) !== -1) return ""
   return Diagnostics.REASONS.unrecognized
 }
 
-function classifyListeners(listeners, processCache, ignoredPorts, alwaysIncludePorts) {
+function classifyListeners(listeners, processCache, ignoredPorts, alwaysIncludePorts, previousServers) {
   var contexts = []
   var diagnostics = []
   var frameworks = {}
   var portsByPid = listenerPortsByPid(listeners)
+  // A deleted directory can no longer supply package metadata or service identity.
+  // Keep the last observation only while the same process owns the same cwd.
+  for (var entry of previousServers || []) {
+    var previous = entry.context.process
+    var current = processCache[String(previous.pid)]
+    if (current && current.cwdDeleted && current.startTime === previous.startTime && current.cwd === previous.cwd) {
+      current.project = previous.project
+      current.serviceKey = previous.serviceKey
+      current.serviceEntry = previous.serviceEntry
+    }
+  }
   for (var index = 0; index < listeners.length; index++) {
     var listener = listeners[index]
     var process = processCache[String(listener.pid)]
@@ -388,7 +401,8 @@ function contextId(context) {
 }
 
 function probeCacheKey(context) {
-  return JSON.stringify([contextId(context), Network.probeHost(context.listener.addresses || []), schemeFor(context.process.command)])
+  return JSON.stringify([contextId(context), Network.probeHost(context.listener.addresses || []), schemeFor(context.process.command),
+    context.process.cwdDeleted === true])
 }
 
 function schemeFor(command) {
@@ -421,10 +435,11 @@ function serverFromContext(context, scheme, lanRoute, lanInterfaces) {
     for (var index = 0; index < interfaces.length; index++)
       if (interfaces[index].ip === lanHost) { route = interfaces[index]; break }
   }
-  var lanAvailable = lanHost !== ""
+  var lanAvailable = !!scheme && lanHost !== ""
   var loopbackBound = listener.addresses.some(Network.isLoopback)
   var wildcardBound = listener.addresses.some(Network.isUnspecified)
   var localHost = loopbackBound || wildcardBound ? "localhost" : (lanHost || "localhost")
+  var projectRoot = (process.project && process.project.root) || process.cwd || context.projectRoot || contextId(context)
   return {
     id: contextId(context),
     name: context.displayName || (process.project && process.project.name) || Paths.basename(process.cwd) || listener.process || "Development server",
@@ -439,11 +454,12 @@ function serverFromContext(context, scheme, lanRoute, lanInterfaces) {
       ? Paths.basename(process.cwd) + " / " + process.serviceEntry : ""),
     port: listener.port,
     cwd: process.cwd,
-    projectRoot: (process.project && process.project.root) || process.cwd || context.projectRoot || contextId(context),
+    cwdDeleted: process.cwdDeleted === true,
+    projectRoot: process.cwdDeleted ? "deleted:" + projectRoot : projectRoot,
     projectPath: (process.project && process.project.relativePath) || "",
     gitBranch: (process.project && process.project.gitBranch) || "",
-    gitCommonDir: (process.project && process.project.gitCommonDir) || "",
-    localUrl: scheme + "://" + Network.urlHost(localHost) + ":" + listener.port,
+    gitCommonDir: (!process.cwdDeleted && process.project && process.project.gitCommonDir) || "",
+    localUrl: scheme ? scheme + "://" + Network.urlHost(localHost) + ":" + listener.port : "",
     lanUrl: lanAvailable ? scheme + "://" + Network.urlHost(lanHost) + ":" + listener.port : "",
     lanHost: lanHost,
     lanInterface: String(route.interfaceName || ""),
@@ -451,7 +467,7 @@ function serverFromContext(context, scheme, lanRoute, lanInterfaces) {
     lanAvailable: lanAvailable,
     restartAvailable: context.source === "docker" || process.restartAvailable === true,
     restartReason: String(process.restartReason || ""),
-    hint: lanAvailable
+    hint: !scheme ? "The listener is still running but did not answer the HTTP check." : lanAvailable
       ? "Same Wi-Fi network required"
       : (listener.addresses.length && listener.addresses.every(Network.isLoopback)
         ? "Server listens on localhost only. Bind it to 0.0.0.0 or a LAN address to share."

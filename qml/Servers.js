@@ -27,6 +27,7 @@ function normalizeServer(server) {
     serviceName: String(source.serviceName || ""),
     port: Number(source.port || 0),
     cwd: String(source.cwd || ""),
+    cwdDeleted: source.cwdDeleted === true,
     localUrl: String(source.localUrl || ""),
     lanUrl: String(source.lanUrl || ""),
     lanHost: String(source.lanHost || ""),
@@ -81,7 +82,10 @@ function projectGroups(servers, activeServers) {
   for (var i = 0; i < servers.length; i++) {
     var server = servers[i]
     var key = server.projectRoot
-    if (!groups[key]) groups[key] = { name: Paths.basename(key).replace(/^compose:/, ""), branch: "", count: 0 }
+    if (!groups[key]) {
+      var name = Paths.basename(key).replace(/^compose:/, "")
+      groups[key] = { name: server.cwdDeleted ? name + " (deleted working directory)" : name, branch: "", count: 0 }
+    }
     if (server.gitBranch && roots.has(server.gitCommonDir) && roots.get(server.gitCommonDir).size > 1)
       groups[key].branch = server.gitBranch
     groups[key].count++
