@@ -6,12 +6,14 @@ import qs.Commons
 import qs.Commons as Theme
 import qs.Ui
 import "Motion.js" as Motion
+import "Frameworks.js" as Frameworks
 
 CursorSurface {
   id: header
   required property string projectRoot
   required property string name
   property string branch: ""
+  property string dependencyStates: ""
   required property int count
   property bool collapsed: false
   property bool selected: false
@@ -37,6 +39,7 @@ CursorSurface {
   Accessible.role: Accessible.Button
   Accessible.name: name + (branch ? ", branch " + branch : "") + ", " + count + " " + countNoun + (count === 1 ? "" : "s")
   Accessible.description: (projectRoot ? projectRoot + " · " : "") + (collapsed ? "Collapsed" : "Expanded")
+    + (dependencyStates ? ". Compose dependencies: " + dependencyStates.split("\n").join(", ") : "")
   Accessible.checkable: true
   Accessible.checked: !collapsed
   Accessible.focusable: true
@@ -71,6 +74,7 @@ CursorSurface {
       }
     }
     PanelSectionHeader {
+      id: projectName
       objectName: "projectName"
       Layout.maximumWidth: header.branch ? header.width * 0.42 : header.width
       Layout.alignment: Qt.AlignVCenter
@@ -92,6 +96,25 @@ CursorSurface {
       font.family: Style.font.family
       font.pixelSize: Style.font.caption
       elide: Text.ElideMiddle
+    }
+    InlineIcon {
+      objectName: "projectComposeIcon"
+      visible: header.dependencyStates !== ""
+      label: projectName
+      text: Frameworks.frameworkIcon("docker")
+      color: header.foreground
+      Accessible.role: Accessible.StaticText
+      Accessible.name: dependencies.text
+      HoverHandler { id: composeHover }
+      ComposeProblemDot {
+        width: Style.space(6)
+        dependencyStates: header.dependencyStates
+      }
+      ComposeDependencyTooltip {
+        id: dependencies
+        visible: composeHover.hovered && header.dependencyStates !== ""
+        details: header.dependencyStates
+      }
     }
     Item { Layout.fillWidth: true }
     PanelActionButton {

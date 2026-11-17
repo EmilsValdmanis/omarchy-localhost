@@ -38,14 +38,23 @@ CursorSurface {
     spacing: Style.space(9)
 
     Item {
+      id: frameworkItem
+      objectName: "serverFrameworkIcon"
+      readonly property bool showDependencies: row.server.source === "docker"
+        && (row.server.serviceKey.startsWith("compose:") || row.server.dependencyStates !== "")
       Layout.preferredWidth: Style.space(22)
       Layout.preferredHeight: Style.space(24)
       Accessible.role: Accessible.StaticText
-      Accessible.name: row.server.framework
+      Accessible.name: showDependencies ? "Docker. " + dependencies.text : row.server.framework
       HoverHandler { id: frameworkHover }
       PanelToolTip {
-        visible: frameworkHover.hovered
+        visible: frameworkHover.hovered && !frameworkItem.showDependencies
         text: row.server.framework
+      }
+      ComposeDependencyTooltip {
+        id: dependencies
+        visible: frameworkHover.hovered && frameworkItem.showDependencies
+        details: row.server.dependencyStates
       }
       PaintedGlyph {
         objectName: "frameworkGlyph"
@@ -56,6 +65,10 @@ CursorSurface {
         fontFamily: Style.font.family
         fontSize: row.server.frameworkId === "docusaurus" ? Style.font.body : Style.font.heading
         paintedSize: Style.space(row.server.frameworkId === "docusaurus" ? 12 : 16)
+      }
+      ComposeProblemDot {
+        anchors.topMargin: Style.space(2)
+        dependencyStates: row.server.dependencyStates
       }
       Text {
         anchors.centerIn: parent

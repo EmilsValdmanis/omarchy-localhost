@@ -107,7 +107,7 @@ ShellRoot {
             model: [
               "Automatic server & framework detection",
               "Git branches for active worktrees",
-              "Docker, Compose & custom port skips",
+              "Compose dependency health",
               "Live RAM usage & server trends",
               "Open locally, share over LAN",
               "Quick search & keyboard navigation"
@@ -190,7 +190,7 @@ ShellRoot {
         var demo = [
           ["@atlas/web", "TanStack Start", "tanstack", 3000, "atlas", "apps/web", true],
           ["@atlas/docs", "Docusaurus", "docusaurus", 3001, "atlas", "apps/docs", true],
-          ["@atlas/api", "FastAPI", "fastapi", 8000, "atlas", "services/api", true],
+          ["atlas / api", "Docker", "docker", 8000, "atlas", "services/api", true],
           ["@atlas/web", "TanStack Start", "tanstack", 3002, "worktrees/atlas", "apps/web", false],
           ["@atlas/ui", "Storybook", "storybook", 6006, "worktrees/atlas", "packages/ui", false],
           ["@atlas/api", "FastAPI", "fastapi", 8001, "worktrees/atlas", "services/api", true]
@@ -210,7 +210,9 @@ ShellRoot {
           var row = demo[i]
           servers.append(Servers.normalizeServer({
             serverId: "demo-" + i, name: row[0], framework: row[1], frameworkId: row[2],
-            pid: processIds[i], startTime: 100,
+            pid: i === 2 ? 0 : processIds[i], startTime: i === 2 ? 0 : 100,
+            source: i === 2 ? "docker" : "process", containerId: i === 2 ? "aebcde000033" : "",
+            dependencyStates: i === 2 ? "postgres healthy\nredis exited" : "",
             port: row[3], projectRoot: "/work/" + row[4], projectPath: row[5],
             gitCommonDir: "/work/atlas/.git", gitBranch: row[4] === "atlas" ? "main" : "checkout-redesign",
             memoryBytes: [445, 186, 92, 612, 205, 150][i] * 1048576,
@@ -234,6 +236,7 @@ ShellRoot {
         compare(panel.resultCount, 6)
         compare(panel.projectCount, 2)
         compare(panel.groups["/work/atlas"].branch, "main")
+        compare(panel.groups["/work/atlas"].dependencyStates, "atlas / api → postgres healthy · redis exited")
         compare(panel.groups["/work/worktrees/atlas"].branch, "checkout-redesign")
         var hues = []
         for (var index = 0; index < servers.count; index++) {
@@ -254,6 +257,9 @@ ShellRoot {
         compare(title.y + title.baselineOffset + titleMetrics.tightBoundingRect(title.text).y, card.y)
         waitForRendering(poster)
         wait(100)
+        var api = findChild(panel, "serverList").itemAtIndex(3)
+        verify(findChild(api, "composeProblemDot").visible)
+        verify(!findChild(api, "composeDependencyTooltip").visible)
         var screenshot = grabImage(poster)
         compare(screenshot.width, 1600)
         compare(screenshot.height, 900)

@@ -1080,6 +1080,85 @@ ShellRoot {
         }
       }
 
+      function test_docker_icon_shows_compose_dependencies_through_fold_and_recovery() {
+        panel.groupByProject = true
+        var web = ["frontend", "atlas-web-1", "web", "127.0.0.1:2999->80/tcp",
+          "/work/atlas", "web", "atlas", "running", "Up 2 minutes", "redis:service_started:false", "False", "1"]
+        var redis = ["cache", "atlas-redis-1", "redis", "", "/work/atlas", "redis", "atlas",
+          "exited", "Exited (1) a minute ago", "", "False", "1"]
+        function scan() {
+          var context = Discovery.classifyDockerPorts([web, redis].map(function(row) { return JSON.stringify(row) }).join("\n")).contexts[0]
+          var native = fixtures(1)[0]
+          native.projectRoot = "/work/atlas"
+          Servers.syncServerModel(servers, [native, Discovery.serverFromContext(context, "http", {})])
+          panel.revision++
+          settled()
+        }
+        scan()
+        var header = findChild(list.itemAtIndex(0), "projectHeader")
+        var warning = findChild(header, "projectComposeIcon")
+        check(!warning.visible)
+        var webWarning = findChild(list.itemAtIndex(1), "serverFrameworkIcon")
+        check(webWarning.showDependencies)
+        check(webWarning.visible)
+        check(findChild(webWarning, "composeProblemDot").visible)
+        var rowHeight = list.itemAtIndex(1).height
+        var tip = findChild(webWarning, "composeDependencyTooltip")
+        mouseMove(webWarning, webWarning.width / 2, webWarning.height / 2)
+        tryCompare(tip, "opened", true)
+        equal(tip.text, "Compose dependencies\nredis exited")
+        equal(findChild(tip.contentItem, "dependencyName").text, "redis")
+        equal(findChild(tip.contentItem, "dependencyStatus").text, "exited")
+        mouseMove(tests, 850, 750)
+        tryCompare(tip, "visible", false)
+        check(!findChild(list.itemAtIndex(2), "serverFrameworkIcon").showDependencies)
+        check(!findChild(list.itemAtIndex(2), "composeProblemDot").visible)
+        panel.groupByProject = false
+        tryCompare(list, "count", 2)
+        settled()
+        check(findChild(list.itemAtIndex(0), "serverFrameworkIcon").visible)
+        panel.groupByProject = true
+        tryCompare(list, "count", 3)
+        settled()
+        header = findChild(list.itemAtIndex(0), "projectHeader")
+        warning = findChild(header, "projectComposeIcon")
+        panel.query = "Project 0"
+        tryCompare(list, "count", 2)
+        equal(header.dependencyStates, "atlas / web → redis exited")
+        panel.query = ""
+        panel.setProjectCollapsed("/work/atlas", true)
+        tryCompare(list, "count", 1)
+        check(warning.visible)
+        settled()
+        check(findChild(warning, "composeProblemDot").visible)
+        mouseMove(warning, warning.width / 2, warning.height / 2)
+        var groupTip = findChild(warning, "composeDependencyTooltip")
+        tryCompare(groupTip, "opened", true)
+        equal(findChild(groupTip.contentItem, "dependencyName").text, "atlas / web → redis")
+        equal(findChild(groupTip.contentItem, "dependencyStatus").text, "exited")
+        var warningHeight = header.height
+        redis[7] = "running"
+        redis[8] = "Up a minute (healthy)"
+        scan()
+        check(warning.visible)
+        tryCompare(findChild(groupTip.contentItem, "dependencyStatus"), "text", "healthy")
+        check(!findChild(warning, "composeProblemDot").visible)
+        equal(header.height, warningHeight)
+        panel.setProjectCollapsed("/work/atlas", false)
+        tryCompare(list, "count", 3)
+        settled()
+        equal(list.itemAtIndex(1).height, rowHeight)
+        var icon = findChild(list.itemAtIndex(1), "serverFrameworkIcon")
+        check(!findChild(icon, "composeProblemDot").visible)
+        var healthyTip = findChild(icon, "composeDependencyTooltip")
+        mouseMove(icon, icon.width / 2, icon.height / 2)
+        tryCompare(healthyTip, "opened", true)
+        equal(findChild(healthyTip.contentItem, "dependencyStatus").text, "healthy")
+        web[9] = ""
+        scan()
+        equal(healthyTip.text, "Compose dependencies\nNo declared dependencies")
+      }
+
       function test_project_grouping_filtering_and_shared_actions() {
         panel.groupByProject = true
         var rows = fixtures(6)
