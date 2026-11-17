@@ -2,6 +2,7 @@ pragma ComponentBehavior: Bound
 
 import QtQuick
 import Quickshell
+import Quickshell.Hyprland
 import Quickshell.Io
 import qs.Commons
 import qs.Ui
@@ -32,6 +33,7 @@ BarWidget {
     })
   }
   readonly property bool opened: card.open
+  readonly property string panelScreenName: Screen.name
 
   visible: serverCount > 0 || showWhenEmpty || hasManagedSkippedPorts || radar.actionName === "restart" || !!radar.failedRestart
   implicitWidth: button.implicitWidth
@@ -121,10 +123,21 @@ BarWidget {
     else openPanel()
   }
 
-  // Direct IPC contract used by `omarchy-shell emils.localhost toggle`.
+  // Bar actions operate on the widget that the shell or mouse selected.
   function open() { openPanel() }
   function close() { closePanel() }
   function toggle() { togglePanel() }
+
+  // One IPC target is shared by the bar widgets on every monitor.
+  function ipcPanel(host, focusedScreen = Hyprland.focusedMonitor?.name) {
+    var widgets = host && typeof host.moduleWidgets === "function" ? host.moduleWidgets(moduleName) : []
+    var target = root
+    for (let widget of widgets) {
+      if (widget.opened) return widget
+      if (focusedScreen && widget.panelScreenName === focusedScreen) target = widget
+    }
+    return target
+  }
 
   Internal.RadarService {
     id: radar
@@ -164,9 +177,9 @@ BarWidget {
 
   IpcHandler {
     target: root.moduleName
-    function open(): string { root.openPanel(); return "ok" }
-    function close(): string { root.closePanel(); return "ok" }
-    function toggle(): string { root.togglePanel(); return "ok" }
+    function open(): string { root.ipcPanel(root.bar).open(); return "ok" }
+    function close(): string { root.ipcPanel(root.bar).close(); return "ok" }
+    function toggle(): string { root.ipcPanel(root.bar).toggle(); return "ok" }
     function refresh(): string { radar.refresh(); firewall.refresh(); return "ok" }
     function status(): string {
       var detectedServers = []

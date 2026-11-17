@@ -112,6 +112,7 @@ def main():
             if (smoke.returncode
                     or "LOCALHOST_WAYLAND_SMOKE emils.localhost false" not in output
                     or "LOCALHOST_BAR_LABEL PASS" not in output
+                    or "LOCALHOST_PANEL_ROUTING PASS" not in output
                     or re.search(r"\b(?:WARN|ERROR)\b", output)):
                 sys.exit("Wayland entry-point smoke test failed")
             print("Both plugin entry points and themed bar label passed on Wayland")
