@@ -102,7 +102,9 @@ To ship a stable version, bump `manifest.json` using `major.minor.patch`.
 After the PR merges and both CI jobs pass on `main`, the workflow runs
 `gh release create --generate-notes`. The release title is just the version,
 such as `v0.9.0`. GitHub generates "What's Changed", PR links, contributor
-credits, and a full changelog comparison from the merged pull requests.
+credits, and a full changelog comparison from the merged pull requests. CI
+prepends a linked entry for each non-merge commit since the previous version.
+Use **Rebase and merge** for a multi-feature PR to preserve those entries.
 
 No manual changelog or release notes are required. Already published versions
 are skipped. The release targets the tested commit, and publishing is skipped
