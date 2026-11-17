@@ -15,3 +15,13 @@ function key(row) {
 function belongsTo(key, source) {
   return key.indexOf(source + ":") === 0
 }
+
+function savedServices(value) {
+  var rules = Object.create(null)
+  for (var key of Object.keys(value || {})) {
+    var rule = value[key]
+    if (/^(native|compose):/.test(key) && rule && typeof rule.name === "string" && rule.name)
+      rules[key] = { name: rule.name, cwd: String(rule.cwd || "") }
+  }
+  return rules
+}

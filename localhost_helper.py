@@ -11,6 +11,7 @@ from __future__ import annotations
 import argparse
 from contextlib import contextmanager
 from dataclasses import dataclass
+import hashlib
 import http.client
 import ipaddress
 import json
@@ -234,8 +235,51 @@ def inspect_processes(
         process = inspect_process(pid, expected_uid)
         if process and process["cwd"] and process["command"]:
             process["project"] = inspector.inspect(process["cwd"])
+            process["serviceKey"], process["serviceEntry"] = native_service(process)
             processes.append(process)
     return processes
+
+
+def native_service(process: dict) -> tuple[str, str]:
+    """Identify a project-owned entry point. Keep command arguments out of saved settings."""
+    argv = process["argv"]
+    runtime = Path(process["executable"]).name
+    if not process["restartAvailable"] or len(argv) < 2:
+        return "", ""
+    if runtime not in {"node", "nodejs", "bun"} and not re.fullmatch(r"python[\d.]*", runtime):
+        return "", ""
+    if argv[1].startswith("-"):
+        return "", ""
+    cwd = Path(process["cwd"])
+    project_root = process["project"].get("root")
+    if not project_root:
+        return "", ""
+    try:
+        entry = (cwd / argv[1]).resolve(strict=True).relative_to(project_root)
+    except (ValueError, OSError, RuntimeError):
+        return "", ""
+    # Use the package-relative CLI path across pnpm's versioned store directories.
+    entry_path = re.sub(r"(^|/)node_modules/\.pnpm/[^/]+/node_modules/", r"\1node_modules/", str(entry))
+    package = re.search(r"(?:^|/)node_modules/((?:@[^/]+/)?[^/]+)/[^/]", entry_path)
+    label = package.group(1) if package else entry_path
+    port_flags = {"--port"}
+    if label in {"storybook", "@storybook/cli", "next", "astro"}:
+        port_flags.add("-p")
+    args = []
+    i = 2
+    while i < len(argv):
+        arg = argv[i]
+        if arg == "--":
+            args.extend(argv[i:])
+            break
+        if arg in port_flags and i + 1 < len(argv) and argv[i + 1].isdecimal():
+            i += 2
+            continue
+        if not re.fullmatch(r"--port=\d+", arg) and not ("-p" in port_flags and re.fullmatch(r"-p\d+", arg)):
+            args.append(arg)
+        i += 1
+    identity = json.dumps([str(cwd), runtime, entry_path, args]).encode()
+    return "native:" + hashlib.sha256(identity).hexdigest(), label
 
 
 def verified_process_directory(

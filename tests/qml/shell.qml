@@ -497,6 +497,25 @@ ShellRoot {
         equal(skipped.length, 2)
         equal(skipped[1], 3001, "mouse click skips the currently selected port directly")
         equal(stopSpy.count, 0)
+        var serviceSkips = [], restored = []
+        panel.skipServiceRequested.connect(function(server) { serviceSkips.push(server.serviceKey) })
+        panel.restoreServiceRequested.connect(function(key, name) { restored.push(key) })
+        servers.setProperty(1, "serviceKey", "native:fixture")
+        servers.setProperty(1, "serviceName", "atlas / storybook")
+        panel.revision++
+        settled()
+        mouseClick(skip, skip.width / 2, skip.height / 2)
+        equal(serviceSkips[0], "native:fixture")
+        equal(skipped.length, 2)
+        panel.diagnostics = [{ port: 0, process: "atlas / storybook", reason: "skipped-service",
+          serviceKey: "native:fixture", detail: "/work/atlas · No detected endpoint" }]
+        panel.showDiagnostics = true
+        settled()
+        button = findChild(area.itemAtIndex(1), "includePort")
+        equal(button.text, "Restore")
+        mouseClick(button, button.width / 2, button.height / 2)
+        equal(restored[0], "native:fixture")
+        equal(included.length, 1)
       }
 
       function test_skipped_controls_fit_content_without_scrollbar_feedback() {
@@ -1599,6 +1618,36 @@ ShellRoot {
         equal(discovery.manualScanQueued, true, "manual refresh during a forced scan schedules another forced scan")
       }
 
+      function test_saved_service_skip_survives_replacement_and_port_reuse() {
+        var service = createTemporaryObject(serviceComponent, tests, { includeDocker: true })
+        var docker = findChild(service, "dockerDiscovery")
+        function publish(rows) {
+          var raw = rows.map(function(row) { return JSON.stringify(row) }).join("\n")
+          docker.readyContexts = Discovery.classifyDockerPorts(raw).contexts.map(function(context) {
+            return { context: context, scheme: "http" }
+          })
+          service.publishServers()
+        }
+        function container(id, port, name) {
+          return [id, name, "node", "127.0.0.1:" + port + "->80/tcp", "/work/atlas", name, "atlas"]
+        }
+        publish([container("original", 6006, "storybook")])
+        var key = service.servers.get(0).serviceKey
+        var rules = {}
+        rules[key] = { name: "atlas / storybook", cwd: "/work/atlas" }
+        service.skippedServices = rules
+        equal(service.serverCount, 0)
+        publish([])
+        equal(service.diagnostics[0].serviceKey, key, "the saved rule is available offline")
+        publish([container("new", 6007, "storybook"), container("other", 6006, "frontend")])
+        equal(service.serverCount, 1)
+        equal(service.servers.get(0).port, 6006)
+        check(service.diagnostics[0].detail.includes(":6007"))
+        service.skippedServices = {}
+        equal(service.serverCount, 2)
+        equal(service.diagnostics.length, 0)
+      }
+
       function test_skipped_ports_survive_scan_and_merge_without_truncation() {
         var service = createTemporaryObject(serviceComponent, tests, { includeDocker: true })
         var native = findChild(service, "nativeDiscovery")
@@ -1752,6 +1801,15 @@ ShellRoot {
         check(shared.length >= 2, "fixture process exposes two ports")
         equal(Memory.memorySummary(shared).totalBytes, server.memoryBytes,
           "shared process RAM is counted once")
+        check(server.serviceKey.indexOf("native:") === 0)
+        var skips = {}
+        skips[server.serviceKey] = { name: server.serviceName, cwd: server.cwd }
+        service.skippedServices = skips
+        equal(detected(), null)
+        var rule = service.diagnostics.find(function(row) { return row.serviceKey === server.serviceKey })
+        check(rule && rule.detail.includes(":" + port) && rule.detail.includes(":" + secondPort))
+        service.skippedServices = {}
+        equal(detected().pid, server.pid, "restore leaves both port preferences and the running process intact")
         tryVerify(function() {
           var refreshed = detected()
           return refreshed && Memory.parseMemoryHistory(refreshed.memoryHistoryJson).length >= 2

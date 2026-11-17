@@ -23,6 +23,8 @@ function normalizeServer(server) {
     startTime: Number(source.startTime || 0),
     source: String(source.source || "process"),
     containerId: String(source.containerId || ""),
+    serviceKey: String(source.serviceKey || ""),
+    serviceName: String(source.serviceName || ""),
     port: Number(source.port || 0),
     cwd: String(source.cwd || ""),
     localUrl: String(source.localUrl || ""),

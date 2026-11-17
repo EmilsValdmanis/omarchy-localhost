@@ -145,6 +145,18 @@ ShellRoot {
       compare(widget.notice, "Could not save the port preference.")
       widget.setPortIncluded(0, false)
       compare(settingsApi.calls, 2)
+      host.shell = settingsApi
+      widget.setServiceSkipped("native:test", "atlas / storybook", "/work/atlas", true)
+      compare(widget.noticeUrgent, true)
+      compare(widget.notice, "Could not save the service preference.")
+      settingsApi.accepted = true
+      widget.setServiceSkipped("native:test", "atlas / storybook", "/work/atlas", true)
+      compare(settingsApi.saved.skippedServices["native:test"].cwd, "/work/atlas")
+      widget.settings = settingsApi.saved
+      widget.setServiceSkipped("native:test", "atlas / storybook", "", false)
+      compare(Object.keys(settingsApi.saved.skippedServices).length, 0)
+      compare(settingsApi.saved.alwaysIncludePorts, "")
+      compare(settingsApi.saved.ignoredPorts, "3000-3010")
     }
     onCompletedChanged: if (completed) console.log("HOST_SETTINGS_RESULT " + JSON.stringify({
       tests: 1, failed: qtest_results.failCount, skipped: qtest_results.skipCount
