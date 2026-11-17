@@ -21,6 +21,7 @@ CursorSurface {
   property bool actionBusy: false
   property bool stopping: false
   property bool showStopAction: true
+  property string stopHint: ""
   property string countNoun: "server"
 
   signal toggled()
@@ -118,6 +119,7 @@ CursorSurface {
     }
     Item { Layout.fillWidth: true }
     PanelActionButton {
+      id: stopButton
       objectName: "projectStopAll"
       visible: header.showStopAction
       Layout.alignment: Qt.AlignVCenter
@@ -128,12 +130,21 @@ CursorSurface {
       bordered: hasCursor
       focusable: true
       onActiveFocusChanged: if (activeFocus) header.stopFocused()
-      tooltipText: header.stopping ? "Stopping project servers…" : "Stop all servers in this project"
       Accessible.role: Accessible.Button
-      Accessible.name: (header.stopping ? "Stopping all servers in " : "Stop all servers in ") + header.name
+      Accessible.name: header.stopping ? "Stopping project servers…" : header.stopHint
       Accessible.focused: header.selected && header.stopSelected
       Accessible.onPressAction: if (enabled) header.stopRequested()
       onClicked: header.stopRequested()
+      HoverHandler { id: stopHover }
+      PanelToolTip {
+        objectName: "projectStopTooltip"
+        visible: stopButton.visible && stopButton.enabled
+          && (stopHover.hovered || stopButton.hasCursor || stopButton.activeFocus)
+        delay: stopButton.hasCursor || stopButton.activeFocus ? 0 : 400
+        text: header.stopHint
+        width: Math.min(implicitWidth, Style.space(400))
+        x: stopButton.width - width
+      }
       InlineIcon {
         objectName: "projectStopIcon"
         anchors.centerIn: parent

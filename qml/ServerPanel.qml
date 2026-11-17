@@ -1168,6 +1168,7 @@ Item {
               collapsed: entryDelegate.model.collapsed
               selected: entryDelegate.selected
               stopSelected: entryDelegate.selected && root.projectStopSelected
+              stopHint: Actions.projectStopHint(root.groups[projectRoot])
               actionBusy: root.actionBusy
               stopping: root.stoppingProjectRoot === projectRoot
               foreground: root.foreground

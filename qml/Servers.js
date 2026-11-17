@@ -1,4 +1,5 @@
 .import "Paths.js" as Paths
+.import "Sources.js" as Sources
 .import "ListModelSync.js" as ListModelSync
 .import "Memory.js" as Memory
 .import "Ports.js" as Ports
@@ -75,8 +76,11 @@ function compareServers(left, right, grouped) {
 function projectGroups(servers, activeServers) {
   var roots = new Map()
   var statesByRoot = new Map()
+  var targetsByRoot = new Map()
   var visibleIds = new Set(servers.map(function(row) { return row.serverId }))
   for (var row of activeServers || servers) {
+    if (!targetsByRoot.has(row.projectRoot)) targetsByRoot.set(row.projectRoot, new Set())
+    targetsByRoot.get(row.projectRoot).add(Sources.key(row))
     if (row.dependencyStates) {
       if (!statesByRoot.has(row.projectRoot)) statesByRoot.set(row.projectRoot, new Map())
       var states = statesByRoot.get(row.projectRoot)
@@ -96,6 +100,7 @@ function projectGroups(servers, activeServers) {
       var states = statesByRoot.get(key)
       var summaries = states ? Array.from(states.keys()).sort() : []
       groups[key] = { name: server.cwdDeleted ? name + " (deleted working directory)" : name, branch: "", count: 0,
+        stopCount: targetsByRoot.get(key).size,
         dependencyStates: summaries.join("\n"),
         hiddenDependencyStates: summaries.filter(function(summary) { return !states.get(summary) }).join("\n") }
     }

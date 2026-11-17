@@ -38,6 +38,12 @@ function projectStopTargets(servers, projectRoot) {
   return targets
 }
 
+function projectStopHint(group) {
+  if (!group) return ""
+  var total = group.stopCount
+  return "Stop " + (total === 1 ? "1 server" : "all " + total + " servers") + " in " + group.name
+}
+
 function actionEnabled(index, server, busy) {
   return !!server && (!busy || (index !== ACTIONS.restart && index !== ACTIONS.stop))
     && ((index !== ACTIONS.copyLan && index !== ACTIONS.qr) || actionUrl(server, true) !== "")
