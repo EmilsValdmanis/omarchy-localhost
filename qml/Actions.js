@@ -63,8 +63,10 @@ function parseActionPayload(raw, fallback) {
     var payload = JSON.parse(String(raw || ""))
     if (payload && payload.ok === true)
       return { ok: true, message: String(payload.message || fallback || "Action completed") }
-    return { ok: false, message: String((payload && payload.error) || fallback || "Action failed"),
+    var failure = { ok: false, message: String((payload && payload.error) || fallback || "Action failed"),
       forceStopAvailable: !!payload && payload.forceStopAvailable === true }
+    if (payload && typeof payload.log === "string" && payload.log.startsWith("/")) failure.logPath = payload.log
+    return failure
   } catch (exception) {
     return { ok: false, message: String(fallback || "Action failed") }
   }

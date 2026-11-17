@@ -389,12 +389,16 @@ class ProcessActionTests(unittest.TestCase):
     def test_replacement_exit_is_reported_as_failure_with_log(self):
         self.start_http_server()
         self.script.write_text("import sys\nprint('startup failed', flush=True)\nsys.exit(7)\n")
-        with mock.patch.dict(os.environ, {"XDG_STATE_HOME": self.state_directory.name}):
-            with self.assertRaisesRegex(helper.LocalhostError, "replacement exited with status 7; see"):
-                helper.restart_process(self.child.pid, self.start_time, self.url)
+        with mock.patch.dict(os.environ, {"XDG_STATE_HOME": self.state_directory.name}), redirect_stdout(io.StringIO()) as output:
+            status = helper.main(["process-action", "--action", "restart", "--pid", str(self.child.pid),
+                                  "--start-time", str(self.start_time), "--url", self.url])
+        self.assertEqual(status, 1)
+        failure = json.loads(output.getvalue())
+        self.assertIn("replacement exited with status 7", failure["error"])
         self.child.wait(timeout=2)
         logs = list((Path(self.state_directory.name) / "omarchy" / "localhost").glob("restart-*.log"))
         self.assertEqual(len(logs), 1)
+        self.assertEqual(Path(failure["log"]), logs[0])
         self.assertIn("startup failed", logs[0].read_text())
 
     def test_invalid_readiness_url_preserves_original(self):
@@ -426,9 +430,10 @@ class ProcessActionTests(unittest.TestCase):
     def test_other_process_http_response_cannot_make_replacement_ready(self):
         self.start_http_server()
         self.restarted = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(60)"])
-        with self.assertRaisesRegex(helper.LocalhostError, "did not become HTTP-ready"):
+        with self.assertRaisesRegex(helper.LocalhostError, "did not become HTTP-ready") as failure:
             server = helper.RestartedServer(self.restarted, Path("fixture.log"), None)
             helper.wait_for_restart_ready(server, helper.restart_endpoint(self.url), timeout=0.2)
+        self.assertEqual(failure.exception.log_path, server.log_path)
 
     def test_handle_is_acquired_before_verification_and_used_for_signal(self):
         events = []

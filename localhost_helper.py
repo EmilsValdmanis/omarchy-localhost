@@ -42,9 +42,10 @@ RESTART_READY_TIMEOUT = 10.0
 class LocalhostError(RuntimeError):
     """An expected failure that can be shown directly in the plugin UI."""
 
-    def __init__(self, message: str, *, force_stop_available: bool = False):
+    def __init__(self, message: str, *, force_stop_available: bool = False, log_path: Path | None = None):
         super().__init__(message)
         self.force_stop_available = force_stop_available
+        self.log_path = log_path
 
 
 @dataclass(frozen=True)
@@ -514,7 +515,7 @@ def wait_for_restart_ready(
                     server.collector.wait(timeout=2)
                 except subprocess.TimeoutExpired:
                     pass
-            raise LocalhostError(f"The replacement exited with status {restarted.returncode}; see {server.log_path}")
+            raise LocalhostError(f"The replacement exited with status {restarted.returncode}", log_path=server.log_path)
         ready = False
         if owned_probe_host(proc_directory(restarted.pid), endpoint):
             connection = (
@@ -536,7 +537,7 @@ def wait_for_restart_ready(
         else:
             ready_since = None
         time.sleep(0.05)
-    raise LocalhostError(f"The replacement did not become HTTP-ready within {timeout:g}s; see {server.log_path}")
+    raise LocalhostError(f"The replacement did not become HTTP-ready within {timeout:g}s", log_path=server.log_path)
 
 
 def prune_restart_logs(state_root: Path) -> None:
@@ -818,7 +819,10 @@ def main(argv: Sequence[str] | None = None) -> int:
             relay_restart_log(arguments.input_fd, arguments.log_fd, arguments.ready_fd)
         return 0
     except LocalhostError as error:
-        json_print({"ok": False, "error": str(error), "forceStopAvailable": error.force_stop_available})
+        payload = {"ok": False, "error": str(error), "forceStopAvailable": error.force_stop_available}
+        if error.log_path is not None:
+            payload["log"] = str(error.log_path.absolute())
+        json_print(payload)
         return 1
 
 

@@ -256,8 +256,11 @@ from their terminal. The helper rechecks the command and environment and
 prepares a private restart log and its collector before stopping the original.
 It reports success only after the replacement owns the original listening
 address and port and answers
-HTTP or HTTPS. Startup exits and the 10-second readiness timeout report failure
-with the log path. A replacement still running at the timeout is left running;
+HTTP or HTTPS. If the replacement exits or takes more than 10 seconds to
+answer, the panel keeps the failure and its **Open log** button available even
+if the server disappears. Click it or press `Ctrl+L` to open that restart’s
+captured output in your Omarchy editor. Dismiss the message with **×**.
+A replacement still running at the timeout is left running;
 check the log before starting another instance. Restart does not reconstruct
 parent supervisors or roll back a failed launch. Logs live under
 `${XDG_STATE_HOME:-~/.local/state}/omarchy/localhost/`. The newest ten are kept;

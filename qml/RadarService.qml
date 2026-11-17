@@ -34,6 +34,7 @@ Item {
   property string actionName: ""
   property string actionServerId: ""
   property string actionServerLabel: ""
+  property var failedRestart: null
   property string actionSourceKey: ""
   property var forceStopSourceKeys: ({})
   readonly property bool actionBusy: actionName !== "" || stoppingProjectRoot !== ""
@@ -274,6 +275,12 @@ Item {
     var serverId = actionServerId
     var label = actionServerLabel
     var sourceKey = actionSourceKey
+    if (action === "restart" && !Sources.belongsTo(sourceKey, "docker")) {
+      if (!successful && parsed.logPath)
+        failedRestart = { serverId: serverId, label: label, message: parsed.message, logPath: parsed.logPath }
+      else if (failedRestart && failedRestart.serverId === serverId)
+        failedRestart = null
+    }
     actionName = ""
     actionServerId = ""
     actionServerLabel = ""

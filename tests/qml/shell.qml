@@ -869,6 +869,35 @@ ShellRoot {
         tryCompare(filter, "popupOpen", false)
       }
 
+      function test_failed_restart_log_survives_an_empty_list() {
+        var service = createTemporaryObject(serviceComponent, tests)
+        panel.failedRestart = Qt.binding(function() { return service.failedRestart })
+        var path = "/tmp/project logs/restart-123.log"
+        service.actionName = "restart"
+        service.actionSourceKey = "process:123:100"
+        service.actionServerId = "server-0"
+        service.actionServerLabel = "atlas / api (:8000)"
+        service.finishAction(1, JSON.stringify({ ok: false, error: "The replacement exited with status 1", log: path }), "", false)
+        servers.clear()
+        panel.revision++
+        tryCompare(panel, "resultCount", 0)
+        var banner = findChild(panel, "restartFailureNotice")
+        check(banner.visible)
+        var opened = []
+        panel.openRestartLogRequested.connect(function(file) { opened.push(file) })
+        var open = findChild(banner, "openRestartLog")
+        mouseClick(open, open.width / 2, open.height / 2)
+        panel.focusNavigation()
+        keyClick(Qt.Key_L, Qt.ControlModifier)
+        equal(opened.length, 2)
+        equal(opened[0], path)
+        equal(opened[1], path)
+        panel.dismissRestartFailureRequested.connect(function() { service.failedRestart = null })
+        var dismiss = findChild(banner, "dismissRestartFailure")
+        mouseClick(dismiss, dismiss.width / 2, dismiss.height / 2)
+        check(!banner.visible)
+      }
+
       function test_notices_do_not_move_footer_or_resize_popup() {
         var status = findChild(panel, "footerStatus")
         var action = findChild(panel, "serverAction0")
