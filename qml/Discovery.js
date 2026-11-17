@@ -1,4 +1,5 @@
 .import "Paths.js" as Paths
+.import "Compose.js" as Compose
 .import "Diagnostics.js" as Diagnostics
 .import "Frameworks.js" as Frameworks
 .import "Network.js" as Network
@@ -267,6 +268,7 @@ function classifyDockerPorts(raw, ignoredPorts, alwaysIncludePorts) {
   var ignored = ignoredPorts || {}
   var alwaysInclude = alwaysIncludePorts || {}
   var records = []
+  var composeInventory = new Map()
   var mappingsToExpand = []
   var count = 0
   var diagnosticKeys = {}
@@ -291,10 +293,17 @@ function classifyDockerPorts(raw, ignoredPorts, alwaysIncludePorts) {
     var cwd = String(record[4] || "")
     var service = String(record[5] || "")
     var project = String(record[6] || "")
-    if (!containerId || !publishedPorts) continue
+    var state = String(record[7] || "")
+    var oneOff = String(record[10] || "").toLowerCase() === "true"
+    if (!containerId) continue
+    if (project && service && !oneOff && state)
+      Compose.recordReplica(composeInventory, cwd, project, service, String(record[11] || containerName),
+        state, String(record[8] || ""))
+    if (!publishedPorts || (state && state !== "running")) continue
 
     var entry = { containerId: containerId, containerName: containerName, image: image,
-      cwd: cwd, service: service, project: project, grouped: {} }
+      cwd: cwd, service: service, project: project, grouped: {},
+      dependsOn: project && service && !oneOff ? String(record[9] || "") : "" }
     records.push(entry)
     var mappings = publishedPorts.split(/,\s*/)
     for (var mappingIndex = 0; mappingIndex < mappings.length; mappingIndex++) {
@@ -364,6 +373,7 @@ function classifyDockerPorts(raw, ignoredPorts, alwaysIncludePorts) {
   for (var recordIndex = 0; recordIndex < records.length; recordIndex++) {
     var entry = records[recordIndex]
     var grouped = entry.grouped
+    var states = entry.dependsOn ? Compose.dependencyStates(composeInventory, entry) : ""
     for (var rawPort in grouped) {
       var hostPort = Number(rawPort)
       var name = entry.project && entry.service ? entry.project + " / " + entry.service
@@ -372,6 +382,7 @@ function classifyDockerPorts(raw, ignoredPorts, alwaysIncludePorts) {
         id: "docker:" + entry.containerId + ":" + hostPort,
         source: "docker",
         containerId: entry.containerId,
+        dependencyStates: states,
         serviceKey: entry.project && entry.service ? "compose:" + JSON.stringify([entry.cwd, entry.project, entry.service]) : "",
         projectRoot: entry.cwd || (entry.project ? "compose:" + entry.project : "docker:" + entry.containerId),
         displayName: name,
@@ -449,6 +460,7 @@ function serverFromContext(context, scheme, lanRoute, lanInterfaces) {
     startTime: Number(process.startTime || 0),
     source: String(context.source || "process"),
     containerId: String(context.containerId || ""),
+    dependencyStates: context.dependencyStates || "",
     serviceKey: context.serviceKey || process.serviceKey || "",
     serviceName: context.displayName || (process.serviceEntry
       ? Paths.basename(process.cwd) + " / " + process.serviceEntry : ""),

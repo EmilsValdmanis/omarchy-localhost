@@ -52,8 +52,9 @@ Item {
     pendingWarnings = []
     sourceProcess.start(source === "docker" ? [
       "bash", "-c", "command -v docker >/dev/null 2>&1 || exit 127; exec timeout 3s docker \"$@\"",
-      "localhost-docker", "ps", "--format",
-      "[{{json .ID}},{{json .Names}},{{json .Image}},{{json .Ports}},{{json (.Label \"com.docker.compose.project.working_dir\")}},{{json (.Label \"com.docker.compose.service\")}},{{json (.Label \"com.docker.compose.project\")}}]"
+      "localhost-docker", "ps", "--all", "--format",
+      "[{{json .ID}},{{json .Names}},{{json .Image}},{{json .Ports}},{{json (.Label \"com.docker.compose.project.working_dir\")}},{{json (.Label \"com.docker.compose.service\")}},{{json (.Label \"com.docker.compose.project\")}},"
+        + "{{json .State}},{{json .Status}},{{json (.Label \"com.docker.compose.depends_on\")}},{{json (.Label \"com.docker.compose.oneoff\")}},{{json (.Label \"com.docker.compose.container-number\")}}]"
     ] : ["ss", "-H", "-ltnp"])
   }
 

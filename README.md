@@ -233,6 +233,15 @@ repositories. Outside Git, it recognizes pnpm, npm/Yarn workspaces, Lerna,
 Cargo workspaces, and `go.work`. Native processes and Compose services share a
 group when their working directories resolve to the same project root.
 
+Hover over a Compose service’s Docker icon to see all its declared dependencies,
+including ones with private ports. Each badge shows Docker’s current state.
+**Healthy** means the container passed its health check. **Running** means the
+container is up without a reported health result. Successful one-shot jobs
+show **completed**, and dependencies absent from the scan show **unknown**.
+A small dot appears on the Docker icon when a dependency is unhealthy, exited,
+restarting, paused, or dead. When a fold or filter hides the service, the project
+header provides the same Docker tooltip with service names on the dependency rows.
+
 Discovery and readiness probes stay on the local machine. Before stopping or
 restarting a process, the helper acquires a Linux pidfd, verifies its owner and
 start time, and signals through that handle so PID reuse cannot redirect the

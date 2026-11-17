@@ -4,6 +4,44 @@ import { loadQmlJs, plain } from "./support/qml_js.mjs"
 
 const Discovery = loadQmlJs("Discovery.js")
 
+test("Compose dependency health follows declared services and current replicas", () => {
+  function container(service, state, status, options = {}) {
+    return JSON.stringify([options.id || service, service, service, options.ports || "",
+      options.cwd || "/work/shop", service, options.project || "shop", state, status,
+      options.depends || "", options.oneOff || "False", options.slot || "1"])
+  }
+  const web = container("web", "running", "Up 2 minutes", {
+    ports: "127.0.0.1:3000->80/tcp",
+    depends: "postgres:service_healthy:false,redis:service_started:false,migrate:service_completed_successfully:false,worker,cache",
+  })
+  const rows = [
+    web,
+    container("postgres", "exited", "Exited (1) 1 minute ago", { oneOff: "True" }),
+    container("postgres", "running", "Up 2 minutes (unhealthy)"),
+    container("redis", "exited", "Exited (0) 2 minutes ago", { ports: "127.0.0.1:5555->80/tcp" }),
+    container("migrate", "exited", "Exited (0) 5 minutes ago"),
+    container("worker", "running", "Up 1 minute (healthy)"),
+    container("worker", "paused", "Up 2 minutes (Paused)", { slot: "2" }),
+    container("cache", "running", "Up 1 minute"),
+    container("cache", "exited", "Exited (1) yesterday", { id: "old-cache" }),
+    container("cache", "restarting", "Restarting (1)", { cwd: "/trees/shop", slot: "3" }),
+    container("cache", "dead", "Dead", { project: "different", slot: "4" }),
+    container("unrelated", "dead", "Dead"),
+  ]
+  const [context] = Discovery.classifyDockerPorts(rows.join("\n")).contexts
+  assert.equal(Discovery.classifyDockerPorts(rows.join("\n")).contexts.length, 1)
+  assert.equal(Discovery.serverFromContext(context, "http", {}).dependencyStates,
+    "cache running\nmigrate completed\npostgres unhealthy\nredis exited\nworker [1] healthy\nworker [2] paused")
+  const recovered = [web, container("postgres", "running", "Up 1 minute (healthy)"),
+    container("redis", "running", "Up 10 seconds (health: starting)")]
+  assert.equal(Discovery.classifyDockerPorts(recovered.join("\n")).contexts[0].dependencyStates,
+    "cache unknown\nmigrate unknown\npostgres healthy\nredis starting\nworker unknown")
+  const failures = [web, container("migrate", "exited", "Exited (1) yesterday"),
+    container("worker", "restarting", "Restarting (1)"), container("cache", "dead", "Dead")]
+  assert.equal(Discovery.classifyDockerPorts(failures.join("\n")).contexts[0].dependencyStates,
+    "cache dead\nmigrate exited\npostgres unknown\nredis unknown\nworker restarting")
+})
+
 function listener(port) {
   return { pid: 410, port, process: "node", addresses: ["127.0.0.1"] }
 }
@@ -253,6 +291,7 @@ test("discovers published Docker Compose HTTP ports", () => {
     id: "docker:ed3fec6359f3:8000",
     source: "docker",
     containerId: "ed3fec6359f3",
+    dependencyStates: "",
     displayName: "api / app",
     projectRoot: "/work/betterat/apps/api",
     serviceKey: 'compose:["/work/betterat/apps/api","api","app"]',
@@ -282,6 +321,7 @@ test("does not HTTP-probe remapped database ports", () => {
     id: "docker:b49bb7bdabef:15672",
     source: "docker",
     containerId: "b49bb7bdabef",
+    dependencyStates: "",
     displayName: "api / queue",
     projectRoot: "/work/api",
     serviceKey: 'compose:["/work/api","api","queue"]',

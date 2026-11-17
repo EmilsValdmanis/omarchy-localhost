@@ -1163,6 +1163,7 @@ Item {
               projectRoot: entryDelegate.model.projectRoot
               name: entryDelegate.model.name
               branch: entryDelegate.model.branch
+              dependencyStates: entryDelegate.model.dependencyStates
               count: entryDelegate.model.count
               collapsed: entryDelegate.model.collapsed
               selected: entryDelegate.selected

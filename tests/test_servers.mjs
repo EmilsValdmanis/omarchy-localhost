@@ -42,6 +42,7 @@ test("normalizes servers from discovery and model rows", () => {
     startTime: 991,
     source: "process",
     containerId: "",
+    dependencyStates: "",
     serviceKey: "",
     serviceName: "",
     port: 5173,
@@ -78,6 +79,7 @@ test("normalizes servers from discovery and model rows", () => {
     startTime: 0,
     source: "process",
     containerId: "",
+    dependencyStates: "",
     serviceKey: "",
     serviceName: "",
     port: 0,
@@ -129,7 +131,8 @@ test("project grouping is stable, searchable and distinguishes repositories with
   assert.deepEqual(rows.slice().sort((a, b) => Servers.compareServers(a, b, true)).map(row => row.serverId), ["other", "web", "api"])
   assert.deepEqual(rows.slice().sort((a, b) => Servers.compareServers(a, b, false)).map(row => row.serverId), ["web", "other", "api"])
   assert.deepEqual(plain(Servers.projectGroups(rows)), {
-    "/work/atlas": { name: "atlas", branch: "", count: 2 }, "/other/atlas": { name: "atlas", branch: "", count: 1 },
+    "/work/atlas": { name: "atlas", branch: "", dependencyStates: "", hiddenDependencyStates: "", count: 2 },
+    "/other/atlas": { name: "atlas", branch: "", dependencyStates: "", hiddenDependencyStates: "", count: 1 },
   })
   assert.equal(Servers.matchesSearch(rows[0], "atlas", "all"), true)
   assert.equal(Servers.matchesSearch(rows[2], "apps/api", "all"), true)
@@ -147,4 +150,15 @@ test("branch labels use active worktrees of the same repository even while filte
   assert.equal(Servers.projectGroups([checkout], [main, checkout])[checkout.projectRoot].branch, "feature/Checkout")
   assert.equal(Servers.matchesSearch(checkout, "feature/check", "all"), true)
   assert.equal(Servers.matchesSearch(main, "feature/check", "all"), false)
+})
+
+test("project warnings identify each owning service and deduplicate its published ports", () => {
+  const rows = [
+    { id: "api:8000", name: "shop / api" },
+    { id: "api:8001", name: "shop / api" },
+    { id: "admin:9000", name: "shop / admin" },
+  ].map(row => Servers.normalizeServer({ ...row, projectRoot: "/shop", dependencyStates: "redis exited" }))
+  const group = Servers.projectGroups([rows[0]], rows)["/shop"]
+  assert.equal(group.dependencyStates, "shop / admin → redis exited\nshop / api → redis exited")
+  assert.equal(group.hiddenDependencyStates, "shop / admin → redis exited")
 })
