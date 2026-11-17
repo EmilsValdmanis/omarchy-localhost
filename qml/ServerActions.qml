@@ -27,6 +27,8 @@ RowLayout {
     if (action === Actions.ACTIONS.skip && server.serviceKey)
       return "Skip service " + server.serviceName + " across port changes. Restore it from Skipped."
     if (available(action)) return normalHint
+    if (action === Actions.ACTIONS.open || action === Actions.ACTIONS.copyLocal)
+      return server.hint || "No local URL is available."
     if (action === Actions.ACTIONS.qr) return Actions.lanUnavailableReason(server)
     if (action === Actions.ACTIONS.terminal || action === Actions.ACTIONS.project)
       return "The project directory is unavailable for this server."

@@ -342,6 +342,33 @@ class ProcessActionTests(unittest.TestCase):
             helper.restart_process(self.child.pid, self.start_time, self.url)
         self.assertIsNone(self.child.poll())
 
+    def test_unlinked_working_directory_is_detected_even_if_the_path_is_reused(self):
+        cwd = Path(self.state_directory.name) / "feature (deleted)"
+        cwd.mkdir()
+        fixture = Path(__file__).with_name("http_fixture.py").resolve()
+        with subprocess.Popen([sys.executable, str(fixture)], cwd=cwd, stdout=subprocess.PIPE, text=True) as server:
+            try:
+                port, _ = json.loads(server.stdout.readline())
+                live = helper.inspect_process(server.pid, os.geteuid())
+                self.assertFalse(live["cwdDeleted"])
+                cwd.rmdir()
+                cwd.mkdir()
+                Path(str(cwd) + " (deleted)").mkdir()
+                (cwd / "package.json").write_text('{"name":"new-checkout"}')
+                deleted, = helper.inspect_processes([server.pid], os.geteuid())
+                self.assertTrue(deleted["cwdDeleted"])
+                self.assertEqual(deleted["cwd"], str(cwd))
+                self.assertEqual(deleted["project"], {})
+                self.assertFalse(deleted["restartAvailable"])
+                with self.assertRaisesRegex(helper.LocalhostError, "working directory was deleted"):
+                    helper.restart_process(server.pid, live["startTime"], f"http://localhost:{port}")
+                self.assertIn(("127.0.0.1", port), helper.listening_endpoints(Path(f"/proc/{server.pid}")))
+                helper.signal_process(server.pid, live["startTime"])
+                server.wait(timeout=3)
+            finally:
+                if server.poll() is None:
+                    server.kill()
+
     @unittest.skipUnless(shutil.which("node"), "requires Node for the rewritten-title fixture")
     def test_rewritten_node_title_disables_restart_without_stopping_server(self):
         self.child.kill()

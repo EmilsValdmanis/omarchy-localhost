@@ -434,6 +434,52 @@ ShellRoot {
         equal(panel.selectedServer().serverId, "server-1")
       }
 
+      function test_deleted_directory_server_uses_footer_and_keyboard_stop() {
+        servers.setProperty(1, "cwdDeleted", true)
+        panel.revision++
+        settled()
+        var row = list.itemAtIndex(1)
+        equal(findChild(row, "serverPath").text, "Working directory deleted")
+        mouseClick(row, row.width / 2, row.height / 2)
+        equal(panel.selectedServer().serverId, "server-1")
+        var stop = findChild(panel, "serverAction7")
+        mouseClick(stop, stop.width / 2, stop.height / 2)
+        equal(panel.pendingServer.serverId, "server-1")
+        equal(panel.pendingAction, "stop")
+        keyClick(Qt.Key_Escape)
+        panel.focusNavigation()
+        tryVerify(function() { return panel.keyboardFocusTarget.activeFocus })
+        keyClick(Qt.Key_Delete)
+        equal(panel.pendingAction, "stop")
+        equal(stopSpy.count, 0)
+        panel.confirmPendingAction()
+        equal(stopSpy.signalArguments[0][0].pid, 1001)
+        equal(stopSpy.signalArguments[0][0].startTime, 100)
+        check(!panel.actionEnabled(Actions.ACTIONS.terminal, panel.selectedServer()))
+        check(!panel.actionEnabled(Actions.ACTIONS.project, panel.selectedServer()))
+      }
+
+      function test_deleted_directory_keeps_only_a_previously_verified_listener_after_probe_failure() {
+        var service = createTemporaryObject(serviceComponent, tests)
+        var discovery = findChild(service, "nativeDiscovery")
+        var context = { listener: { pid: 1001, port: 5173, addresses: ["127.0.0.1"] },
+          process: { pid: 1001, startTime: 99, cwd: "/work/app", command: "node app.js" },
+          framework: { id: "node", name: "Node.js" } }
+        discovery.readyContexts = [{ context: context, scheme: "http" }]
+        var deleted = Object.assign({}, context, { process: Object.assign({}, context.process, { cwdDeleted: true }) })
+        discovery.pendingContexts = [deleted]
+        discovery.pendingSchemes = ({})
+        discovery.applyCandidates()
+        equal(service.serverCount, 1)
+        equal(service.servers.get(0).localUrl, "")
+        equal(service.servers.get(0).cwdDeleted, true)
+        check(!Actions.actionEnabled(Actions.ACTIONS.open, service.servers.get(0)))
+        check(Actions.actionEnabled(Actions.ACTIONS.stop, service.servers.get(0)))
+        discovery.pendingContexts = [Object.assign({}, deleted, { process: Object.assign({}, deleted.process, { startTime: 100 }) })]
+        discovery.applyCandidates()
+        equal(service.serverCount, 0, "a reused PID and port need a fresh successful probe")
+      }
+
       function test_single_copy_action_uses_local_url() {
         panel.selectedIndex = 0
         var copy = findChild(panel, "serverAction1")

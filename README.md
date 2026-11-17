@@ -49,6 +49,13 @@ in sequence with the same identity checks as individual stops; a failure does
 not prevent the remaining servers from being stopped. The result reports any
 failures by server name and port. Processes that refuse to stop retain their
 individual **Force stop** action.
+
+If you remove a worktree while its native dev server is running, its row shows
+**Working directory deleted**. Select the row and choose **Stop** in the footer
+or press **Delete** to open the confirmation. A previously detected server stays visible while it holds the port, even
+if it stops answering HTTP. Terminal, editor, and restart actions require a live
+working directory.
+
 Click a row to select it, then use the shared action toolbar. Moving the pointer
 over other rows keeps your selection. **Open** and clicking a port use the local
 URL. **Copy** always copies that same local URL. **QR** shares the network URL,

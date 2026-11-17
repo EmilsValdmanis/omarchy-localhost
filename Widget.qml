@@ -166,6 +166,7 @@ BarWidget {
           name: server.name,
           framework: server.framework,
           port: server.port,
+          cwdDeleted: server.cwdDeleted,
           localUrl: server.localUrl,
           lanUrl: server.lanUrl,
           lanInterface: server.lanInterface,

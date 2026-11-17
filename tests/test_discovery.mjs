@@ -61,6 +61,7 @@ test("parses verified process metadata from the helper", () => {
         argv: ["node", "app.js"],
         project: {},
         cwd: "/work/app",
+        cwdDeleted: false,
         executable: "/usr/bin/node",
         startTime: 991,
         restartAvailable: false,
@@ -75,6 +76,24 @@ test("parses verified process metadata from the helper", () => {
 
 test("extracts declared ports", () => {
   assert.deepEqual(plain(Discovery.declaredPorts("vite --port 3000 --listen-port=4000 -p5000")), [3000, 4000, 5000])
+})
+
+test("a deleted cwd retains the same launch's project and skip identity across scans", () => {
+  const process = { pid: 410, startTime: 99, cwd: "/trees/shop/web", command: "node app.js",
+    project: { root: "/trees/shop", name: "web" }, serviceKey: "native:web", serviceEntry: "app.js" }
+  const endpoint = listener(5173)
+  const original = Discovery.classifyListeners([endpoint], { 410: process }).contexts[0]
+  const previous = [{ context: original, scheme: "http" }]
+  function deleted(startTime) {
+    const metadata = { ...process, cwdDeleted: true, project: {}, serviceKey: "", serviceEntry: "", startTime }
+    const context = Discovery.classifyListeners([endpoint], { 410: metadata }, {}, {}, previous).contexts[0]
+    return Discovery.serverFromContext(context, "http", {})
+  }
+  const retained = deleted(99)
+  assert.equal(retained.name, "web")
+  assert.equal(retained.serviceKey, "native:web")
+  assert.notEqual(retained.projectRoot, Discovery.serverFromContext(original, "http", {}).projectRoot)
+  assert.equal(deleted(100).serviceKey, "")
 })
 
 test("keeps multiple listeners and a fallback port despite the requested --port", () => {
