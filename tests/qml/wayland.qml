@@ -18,6 +18,8 @@ ShellRoot {
     property bool vertical: false
     property bool foregroundAnimationEnabled: false
     property string position: "top"
+    property var peers: []
+    function moduleWidgets(id) { return id === widget.moduleName ? peers : [] }
   }
   Plugin.Widget {
     id: widget
@@ -61,6 +63,14 @@ ShellRoot {
       var button = shell.findItem(widget, "localhostBarButton")
       var service = shell.findItem(widget, "localhostRadarService")
       var passed = button !== null && service !== null
+      var main = { panelScreenName: "DP-1", opened: false }
+      var second = { panelScreenName: "HDMI-A-1", opened: false }
+      themeBar.peers = [second, main]
+      var routed = widget.ipcPanel(themeBar, "DP-1") === main && widget.ipcPanel(themeBar, "HDMI-A-1") === second
+        && widget.ipcPanel(themeBar, "") === widget
+      second.opened = true
+      routed = routed && widget.ipcPanel(themeBar, "DP-1") === second
+      console.log("LOCALHOST_PANEL_ROUTING", routed ? "PASS" : "FAIL")
       if (passed) {
         service.servers.clear()
         for (var index = 0; index < 12; index++)
