@@ -43,6 +43,8 @@ port filters reveal matching servers, then restore your folds when cleared.
 Turn off **Group** for a flat list sorted by port.
 Click the square **Stop all** icon on a project header to gracefully stop all of
 that project's discovered server processes and Docker containers in one click.
+Hover over **Stop all** or focus it with the keyboard to see how many servers
+it will stop in the project.
 It includes folded servers and servers hidden by search or port filters. Shared
 processes and containers are stopped once, and other projects keep running. Actions run
 in sequence with the same identity checks as individual stops; a failure does

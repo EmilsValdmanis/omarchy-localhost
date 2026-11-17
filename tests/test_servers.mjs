@@ -131,8 +131,8 @@ test("project grouping is stable, searchable and distinguishes repositories with
   assert.deepEqual(rows.slice().sort((a, b) => Servers.compareServers(a, b, true)).map(row => row.serverId), ["other", "web", "api"])
   assert.deepEqual(rows.slice().sort((a, b) => Servers.compareServers(a, b, false)).map(row => row.serverId), ["web", "other", "api"])
   assert.deepEqual(plain(Servers.projectGroups(rows)), {
-    "/work/atlas": { name: "atlas", branch: "", dependencyStates: "", hiddenDependencyStates: "", count: 2 },
-    "/other/atlas": { name: "atlas", branch: "", dependencyStates: "", hiddenDependencyStates: "", count: 1 },
+    "/work/atlas": { name: "atlas", branch: "", dependencyStates: "", hiddenDependencyStates: "", count: 2, stopCount: 2 },
+    "/other/atlas": { name: "atlas", branch: "", dependencyStates: "", hiddenDependencyStates: "", count: 1, stopCount: 1 },
   })
   assert.equal(Servers.matchesSearch(rows[0], "atlas", "all"), true)
   assert.equal(Servers.matchesSearch(rows[2], "apps/api", "all"), true)

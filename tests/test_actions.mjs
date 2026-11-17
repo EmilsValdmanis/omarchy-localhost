@@ -3,6 +3,7 @@ import test from "node:test"
 import { loadQmlJs, plain } from "./support/qml_js.mjs"
 
 const Actions = loadQmlJs("Actions.js")
+const Servers = loadQmlJs("Servers.js")
 const Discovery = loadQmlJs("Discovery.js")
 
 function listener(port) {
@@ -20,6 +21,9 @@ test("project stops snapshot only their project and deduplicate processes and co
   ]
   const targets = Actions.projectStopTargets(rows, "/work/atlas")
   assert.deepEqual(plain(targets.map(row => row.serverId)), ["web", "api", "reused-pid"])
+  const group = Servers.projectGroups(rows.slice(0, 2), rows)["/work/atlas"]
+  assert.equal(group.stopCount, targets.length)
+  assert.equal(Actions.projectStopHint(group), "Stop all 3 servers in atlas")
   native.pid = 999
   assert.equal(targets[0].pid, 410, "a discovery mutation cannot change queued identities")
   assert.equal(Actions.projectStopTargets(rows, "").length, 0)
