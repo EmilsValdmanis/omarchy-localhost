@@ -1138,7 +1138,7 @@ Item {
         id: serverList
         objectName: "serverList"
         anchors.fill: parent
-        anchors.rightMargin: serverScrollBar.visible ? serverScrollBar.width + root.scrollBarGap : 0
+        anchors.rightMargin: serverScrollBar.width + root.scrollBarGap
         visible: root.resultCount > 0
         model: projectModel
         clip: true
@@ -1176,7 +1176,6 @@ Item {
               projectRoot: entryDelegate.model.projectRoot
               name: entryDelegate.model.name
               branch: entryDelegate.model.branch
-              dependencyStates: entryDelegate.model.dependencyStates
               count: entryDelegate.model.count
               collapsed: entryDelegate.model.collapsed
               selected: entryDelegate.selected

@@ -75,18 +75,10 @@ function compareServers(left, right, grouped) {
 
 function projectGroups(servers, activeServers) {
   var roots = new Map()
-  var statesByRoot = new Map()
   var targetsByRoot = new Map()
-  var visibleIds = new Set(servers.map(function(row) { return row.serverId }))
   for (var row of activeServers || servers) {
     if (!targetsByRoot.has(row.projectRoot)) targetsByRoot.set(row.projectRoot, new Set())
     targetsByRoot.get(row.projectRoot).add(Sources.key(row))
-    if (row.dependencyStates) {
-      if (!statesByRoot.has(row.projectRoot)) statesByRoot.set(row.projectRoot, new Map())
-      var states = statesByRoot.get(row.projectRoot)
-      var summary = row.name + " → " + row.dependencyStates.split("\n").join(" · ")
-      states.set(summary, states.get(summary) || visibleIds.has(row.serverId))
-    }
     if (!row.gitCommonDir) continue
     if (!roots.has(row.gitCommonDir)) roots.set(row.gitCommonDir, new Set())
     roots.get(row.gitCommonDir).add(row.projectRoot)
@@ -97,12 +89,8 @@ function projectGroups(servers, activeServers) {
     var key = server.projectRoot
     if (!groups[key]) {
       var name = Paths.basename(key).replace(/^compose:/, "")
-      var states = statesByRoot.get(key)
-      var summaries = states ? Array.from(states.keys()).sort() : []
       groups[key] = { name: server.cwdDeleted ? name + " (deleted working directory)" : name, branch: "", count: 0,
-        stopCount: targetsByRoot.get(key).size,
-        dependencyStates: summaries.join("\n"),
-        hiddenDependencyStates: summaries.filter(function(summary) { return !states.get(summary) }).join("\n") }
+        stopCount: targetsByRoot.get(key).size }
     }
     if (server.gitBranch && roots.has(server.gitCommonDir) && roots.get(server.gitCommonDir).size > 1)
       groups[key].branch = server.gitBranch

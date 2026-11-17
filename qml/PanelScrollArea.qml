@@ -15,12 +15,6 @@ Item {
   readonly property real viewportWidth: list.width
   property real scrollBarGap: Style.space(2)
   property string emptyText: ""
-  property bool reserveScrollBar: false
-
-  // Wait for wrapped rows to settle before changing their available width.
-  // Deriving padding directly from ScrollBar.size feeds back into list height.
-  function updateScrollPadding() { reserveScrollBar = list.contentHeight > list.height + 1 }
-
   function itemAtIndex(index) { return list.itemAtIndex(index) }
   function positionViewAtIndex(index, mode) { list.positionViewAtIndex(index, mode) }
 
@@ -32,9 +26,7 @@ Item {
   ListView {
     id: list
     anchors.fill: parent
-    anchors.rightMargin: root.reserveScrollBar ? scrollbar.width + root.scrollBarGap : 0
-    onContentHeightChanged: Qt.callLater(root.updateScrollPadding)
-    onHeightChanged: Qt.callLater(root.updateScrollPadding)
+    anchors.rightMargin: scrollbar.width + root.scrollBarGap
     clip: true
     spacing: Style.space(2)
     boundsBehavior: Flickable.StopAtBounds
@@ -44,7 +36,7 @@ Item {
     ScrollBar.vertical: ListScrollBar {
       id: scrollbar
       objectName: "auxiliaryScrollBar"
-      visible: root.reserveScrollBar
+      visible: list.contentHeight > list.height + 1
       parent: root
       x: root.width - width
       height: list.height
