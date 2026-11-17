@@ -435,6 +435,8 @@ function serverFromContext(context, scheme, lanRoute, lanInterfaces) {
     cwd: process.cwd,
     projectRoot: (process.project && process.project.root) || process.cwd || context.projectRoot || contextId(context),
     projectPath: (process.project && process.project.relativePath) || "",
+    gitBranch: (process.project && process.project.gitBranch) || "",
+    gitCommonDir: (process.project && process.project.gitCommonDir) || "",
     localUrl: scheme + "://" + Network.urlHost(localHost) + ":" + listener.port,
     lanUrl: lanAvailable ? scheme + "://" + Network.urlHost(lanHost) + ":" + listener.port : "",
     lanHost: lanHost,

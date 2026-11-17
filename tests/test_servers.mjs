@@ -55,6 +55,8 @@ test("normalizes servers from discovery and model rows", () => {
     hint: "",
     projectRoot: "/work/app",
     projectPath: "",
+    gitBranch: "",
+    gitCommonDir: "",
     memoryBytes: -1,
     memoryHistoryJson: "[]",
   })
@@ -86,6 +88,8 @@ test("normalizes servers from discovery and model rows", () => {
     hint: "",
     projectRoot: "Other servers",
     projectPath: "",
+    gitBranch: "",
+    gitCommonDir: "",
     memoryBytes: -1,
     memoryHistoryJson: "[]",
   })
@@ -119,10 +123,22 @@ test("project grouping is stable, searchable and distinguishes repositories with
   assert.deepEqual(rows.slice().sort((a, b) => Servers.compareServers(a, b, true)).map(row => row.serverId), ["other", "web", "api"])
   assert.deepEqual(rows.slice().sort((a, b) => Servers.compareServers(a, b, false)).map(row => row.serverId), ["web", "other", "api"])
   assert.deepEqual(plain(Servers.projectGroups(rows)), {
-    "/work/atlas": { name: "atlas", count: 2 }, "/other/atlas": { name: "atlas", count: 1 },
+    "/work/atlas": { name: "atlas", branch: "", count: 2 }, "/other/atlas": { name: "atlas", branch: "", count: 1 },
   })
   assert.equal(Servers.matchesSearch(rows[0], "atlas", "all"), true)
   assert.equal(Servers.matchesSearch(rows[2], "apps/api", "all"), true)
   const changed = { ...rows[0], projectRoot: "/work/another" }
   assert.equal(Servers.serversEqual(rows[0], changed), false)
+})
+
+test("branch labels use active worktrees of the same repository even while filtering", () => {
+  const main = Servers.normalizeServer({ projectRoot: "/work/shop", gitCommonDir: "/work/shop/.git", gitBranch: "main" })
+  const checkout = { ...main, projectRoot: "/trees/shop", gitBranch: "feature/Checkout" }
+  const clone = { ...main, projectRoot: "/clone/shop", gitCommonDir: "/clone/shop/.git" }
+  const detached = { ...checkout, gitBranch: "" }
+  assert.equal(Servers.projectGroups([main, main, clone])[main.projectRoot].branch, "")
+  assert.equal(Servers.projectGroups([main, detached])[detached.projectRoot].branch, "")
+  assert.equal(Servers.projectGroups([checkout], [main, checkout])[checkout.projectRoot].branch, "feature/Checkout")
+  assert.equal(Servers.matchesSearch(checkout, "feature/check", "all"), true)
+  assert.equal(Servers.matchesSearch(main, "feature/check", "all"), false)
 })

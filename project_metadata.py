@@ -11,17 +11,42 @@ MAX_MANIFEST_BYTES = 256 * 1024
 MAX_ANCESTORS = 24
 
 
-def repository_marker(directory: Path) -> bool:
-    git = directory / ".git"
-    if git.is_dir():
-        return (git / "HEAD").is_file()
+def git_line(path: Path) -> str:
+    """Read one small Git metadata file, ignoring missing or malformed values."""
     try:
-        if git.is_file():
-            with git.open("rb") as stream:
-                return stream.read(8) == b"gitdir: "
-    except OSError:
+        if path.is_file():
+            with path.open("rb") as stream:
+                raw = stream.read(8193)
+            if len(raw) <= 8192:
+                value = raw.decode().rstrip("\r\n")
+                if value.isprintable():
+                    return value
+    except (OSError, UnicodeError):
         pass
-    return False
+    return ""
+
+
+def git_directory(root: Path) -> Path | None:
+    marker = root / ".git"
+    if marker.is_dir():
+        return marker if (marker / "HEAD").is_file() else None
+    pointer = git_line(marker)
+    if pointer.startswith("gitdir: ") and pointer[8:]:
+        return root / pointer[8:]
+    return None
+
+
+def worktree_metadata(directory: Path) -> tuple[str, str]:
+    head = git_line(directory / "HEAD")
+    if not head:
+        return "", ""
+    common = git_line(directory / "commondir")
+    try:
+        repository = (directory / common).resolve(strict=True)
+    except (OSError, RuntimeError):
+        return "", ""
+    branch = head.removeprefix("ref: refs/heads/") if head.startswith("ref: refs/heads/") else ""
+    return str(repository), branch
 
 
 class ProjectInspector:
@@ -30,6 +55,7 @@ class ProjectInspector:
     def __init__(self):
         self.projects: dict[str, dict] = {}
         self.manifests: dict[Path, dict] = {}
+        self.worktrees: dict[Path, tuple[str, str]] = {}
 
     def manifest(self, path: Path) -> dict:
         if path not in self.manifests:
@@ -64,6 +90,7 @@ class ProjectInspector:
         python = {}
         workspace = None
         repository = None
+        git = None
         for depth, parent in enumerate((directory, *directory.parents)):
             if depth >= MAX_ANCESTORS or parent == Path(parent.anchor):
                 break
@@ -78,7 +105,8 @@ class ProjectInspector:
                     or (parent / "go.work").is_file()):
                 workspace = parent
             # Git worktrees use a .git file. Nested repositories are boundaries.
-            if repository_marker(parent):
+            git = git_directory(parent)
+            if git is not None:
                 repository = parent
                 break
 
@@ -109,5 +137,9 @@ class ProjectInspector:
             "relativePath": str(project_dir.relative_to(root)) if project_dir.is_relative_to(root) else ".",
             "dependencies": sorted(dependencies)[:2048],
         }
+        if git is not None:
+            if git not in self.worktrees:
+                self.worktrees[git] = worktree_metadata(git)
+            value["gitCommonDir"], value["gitBranch"] = self.worktrees[git]
         self.projects[key] = value
         return value

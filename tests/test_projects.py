@@ -62,6 +62,29 @@ class ProjectMetadataTests(unittest.TestCase):
         self.assertEqual(project["name"], "api")
         self.assertEqual(project["dependencies"], ["fastapi", "uvicorn"])
 
+    def test_linked_worktrees_share_identity_and_read_their_own_head(self):
+        self.repository(self.root)
+        main = self.inspector.inspect(str(self.root))
+        self.assertEqual(main["gitBranch"], "main")
+        for marker_absolute in (True, False):
+            name = f"tree-{marker_absolute}"
+            tree = self.root / name
+            tree.mkdir()
+            admin = self.root / ".git/worktrees" / name
+            admin.mkdir(parents=True)
+            target = admin if marker_absolute else Path("../.git/worktrees") / name
+            (tree / ".git").write_text(f"gitdir: {target}\n")
+            (admin / "commondir").write_text("../..\n")
+            head = admin / "HEAD"
+            head.write_text("ref: refs/heads/feature/checkout\n")
+            project = self.inspector.inspect(str(tree))
+            self.assertEqual(project["gitBranch"], "feature/checkout")
+            self.assertEqual(project["gitCommonDir"], main["gitCommonDir"])
+            head.write_text("a" * 40 + "\n")
+            detached = ProjectInspector().inspect(str(tree))
+            self.assertEqual(detached["gitBranch"], "")
+            self.assertEqual(detached["gitCommonDir"], main["gitCommonDir"])
+
     def test_identical_folder_names_in_different_repositories_stay_separate(self):
         roots = []
         for name in ("one", "two"):

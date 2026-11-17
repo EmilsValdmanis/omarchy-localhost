@@ -9,13 +9,13 @@ function entriesFor(servers, groups, grouped, collapsed) {
       var group = groups[projectRoot]
       entries.push({
         entryId: "project:" + projectRoot, projectRoot: projectRoot,
-        projectHeader: true, name: group.name, count: group.count,
+        projectHeader: true, name: group.name, branch: group.branch, count: group.count,
         collapsed: folded, serverIndex: -1, serverId: ""
       })
     }
     if (!folded) entries.push({
       entryId: "server:" + server.serverId, projectRoot: projectRoot,
-      projectHeader: false, name: "", count: 0, collapsed: false,
+      projectHeader: false, name: "", branch: "", count: 0, collapsed: false,
       serverIndex: index, serverId: server.serverId
     })
     previousRoot = projectRoot
@@ -26,6 +26,6 @@ function entriesFor(servers, groups, grouped, collapsed) {
 function entriesEqual(left, right) {
   return left.entryId === right.entryId && left.projectRoot === right.projectRoot
     && left.projectHeader === right.projectHeader && left.name === right.name
-    && left.count === right.count && left.collapsed === right.collapsed
+    && left.branch === right.branch && left.count === right.count && left.collapsed === right.collapsed
     && left.serverIndex === right.serverIndex && left.serverId === right.serverId
 }

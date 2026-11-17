@@ -11,6 +11,7 @@ CursorSurface {
   id: header
   required property string projectRoot
   required property string name
+  property string branch: ""
   required property int count
   property bool collapsed: false
   property bool selected: false
@@ -34,7 +35,7 @@ CursorSurface {
   Keys.onPressed: function(event) { header.navigationKey(event) }
 
   Accessible.role: Accessible.Button
-  Accessible.name: name + ", " + count + " " + countNoun + (count === 1 ? "" : "s")
+  Accessible.name: name + (branch ? ", branch " + branch : "") + ", " + count + " " + countNoun + (count === 1 ? "" : "s")
   Accessible.description: (projectRoot ? projectRoot + " · " : "") + (collapsed ? "Collapsed" : "Expanded")
   Accessible.checkable: true
   Accessible.checked: !collapsed
@@ -71,7 +72,7 @@ CursorSurface {
     }
     PanelSectionHeader {
       objectName: "projectName"
-      Layout.fillWidth: true
+      Layout.maximumWidth: header.branch ? header.width * 0.42 : header.width
       Layout.alignment: Qt.AlignVCenter
       // Section labels reserve extra top padding for clipped list headings.
       // This row already has vertical space; center the label and count together.
@@ -80,6 +81,19 @@ CursorSurface {
       foreground: header.selected ? Theme.Color.accent : header.foreground
       elide: Text.ElideMiddle
     }
+    Text {
+      objectName: "projectBranch"
+      visible: header.branch !== ""
+      Layout.maximumWidth: header.width * 0.40
+      Layout.alignment: Qt.AlignVCenter
+      textFormat: Text.PlainText
+      text: "\uf126 " + header.branch
+      color: Theme.Color.accent
+      font.family: Style.font.family
+      font.pixelSize: Style.font.caption
+      elide: Text.ElideMiddle
+    }
+    Item { Layout.fillWidth: true }
     PanelActionButton {
       objectName: "projectStopAll"
       visible: header.showStopAction
