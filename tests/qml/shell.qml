@@ -600,6 +600,12 @@ ShellRoot {
         equal(manual.count, 1)
         equal(manual.collapsed, false)
         equal(automatic.name, "Automatic")
+        for (var size of [13, 14]) {
+          Style.fontBaseSize = size
+          settled()
+          check(!findChild(manual, "projectName").truncated, "Manual fits at font size " + size)
+          check(!findChild(automatic, "projectName").truncated, "Automatic fits at font size " + size)
+        }
         equal(automatic.count, 2)
         equal(automatic.collapsed, true)
         check(!findChild(manual, "projectStopAll").visible, "section headers do not expose project stop actions")
@@ -870,6 +876,7 @@ ShellRoot {
       }
 
       function test_failed_restart_log_survives_an_empty_list() {
+        groupedFixtures(3)
         var service = createTemporaryObject(serviceComponent, tests)
         panel.failedRestart = Qt.binding(function() { return service.failedRestart })
         var path = "/tmp/project logs/restart-123.log"
@@ -878,6 +885,11 @@ ShellRoot {
         service.actionServerId = "server-0"
         service.actionServerLabel = "atlas / api (:8000)"
         service.finishAction(1, JSON.stringify({ ok: false, error: "The replacement exited with status 1", log: path }), "", false)
+        panel.focusNavigation()
+        tryCompare(panel.keyboardFocusTarget, "activeFocus", true)
+        keyClick(Qt.Key_Home)
+        keyClick(Qt.Key_Tab)
+        equal(panel.selectedProjectRoot, "/work/console", "Tab still navigates projects with a failure notice")
         servers.clear()
         panel.revision++
         tryCompare(panel, "resultCount", 0)
@@ -887,15 +899,21 @@ ShellRoot {
         panel.openRestartLogRequested.connect(function(file) { opened.push(file) })
         var open = findChild(banner, "openRestartLog")
         mouseClick(open, open.width / 2, open.height / 2)
-        panel.focusNavigation()
         keyClick(Qt.Key_L, Qt.ControlModifier)
         equal(opened.length, 2)
         equal(opened[0], path)
         equal(opened[1], path)
         panel.dismissRestartFailureRequested.connect(function() { service.failedRestart = null })
         var dismiss = findChild(banner, "dismissRestartFailure")
-        mouseClick(dismiss, dismiss.width / 2, dismiss.height / 2)
+        panel.focusNavigation()
+        tryCompare(panel.keyboardFocusTarget, "activeFocus", true)
+        keyClick(Qt.Key_Tab)
+        tryCompare(open, "activeFocus", true)
+        keyClick(Qt.Key_Tab)
+        tryCompare(dismiss, "activeFocus", true)
+        keyClick(Qt.Key_Return)
         check(!banner.visible)
+        tryCompare(panel.keyboardFocusTarget, "activeFocus", true)
       }
 
       function test_notices_do_not_move_footer_or_resize_popup() {
@@ -1110,6 +1128,7 @@ ShellRoot {
       }
 
       function test_docker_icon_shows_compose_dependencies_through_fold_and_recovery() {
+        panel.x = 180
         panel.groupByProject = true
         var web = ["frontend", "atlas-web-1", "web", "127.0.0.1:2999->80/tcp",
           "/work/atlas", "web", "atlas", "running", "Up 2 minutes", "redis:service_started:false", "False", "1"]
@@ -1135,9 +1154,13 @@ ShellRoot {
         var tip = findChild(webWarning, "composeDependencyTooltip")
         mouseMove(webWarning, webWarning.width / 2, webWarning.height / 2)
         tryCompare(tip, "opened", true)
-        equal(tip.text, "Compose dependencies\nredis exited")
-        equal(findChild(tip.contentItem, "dependencyName").text, "redis")
-        equal(findChild(tip.contentItem, "dependencyStatus").text, "exited")
+        fuzzyCompare(tip.x + tip.width / 2, webWarning.width / 2, 1)
+        equal(tip.text, "Docker Compose\nweb running\nredis exited")
+        equal(findChild(tip.contentItem, "dependencyName").text, "web")
+        equal(findChild(tip.contentItem, "dependencyStatus").text, "running")
+        var dep = findChild(tip.contentItem, "composeServiceRows").itemAt(1)
+        equal(findChild(dep, "dependencyName").text, "redis")
+        equal(findChild(dep, "dependencyStatus").text, "exited")
         mouseMove(tests, 850, 750)
         tryCompare(tip, "visible", false)
         check(!findChild(list.itemAtIndex(2), "serverFrameworkIcon").showDependencies)
@@ -1153,7 +1176,7 @@ ShellRoot {
         warning = findChild(header, "projectComposeIcon")
         panel.query = "Project 0"
         tryCompare(list, "count", 2)
-        equal(header.dependencyStates, "atlas / web → redis exited")
+        equal(header.dependencyStates, "atlas / web → web running · redis exited")
         panel.query = ""
         panel.setProjectCollapsed("/work/atlas", true)
         tryCompare(list, "count", 1)
@@ -1163,16 +1186,20 @@ ShellRoot {
         mouseMove(warning, warning.width / 2, warning.height / 2)
         var groupTip = findChild(warning, "composeDependencyTooltip")
         tryCompare(groupTip, "opened", true)
-        equal(findChild(groupTip.contentItem, "dependencyName").text, "atlas / web → redis")
-        equal(findChild(groupTip.contentItem, "dependencyStatus").text, "exited")
+        equal(findChild(groupTip.contentItem, "dependencyName").text, "atlas / web")
+        equal(findChild(groupTip.contentItem, "dependencyStatus").text, "running")
         var warningHeight = header.height
         redis[7] = "running"
         redis[8] = "Up a minute (healthy)"
         scan()
         check(warning.visible)
-        tryCompare(findChild(groupTip.contentItem, "dependencyStatus"), "text", "healthy")
+        tryCompare(groupTip, "text", "Docker Compose\natlas / web → web running · redis healthy")
+        var groupDep = findChild(groupTip.contentItem, "composeServiceRows").itemAt(1)
+        equal(findChild(groupDep, "dependencyName").text, "atlas / web → redis")
+        equal(findChild(groupDep, "dependencyStatus").text, "healthy")
         check(!findChild(warning, "composeProblemDot").visible)
         equal(header.height, warningHeight)
+        panel.x = 0
         panel.setProjectCollapsed("/work/atlas", false)
         tryCompare(list, "count", 3)
         settled()
@@ -1182,10 +1209,11 @@ ShellRoot {
         var healthyTip = findChild(icon, "composeDependencyTooltip")
         mouseMove(icon, icon.width / 2, icon.height / 2)
         tryCompare(healthyTip, "opened", true)
-        equal(findChild(healthyTip.contentItem, "dependencyStatus").text, "healthy")
+        check(icon.mapToItem(tests, healthyTip.x, 0).x >= 0, "Compose tooltip fits at the left edge")
+        equal(findChild(healthyTip.contentItem, "dependencyStatus").text, "running")
         web[9] = ""
         scan()
-        equal(healthyTip.text, "Compose dependencies\nNo declared dependencies")
+        equal(healthyTip.text, "Docker Compose\nweb running")
       }
 
       function test_project_grouping_filtering_and_shared_actions() {
@@ -1235,6 +1263,24 @@ ShellRoot {
         settled()
       }
 
+      function test_long_project_labels_leave_room_for_controls() {
+        groupedFixtures(3)
+        var header = findChild(list.itemAtIndex(0), "projectHeader")
+        header.name = "long-project-name-".repeat(6)
+        header.branch = "long-branch-name-".repeat(6)
+        header.dependencyStates = "api → db healthy"
+        settled()
+        var name = findChild(header, "projectName")
+        var branch = findChild(header, "projectBranch")
+        var compose = findChild(header, "projectComposeIcon")
+        var stop = findChild(header, "projectStopAll")
+        var count = findChild(header, "projectCount")
+        check(name.truncated && branch.truncated)
+        check(name.width > 0 && branch.width > 0)
+        check(branch.x + branch.width <= compose.x && compose.x + compose.width <= stop.x)
+        check(stop.x + stop.width <= count.x && count.x + count.width <= header.width)
+      }
+
       function test_project_stop_all_is_one_click_and_does_not_fold() {
         groupedFixtures(9)
         panel.setProjectCollapsed("/work/atlas", true)
@@ -1269,6 +1315,7 @@ ShellRoot {
         var tip = findChild(button, "projectStopTooltip")
         mouseMove(button, button.width / 2, button.height / 2)
         tryCompare(tip, "opened", true)
+        fuzzyCompare(tip.x + tip.width / 2, button.width / 2, 1)
         equal(tip.text, "Stop all 3 servers in atlas")
         mouseClick(button, button.width / 2, button.height / 2)
         equal(projectStopSpy.count, 3)
@@ -1279,6 +1326,7 @@ ShellRoot {
       }
 
       function test_project_stop_arrow_navigation_and_busy_guard() {
+        panel.x = tests.width - panel.width
         groupedFixtures(9)
         panel.focusNavigation()
         wait(50)
@@ -1294,6 +1342,7 @@ ShellRoot {
         var tip = findChild(button, "projectStopTooltip")
         tryCompare(tip, "opened", true)
         equal(tip.text, "Stop all 3 servers in atlas")
+        check(button.mapToItem(tests, tip.x + tip.width, 0).x <= tests.width, "Stop tooltip fits at the right edge")
         keyClick(Qt.Key_Return)
         equal(projectStopSpy.count, 1)
         equal(projectStopSpy.signalArguments[0][0], "/work/atlas")

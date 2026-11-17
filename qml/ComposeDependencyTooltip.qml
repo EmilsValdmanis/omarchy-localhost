@@ -11,10 +11,10 @@ PanelToolTip {
   id: tooltip
   required property string details
   objectName: "composeDependencyTooltip"
-  x: 0
+  x: parent ? (parent.width - width) / 2 : 0
   width: Style.space(232)
   padding: Style.space(12)
-  text: "Compose dependencies\n" + (details || "No declared dependencies")
+  text: "Docker Compose\n" + (details || "Service status unavailable")
 
   component Caption: Text {
     textFormat: Text.PlainText
@@ -26,16 +26,17 @@ PanelToolTip {
   contentItem: ColumnLayout {
     spacing: Style.space(5)
     Caption {
-      text: "Compose dependencies"
+      text: "Docker Compose"
       font.pixelSize: Style.font.body
       font.bold: true
       Layout.bottomMargin: Style.space(2)
     }
     Caption {
       visible: tooltip.details === ""
-      text: "No declared dependencies"
+      text: "Service status unavailable"
     }
     Repeater {
+      objectName: "composeServiceRows"
       model: tooltip.visible ? Compose.tooltipRows(tooltip.details) : []
       RowLayout {
         id: dependency

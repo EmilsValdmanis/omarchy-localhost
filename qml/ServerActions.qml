@@ -62,7 +62,7 @@ RowLayout {
       actionIndex: modelData.action
       icon: actionIndex === Actions.ACTIONS.stop && root.forceStopAvailable ? "\uf714" : modelData.icon
       hint: root.hint(actionIndex, actionIndex === Actions.ACTIONS.stop && root.forceStopAvailable
-        ? "Force stop server (Delete)" : modelData.tip)
+        ? "Force stop server" : modelData.tip)
       foreground: actionIndex === Actions.ACTIONS.stop ? Theme.Color.urgent : root.foreground
       accent: actionIndex === Actions.ACTIONS.stop ? Theme.Color.urgent : Theme.Color.accent
       available: root.available(actionIndex)

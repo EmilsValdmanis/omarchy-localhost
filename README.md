@@ -1,360 +1,71 @@
 # Localhost for Omarchy
 
-[![Built for Omarchy: Plugin](https://raw.githubusercontent.com/tcballard/omarchy-badges/75975e5b5bf75e7ede3764bcd2950046f7abfe2c/badges/v1/omarchy-plugin.svg)](https://github.com/tcballard/omarchy-badges)
+[![Built for Omarchy](https://raw.githubusercontent.com/tcballard/omarchy-badges/75975e5b5bf75e7ede3764bcd2950046f7abfe2c/badges/v1/omarchy-plugin.svg)](https://github.com/tcballard/omarchy-badges)
 
-Discover, control, and share local development servers from the Omarchy bar.
-Start Vite, Next.js, Astro, Rails, or another server and Localhost adds it
-automatically.
+Find your running dev servers in the Omarchy bar. Open the right worktree in
+your browser, see what’s using RAM, or scan a QR code to try a change on your
+phone. Localhost discovers native HTTP and HTTPS servers and published Docker
+ports automatically.
 
-See [GitHub Releases](https://github.com/EmilsValdmanis/omarchy-localhost/releases)
-for version history and release notes.
+![Localhost showing two Git worktrees, server RAM usage, and a QR code for phone sharing](preview.png)
 
-> `pnpm dev` → Localhost appears → click **QR** → scan with your phone
-
-![Localhost showing Atlas servers on the main and checkout-redesign branches, RAM trends, and QR sharing](preview.png)
-
-Preview theme and wallpaper: [Motion Blur by Erik Johansson](https://github.com/erikrjohansson/omarchy-motion-blur-theme) · [MIT notices](THIRD_PARTY_NOTICES.md).
-
-## Features
-
-- Automatic process, framework, Docker, and Compose discovery
-- Collapsible repository and monorepo groups with package-aware framework detection
-- One-click **Stop all** for every server in a repository or monorepo
-- Localhost and LAN URLs with bind-address-aware availability
-- Open, copy, QR, terminal, editor, restart, skip, and stop actions
-- Search and complete arrow-key or Vim-style navigation
-- Phone-ready QR sharing with optional subnet-scoped UFW rules
-- Persistent service skips that follow port changes, with one-click restore
-- Port filters and an **Access** view for Localhost-created LAN rules
-- Process identity verification before stop or restart
-- Native Omarchy styling with no service to install, database, or account
-- Always-visible compact system and server RAM breakdown
-- Live RAM sparkline and usage number for each server
-- Independent native and Docker discovery, with slower RAM sampling while closed
-- Restart logs capped at 1 MiB each, keeping recent output
-
-Servers in the same repository or workspace appear together, with package paths
-under each name. When servers are running in two or more worktrees of the same
-Git repository, each project header shows its checked-out branch. Search by
-branch in either list view, even with only one active worktree. Click a project header to collapse or expand its servers; its
-count stays visible when collapsed. Fold choices survive scans, closing the
-panel, and switching to the flat list for the current shell session. Search and
-port filters reveal matching servers, then restore your folds when cleared.
-Turn off **Group** for a flat list sorted by port.
-Click the square **Stop all** icon on a project header to gracefully stop all of
-that project's discovered server processes and Docker containers in one click.
-Hover over **Stop all** or focus it with the keyboard to see how many servers
-it will stop in the project.
-It includes folded servers and servers hidden by search or port filters. Shared
-processes and containers are stopped once, and other projects keep running. Actions run
-in sequence with the same identity checks as individual stops; a failure does
-not prevent the remaining servers from being stopped. The result reports any
-failures by server name and port. Processes that refuse to stop retain their
-individual **Force stop** action.
-
-If you remove a worktree while its native dev server is running, its row shows
-**Working directory deleted**. Select the row and choose **Stop** in the footer
-or press **Delete** to open the confirmation. A previously detected server stays visible while it holds the port, even
-if it stops answering HTTP. Terminal, editor, and restart actions require a live
-working directory.
-
-Click a row to select it, then use the shared action toolbar. Moving the pointer
-over other rows keeps your selection. **Open** and clicking a port use the local
-URL. **Copy** always copies that same local URL. **QR** shares the network URL,
-which can also be copied from the QR view with its copy button or `Ctrl+C`.
-Horizontal navigation can focus disabled actions to explain why they are unavailable;
-pressing Enter still leaves them inactive. The RAM breakdown stays visible; hover its segments
-for usage details. Server colors stay tied to process or container identity when the
-list changes; ports served by the same process share a color.
-
-LAN-ready servers listen on `0.0.0.0`, `::`, or a LAN interface. Servers bound
-to `127.0.0.1` or `::1` remain available for desktop actions, but **QR** is
-disabled until they are exposed to the local network.
+Preview theme and wallpaper by Erik Johansson. [Motion Blur](https://github.com/erikrjohansson/omarchy-motion-blur-theme) · [Credits](THIRD_PARTY_NOTICES.md)
 
 ## Install
 
-Localhost targets the Quickshell-based Omarchy 4 / Quattro plugin API.
+Localhost runs on Omarchy 4 / Quattro with the Quickshell bar.
 
 ```bash
 omarchy plugin add https://github.com/EmilsValdmanis/omarchy-localhost.git --enable
 ```
 
-It appears on the right side of the bar by default. Move it with:
+Start your dev server as usual, then click the Localhost icon on the right side
+of the bar. The icon appears when a server is detected. To keep it visible
+between projects, enable **Show when no servers are running** in the plugin settings.
+
+## Find a server
+
+Servers are grouped by project. When you run two worktrees of the same
+repository, their headers show the branch names. Press `/` to search by branch,
+project, or port. Use the arrow keys or `h/j/k/l` to move and `Enter` to act.
+
+- **Docker Compose** — Hover over the Docker icon to see the service and its
+  dependencies, including databases with private ports. A dot flags a problem.
+- **Stop all** — Stops the whole project in one click, including servers hidden
+  by a search or fold. Hover over the button to see how many it will stop.
+- **Skipped** — Look here if a server is missing or you want to restore one
+  you hid. Skipping an identified service follows it when its port changes.
+- **Restart logs** — If a restarted native server fails to start serving requests,
+  use **Open log** to read its output in your editor, even after its row disappears.
+
+## Try it on your phone
+
+Connect the phone to the same Wi-Fi as your computer. Start the server on a LAN
+address and select **QR** in Localhost. For Vite, use the `--host` flag.
 
 ```bash
-omarchy bar move emils.localhost --section left   # or center / right
+pnpm exec vite --host 0.0.0.0
 ```
 
-The intended Omarchy environment already provides the required system tools:
-Python 3.11+, `ss`, `ip`, `curl`, `wl-copy`, and `qrencode`. Docker discovery is
-optional and only runs when Docker is available.
+If **QR** is disabled, check whether the server is listening only on
+`127.0.0.1` or `::1`. If UFW blocks the connection, Localhost can authorize
+the port for your subnet. Manage those rules under **Access**.
 
-## Keyboard
+## Optional keyboard shortcut
 
-| Key                                  | Action                                                 |
-| ------------------------------------ | ------------------------------------------------------ |
-| `/` or click search                  | Search by project, branch, framework, port, path, or container |
-| `up/down`, `j/k`, `ctrl+p/ctrl+n`    | Select a visible server or project header              |
-| `left/right`, `h/l`                  | Select an action; on a header, reach **Stop all**      |
-| `enter`                              | Run the selected action, or toggle a project header   |
-| `space` on a project header          | Toggle folding, or run **Stop all** when highlighted  |
-| `ctrl+left/right`                    | Collapse/expand the selected server's project          |
-| `ctrl+shift+left/right`              | Collapse/expand all projects                           |
-| `ctrl+up/down`, `tab/shift+tab`      | Jump to the previous/next project header               |
-| `home/end`                           | Select the first/last visible entry                    |
-| `zc/zo`, `za`                        | Collapse/expand or toggle the current project (Vim)    |
-| `zM/zR`                              | Collapse/expand all projects (Vim)                     |
-| `J/K`                                | Jump to the next/previous project header (Vim)         |
-| `gg/G`                               | Select the first/last visible entry (Vim)              |
-| `ctrl+c`                             | Copy the selected local URL                            |
-| `ctrl+shift+c`                       | Copy the selected LAN URL, when available              |
-| `ctrl+r`                             | Refresh discovery                                      |
-| `alt+r`                              | Restart the selected server                            |
-| `delete`, or `ctrl+k` with no filter | Confirm stopping the selected server                   |
-| `esc`                                | Leave search, clear the filter, then close             |
-
-Select a project header with `up/down` or `j/k`, then press `right` or `l` to
-highlight its **Stop all** icon. Press `enter` or `space` to stop that entire
-project, including folded or filtered servers. `left` / `h` or `esc` returns
-to the header without stopping. Another `right` / `l` enters the first server,
-expanding the project if needed. Busy stop actions are skipped by navigation.
-Use `enter` or `space` on the header itself, `zc/zo`, or `ctrl+left/right` to
-fold projects. Collapsing a selected server's project moves selection to its
-header; hidden servers are skipped and server actions are disabled on headers.
-Folding, Tab, and Home/End shortcuts leave text editing alone while search has focus.
-Use `ctrl+up/down` to jump between projects from search.
-Selection stops at the first and last entries without wrapping.
-Vim commands also work from a selected server: `zc` folds its project and
-selects the header. Uppercase commands use Shift. Escape cancels a pending
-`z` or `g` prefix, and Vim commands do not intercept search input.
-
-### Optional global shortcut
-
-To toggle Localhost with `SUPER + SHIFT + L`, add this to
-`~/.config/hypr/bindings.lua` (or choose an unused shortcut):
+Add this binding to `~/.config/hypr/bindings.lua` to toggle the panel from
+anywhere. Choose another key combination if this one is already in use.
 
 ```lua
 o.bind("SUPER + SHIFT + L", "Localhost", "omarchy-shell emils.localhost toggle")
 ```
 
-## Use it from a phone
+## Uninstall
 
-Bind the development server to all interfaces:
-
-```bash
-pnpm dev -- --host 0.0.0.0       # Vite, SvelteKit, Astro
-pnpm dev -- -H 0.0.0.0           # Next.js
-python -m http.server 8000 --bind 0.0.0.0
-```
-
-Open Localhost and choose **QR**. Your phone must be on the same Wi-Fi or LAN.
-If UFW blocks the port, Localhost can add a persistent inbound TCP rule limited
-to the server URL's interface, subnet, and selected port. Rules created by
-Localhost can be removed from **Access**.
-
-LAN discovery resolves the default route's interface address, including routes
-without a source address. Set **LAN interface** to an interface name to choose
-a different network. A server bound to a specific address uses that address's
-interface and subnet for firewall authorization.
-
-## Settings
-
-| Setting              | Purpose                                         |
-| -------------------- | ----------------------------------------------- |
-| Refresh interval     | Scan native listeners every 1–30 seconds        |
-| Show server count    | Show the detected count beside the bar icon     |
-| Show when empty      | Keep the widget available with no servers       |
-| Include Docker       | Discover browser-ready Docker and Compose ports |
-| Ignored ports        | Hide ports or ranges such as `3001,8000-8010`   |
-| Always include ports | Probe unusual or unrecognized servers           |
-| LAN interface        | Use the default route, or choose an interface such as `wlan0` |
-| Authorize LAN access | Offer scoped UFW access before QR sharing       |
-
-## How it works
-
-The **Skipped** view explains why detected listening ports were left out of
-**Servers**: settings exclusions, helper or system processes, unrecognized dev
-servers, or failed HTTP/HTTPS checks. Use it when an expected server is missing.
-It reflects the latest scan, rather than keeping an activity history.
-Manual skips appear first in their own collapsible section. Automatic exclusions
-start collapsed when manual skips exist, and open otherwise.
-Select a server and use **Skip** to hide it while it keeps running. For Compose,
-the skip follows the project and service across container replacements and port
-changes. For native Node, Bun, and Python servers with a verified project entry
-point, it follows that launch in its working directory. Other projects can use
-the same port. **Skipped → Manual → Restore** removes a service skip, even
-while the service is offline. The widget stays accessible while a saved skip exists.
-
-When discovery cannot identify a service reliably, the action offers **Skip this
-port**. Port skips still apply to every listener on that port. Use **Unskip** to
-restore a manually skipped port or **Include** to probe an automatically excluded
-port. These port choices persist in **Ignored ports** and **Always include ports**.
-Included listeners still need an HTTP or HTTPS response to appear in Servers.
-
-Localhost reads listening sockets from `ss`, batches process metadata through a
-small Python helper, and probes likely development servers over HTTP and HTTPS.
-It filters helper sockets, databases, and other non-browser services. Published
-Docker ports, including published ranges, have their own metadata and probe
-pipeline: a slow Docker daemon cannot delay native results. Docker background
-discovery runs no faster than every five seconds while the panel is open, or
-15 seconds while closed, and respects a longer configured refresh interval.
-To keep discovery responsive, it probes at most 128 eligible ports per
-published range and 1,024 Docker ports in total, prioritizing smaller mappings.
-The diagnostics show a warning if this limit leaves ports unexamined. Ports in
-Always include are prioritized within a range.
-Manual refresh (Ctrl+R, the refresh button,
-right-clicking the bar icon, or IPC refresh) bypasses HTTP probe caches;
-background scans retain caching.
-RAM readings use resident memory for native listener processes and Docker's
-container memory usage for published services. The total counts a shared
-process or container once even if it serves multiple ports. Unavailable
-readings are shown as a dash and excluded from the total. Failed or missing
-samples clear that source's previous reading and sparkline; the other sampler's
-readings remain available. RAM sampling is
-independent of discovery: native/system RAM runs every two seconds while open
-and 15 seconds while closed; Docker RAM runs every eight seconds while open
-and 30 seconds while closed. Opening the panel, discovering a new source, and
-manual refresh request a fresh sample, so a new row may show a dash briefly.
-Sparklines contain the last 30 actual readings, with a slower cadence while
-closed; discovery does not repeat cached readings in the history.
-The system breakdown uses Linux `MemTotal` and `MemAvailable`; "Free" includes
-reclaimable cache. The other bucket includes non-server processes and system
-usage. Server portions use resident-memory estimates, so their sum may differ
-slightly from physical memory accounting.
-
-Every eligible listening port is checked, including multiple HTTP servers in
-one process and fallback ports chosen when a default is busy. Known TanStack
-Devtools and Azure Functions worker endpoints are filtered when their main
-server is present. Framework detection uses executable arguments and dependencies
-from the nearest `package.json` or
-`pyproject.toml`. Project metadata is read once per discovery batch without
-executing project code or searching directory trees.
-
-Grouping uses the nearest Git repository, including worktrees and nested
-repositories. Outside Git, it recognizes pnpm, npm/Yarn workspaces, Lerna,
-Cargo workspaces, and `go.work`. Native processes and Compose services share a
-group when their working directories resolve to the same project root.
-
-Hover over a Compose service’s Docker icon to see all its declared dependencies,
-including ones with private ports. Each badge shows Docker’s current state.
-**Healthy** means the container passed its health check. **Running** means the
-container is up without a reported health result. Successful one-shot jobs
-show **completed**, and dependencies absent from the scan show **unknown**.
-A small dot appears on the Docker icon when a dependency is unhealthy, exited,
-restarting, paused, or dead. When a fold or filter hides the service, the project
-header provides the same Docker tooltip with service names on the dependency rows.
-
-Discovery and readiness probes stay on the local machine. Before stopping or
-restarting a process, the helper acquires a Linux pidfd, verifies its owner and
-start time, and signals through that handle so PID reuse cannot redirect the
-signal. Process actions require Python and Linux pidfd support.
-
-Restart is disabled when the executable or runtime entry point cannot be
-verified, including rewritten process titles such as `next-server`. Unknown
-runtime option layouts are conservatively disabled; restart those servers
-from their terminal. The helper rechecks the command and environment and
-prepares a private restart log and its collector before stopping the original.
-It reports success only after the replacement owns the original listening
-address and port and answers
-HTTP or HTTPS. If the replacement exits or takes more than 10 seconds to
-answer, the panel keeps the failure and its **Open log** button available even
-if the server disappears. Click it or press `Ctrl+L` to open that restart’s
-captured output in your Omarchy editor. Dismiss the message with **×**.
-A replacement still running at the timeout is left running;
-check the log before starting another instance. Restart does not reconstruct
-parent supervisors or roll back a failed launch. Logs live under
-`${XDG_STATE_HOME:-~/.local/state}/omarchy/localhost/`. The newest ten are kept;
-each new log is limited to 1 MiB, dropping older output as it fills. A small
-detached collector drains stdout/stderr until the restarted server and any
-children sharing its output close the pipe. Pruned active logs are drained
-without growing deleted files. See [SECURITY.md](SECURITY.md)
-for security reporting.
-
-## Remove
-
-Remove Localhost-created firewall rules from **Access** first, then run:
+Remove any firewall rules you added through **Access** before removing the plugin.
 
 ```bash
 omarchy plugin remove emils.localhost
 ```
 
-If the plugin is already gone, inspect `sudo ufw status numbered` for rules
-commented `omarchy-localhost` and remove the matching rule numbers.
-
-## Development
-
-The root keeps the two entry points named in `manifest.json`: `Widget.qml`
-for the bar and panel, and `QrOverlay.qml` for phone sharing. Implementation
-components live in `qml/`:
-
-| Path                                                                | Responsibility                                         |
-| ------------------------------------------------------------------- | ------------------------------------------------------ |
-| `qml/RadarService.qml` | Merge independent discovery and RAM samples; control servers |
-| `qml/RadarDiscovery.qml`, `qml/Discovery.js` | Discover, classify, and probe native and Docker listeners |
-| `qml/CommandProcess.qml` | Collect subprocess output and complete exits, cancellations, and failed starts once |
-| `qml/Servers.js`, `qml/ListModelSync.js` | Normalize server rows and preserve model delegates during updates |
-| `qml/Actions.js` | Toolbar metadata, navigation order, and action availability |
-| `qml/Ports.js`, `qml/Diagnostics.js` | Port preferences and skipped-listener explanations |
-| `qml/Sources.js`, `qml/Paths.js` | Stable process/container identity and path naming |
-| `qml/Network.js`, `qml/Frameworks.js`, `qml/Memory.js` | Network addresses, framework identification, and RAM accounting |
-| `qml/FirewallService.qml`, `qml/Firewall.js` | LAN authorization and managed UFW rules |
-| `qml/ServerPanel.qml`, `qml/ServerRow.qml`, `qml/ServerActions.qml` | Server list and controls |
-| `qml/ProjectHeader.qml`, `qml/ProjectList.js` | Project folding and visible navigation entries |
-| `qml/DetailRow.qml`, `qml/PortFilter.qml` | Skipped and Access rows; port filter controls |
-| `qml/MemorySparkline.qml`, `qml/PanelScrollArea.qml`, `qml/ListEdgeFades.qml` | Memory trends and list scrolling |
-| `qml/PaintedGlyph.qml`, `qml/InlineIcon.qml`, `qml/Motion.js` | Icon alignment and motion across shell versions |
-| `qml/QrService.qml`, `qml/Qr.js`, `qml/QrContent.qml`, `qml/QrCode.qml` | QR generation, parsing, and display |
-| `localhost_helper.py`, `project_metadata.py` | Linux/Docker metadata and verified process actions |
-| `tests/` | Feature models, helper behavior, and isolated native QML checks |
-
-`Widget` adapts shell settings, IPC, and UI signals to the services. The services
-own workflows; JavaScript feature modules handle data and policy without importing
-QML. Metadata discovery and resource sampling use separate helper commands. Keep
-the manifest entry points at the root. Refactor decisions and retained external
-constraints are recorded in [REFACTOR_DECISIONS.md](REFACTOR_DECISIONS.md).
-
-Run the development watcher from the repository root:
-
-```bash
-./dev
-```
-
-It validates the plugin, creates a guarded development install at
-`~/.config/omarchy/plugins/emils.localhost`, enables it when necessary, and
-syncs every saved change into that directory. It restarts the Omarchy shell
-on startup and after QML, JavaScript, or manifest changes to clear cached
-components; the bar briefly disappears during each restart. Saves are batched
-so a burst of changes causes one restart. Python helper changes take effect
-on the next scan. Press `ctrl+c` to
-stop watching. The development install remains available for the next run;
-remove it with `omarchy plugin remove emils.localhost` when it is no longer
-needed.
-
-`./dev` will not overwrite a normal Git-installed copy. Move or remove that
-copy first if you want to replace it with the development install. Keep a moved
-copy outside the active plugin path if you plan to restore it later.
-
-If the installed files are current but the bar still shows the previous UI,
-run `omarchy restart shell`. A successful `omarchy-shell shell rescanPlugins`
-call or a running watcher alone does not prove that new QML code is live:
-some shell versions recreate the widget using cached components at the same
-file paths. Checking only the installed `manifest.json` can miss this.
-
-Run the checks before opening a pull request:
-
-```bash
-./check
-```
-
-This runs model/helper tests, plugin validation, Qt 6 lint, and real Quickshell
-UI tests, including native wheel input, model changes while scrolled, keyboard
-actions, grouping, QR rendering, and two HTTP listeners in one disposable
-process. It also checks the hidden
-Wayland entry points when a compositor is available. Screenshots and logs are
-saved to `/tmp/localhost-test-artifacts`; your installed plugin is untouched.
-
-See [CONTRIBUTING.md](CONTRIBUTING.md) for the development workflow and CI setup.
-
-## License
-
-[MIT](LICENSE)
+[Release notes](https://github.com/EmilsValdmanis/omarchy-localhost/releases) · [Contributing](CONTRIBUTING.md) · [Security](SECURITY.md) · [MIT license](LICENSE)

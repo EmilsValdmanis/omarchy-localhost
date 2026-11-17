@@ -15,9 +15,10 @@ function replicaStatus(replica, condition) {
   return health ? health[1] : "running"
 }
 
-function dependencyStates(inventory, container) {
+function serviceStates(inventory, container) {
   var states = new Set()
-  for (var dependency of container.dependsOn.split(",")) {
+  // Keep the hovered service first, with its declared dependencies below it.
+  for (var dependency of [container.service].concat(container.dependsOn.split(",").sort())) {
     var parts = dependency.split(":")
     var name = parts[0]
     if (!name) continue
@@ -26,12 +27,12 @@ function dependencyStates(inventory, container) {
       states.add(name + " unknown")
       continue
     }
-    for (var [slot, replica] of replicas) {
+    for (var slot of Array.from(replicas.keys()).sort()) {
       var label = name + (replicas.size > 1 ? " [" + slot + "]" : "")
-      states.add(label + " " + replicaStatus(replica, parts[1]))
+      states.add(label + " " + replicaStatus(replicas.get(slot), parts[1]))
     }
   }
-  return Array.from(states).sort().join("\n")
+  return Array.from(states).join("\n")
 }
 
 // Project summaries include the owning service for each hidden row.
@@ -41,10 +42,14 @@ function tooltipRows(details) {
   for (var line of details.split("\n")) {
     if (!line) continue
     var parts = line.split(" → ")
-    var prefix = parts.length > 1 ? parts[0] + " → " : ""
+    var owner = parts.length > 1 ? parts[0] : ""
+    var service = owner.split(" / ").pop()
     for (var item of parts[parts.length - 1].split(" · ")) {
       var split = item.lastIndexOf(" ")
-      rows.push({ name: prefix + item.slice(0, split), status: item.slice(split + 1) })
+      var name = item.slice(0, split)
+      if (owner)
+        name = name.split(" ")[0] === service ? owner + name.slice(service.length) : owner + " → " + name
+      rows.push({ name: name, status: item.slice(split + 1) })
     }
   }
   return rows

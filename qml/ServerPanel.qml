@@ -562,9 +562,6 @@ Item {
     if (event.key === Qt.Key_Escape) {
       navigateBack()
       event.accepted = true
-    } else if (event.modifiers === Qt.ControlModifier && event.key === Qt.Key_L && failedRestart) {
-      openRestartLogRequested(failedRestart.logPath)
-      event.accepted = true
     } else if (!searchMode && control && groupByProject
                && (event.key === Qt.Key_Left || event.key === Qt.Key_Right)) {
       if (shift) setAllProjectsCollapsed(event.key === Qt.Key_Left)
@@ -573,9 +570,13 @@ Item {
     } else if (control && groupByProject && (event.key === Qt.Key_Up || event.key === Qt.Key_Down)) {
       selectAdjacentProject(event.key === Qt.Key_Up ? -1 : 1)
       event.accepted = true
-    } else if (!searchMode && !control && !alternate && groupByProject
+    } else if (!searchMode && !control && !alternate && (groupByProject || failedRestart)
                && (event.key === Qt.Key_Tab || event.key === Qt.Key_Backtab)) {
-      selectAdjacentProject(event.key === Qt.Key_Backtab || shift ? -1 : 1)
+      const backwards = event.key === Qt.Key_Backtab || shift
+      const previousProject = selectedProjectRoot
+      selectAdjacentProject(backwards ? -1 : 1)
+      if (failedRestart && selectedProjectRoot === previousProject)
+        (backwards ? dismissFailure : openLog).forceActiveFocus(Qt.TabFocusReason)
       event.accepted = true
     } else if (plainNavigation && (event.key === Qt.Key_Home || event.key === Qt.Key_End)) {
       selectEntry(event.key === Qt.Key_Home ? 0 : projectModel.count - 1)
@@ -645,6 +646,12 @@ Item {
   ListModel { id: filteredModel }
   ListModel { id: projectModel }
   ListModel { id: skippedModel }
+
+  Shortcut {
+    sequence: "Ctrl+L"
+    enabled: root.panelActive && !!root.failedRestart && !confirmDialog.opened && !portFilterDropdown.popupOpen
+    onActivated: root.openRestartLogRequested(root.failedRestart.logPath)
+  }
 
   Item {
     id: keyCatcher
@@ -1296,6 +1303,7 @@ Item {
           }
         }
         Button {
+          id: openLog
           objectName: "openRestartLog"
           text: "Open log"
           iconText: "\uf121"
@@ -1309,12 +1317,16 @@ Item {
           onClicked: if (root.failedRestart) root.openRestartLogRequested(root.failedRestart.logPath)
         }
         PanelActionButton {
+          id: dismissFailure
           objectName: "dismissRestartFailure"
           iconText: "\uf00d"
           focusable: true
           tooltipText: "Dismiss restart failure"
           Accessible.name: tooltipText
-          onClicked: root.dismissRestartFailureRequested()
+          onClicked: {
+            root.dismissRestartFailureRequested()
+            root.focusNavigation()
+          }
         }
       }
     }

@@ -296,14 +296,16 @@ function classifyDockerPorts(raw, ignoredPorts, alwaysIncludePorts) {
     var state = String(record[7] || "")
     var oneOff = String(record[10] || "").toLowerCase() === "true"
     if (!containerId) continue
-    if (project && service && !oneOff && state)
+    var composeService = project && service && !oneOff
+    if (composeService && state)
       Compose.recordReplica(composeInventory, cwd, project, service, String(record[11] || containerName),
         state, String(record[8] || ""))
     if (!publishedPorts || (state && state !== "running")) continue
 
     var entry = { containerId: containerId, containerName: containerName, image: image,
       cwd: cwd, service: service, project: project, grouped: {},
-      dependsOn: project && service && !oneOff ? String(record[9] || "") : "" }
+      serviceKey: composeService ? "compose:" + JSON.stringify([cwd, project, service]) : "",
+      dependsOn: composeService ? String(record[9] || "") : "" }
     records.push(entry)
     var mappings = publishedPorts.split(/,\s*/)
     for (var mappingIndex = 0; mappingIndex < mappings.length; mappingIndex++) {
@@ -373,7 +375,7 @@ function classifyDockerPorts(raw, ignoredPorts, alwaysIncludePorts) {
   for (var recordIndex = 0; recordIndex < records.length; recordIndex++) {
     var entry = records[recordIndex]
     var grouped = entry.grouped
-    var states = entry.dependsOn ? Compose.dependencyStates(composeInventory, entry) : ""
+    var states = entry.serviceKey ? Compose.serviceStates(composeInventory, entry) : ""
     for (var rawPort in grouped) {
       var hostPort = Number(rawPort)
       var name = entry.project && entry.service ? entry.project + " / " + entry.service
@@ -383,7 +385,7 @@ function classifyDockerPorts(raw, ignoredPorts, alwaysIncludePorts) {
         source: "docker",
         containerId: entry.containerId,
         dependencyStates: states,
-        serviceKey: entry.project && entry.service ? "compose:" + JSON.stringify([entry.cwd, entry.project, entry.service]) : "",
+        serviceKey: entry.serviceKey,
         projectRoot: entry.cwd || (entry.project ? "compose:" + entry.project : "docker:" + entry.containerId),
         displayName: name,
         listener: {
