@@ -1,6 +1,7 @@
 import QtQuick
 import "Actions.js" as Actions
 import "Discovery.js" as Discovery
+import "Diagnostics.js" as Diagnostics
 import "Memory.js" as Memory
 import "Network.js" as Network
 import "Paths.js" as Paths
@@ -14,6 +15,10 @@ Item {
   property bool panelActive: false
   property bool includeDocker: true
   property string ignoredPorts: ""
+  property var skippedServices: ({})
+  // The shell replaces the whole settings object even for unrelated bar changes.
+  readonly property string skippedServiceSignature: JSON.stringify(skippedServices)
+  onSkippedServiceSignatureChanged: publishServers()
   property string alwaysIncludePorts: ""
   property string selectedLanInterface: ""
   property alias servers: serverModel
@@ -67,10 +72,16 @@ Item {
     var entries = nativeDiscovery.readyContexts.concat(includeDocker ? dockerDiscovery.readyContexts : [])
     var nextServers = []
     var activeKeys = {}
+    var servicePorts = Object.create(null)
     for (let i = 0; i < entries.length; i++) {
       let entry = entries[i]
       let server = Discovery.serverFromContext(entry.context, entry.scheme,
         { ip: lanIp, interfaceName: lanInterface, subnet: lanSubnet }, lanInterfaces)
+      if (server.serviceKey && skippedServices[server.serviceKey]) {
+        if (!servicePorts[server.serviceKey]) servicePorts[server.serviceKey] = []
+        servicePorts[server.serviceKey].push(server.port)
+        continue
+      }
       let key = Sources.key(server)
       activeKeys[key] = true
       server.memoryBytes = resourceByKey[key] === undefined ? -1 : resourceByKey[key]
@@ -89,6 +100,7 @@ Item {
     if (Servers.syncServerModel(serverModel, nextServers)) revision++
     var nextDiagnostics = nativeDiscovery.diagnostics.concat(includeDocker ? dockerDiscovery.diagnostics : [])
     nextDiagnostics.sort(function(a, b) { return a.port - b.port || String(a.process).localeCompare(String(b.process)) })
+    nextDiagnostics = Diagnostics.serviceEntries(skippedServices, servicePorts).concat(nextDiagnostics)
     if (!arraysEqual(diagnostics, nextDiagnostics)) diagnostics = nextDiagnostics
     var nextWarnings = dependencyWarnings.concat(routeWarning ? [routeWarning] : [],
       resourceWarning ? [resourceWarning] : [], nativeDiscovery.warnings, includeDocker ? dockerDiscovery.warnings : [])

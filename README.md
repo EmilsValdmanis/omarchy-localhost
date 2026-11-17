@@ -24,7 +24,7 @@ Preview theme and wallpaper: [Motion Blur by Erik Johansson](https://github.com/
 - Open, copy, QR, terminal, editor, restart, skip, and stop actions
 - Search and complete arrow-key or Vim-style navigation
 - Phone-ready QR sharing with optional subnet-scoped UFW rules
-- Manual and automatic skips with reasons and one-click inclusion
+- Persistent service skips that follow port changes, with one-click restore
 - Port filters and an **Access** view for Localhost-created LAN rules
 - Process identity verification before stop or restart
 - Native Omarchy styling with no service to install, database, or account
@@ -169,13 +169,18 @@ servers, or failed HTTP/HTTPS checks. Use it when an expected server is missing.
 It reflects the latest scan, rather than keeping an activity history.
 Manual skips appear first in their own collapsible section. Automatic exclusions
 start collapsed when manual skips exist, and open otherwise.
-Use **Include** to check an automatically excluded port, **Unskip** to restore a
-manually skipped port, or select a server and choose
-**Skip** to hide its port without stopping it. These choices persist in
-**Always include ports** and **Ignored ports**, apply to all listeners on that
-port, and can be reversed from Skipped. Included ports still need an HTTP or
-HTTPS response to appear in Servers. The bar stays available while manually
-skipped ports are listening, so they can be restored even with no visible servers.
+Select a server and use **Skip** to hide it while it keeps running. For Compose,
+the skip follows the project and service across container replacements and port
+changes. For native Node, Bun, and Python servers with a verified project entry
+point, it follows that launch in its working directory. Other projects can use
+the same port. **Skipped → Manual → Restore** removes a service skip, even
+while the service is offline. The widget stays accessible while a saved skip exists.
+
+When discovery cannot identify a service reliably, the action offers **Skip this
+port**. Port skips still apply to every listener on that port. Use **Unskip** to
+restore a manually skipped port or **Include** to probe an automatically excluded
+port. These port choices persist in **Ignored ports** and **Always include ports**.
+Included listeners still need an HTTP or HTTPS response to appear in Servers.
 
 Localhost reads listening sockets from `ss`, batches process metadata through a
 small Python helper, and probes likely development servers over HTTP and HTTPS.

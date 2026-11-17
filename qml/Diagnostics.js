@@ -1,6 +1,7 @@
 var catalog = {
   metadataUnavailable: ["metadata-unavailable", "Process details unavailable", "\uf059"],
   ignored: ["ignored", "Excluded in settings", "\uf013"],
+  skippedService: ["skipped-service", "Skipped service", "\uf05e"],
   privileged: ["privileged", "System port (below 1024)", "\uf108"],
   excludedProcess: ["excluded-process", "Desktop or system process", "\uf108"],
   runtimeHelper: ["runtime-helper", "Runtime helper", "\uf085"],
@@ -19,11 +20,21 @@ for (var name in catalog) {
   presentations[entry[0]] = { text: entry[1], icon: entry[2] }
 }
 
+function serviceEntries(rules, portsByKey) {
+  return Object.keys(rules).map(function(key) {
+    var rule = rules[key]
+    var ports = Array.from(new Set(portsByKey[key] || [])).sort(function(a, b) { return a - b })
+    var endpoints = ports.map(function(port) { return ":" + port }).join(", ")
+    return { serviceKey: key, port: 0, process: rule.name, reason: REASONS.skippedService,
+      detail: [rule.cwd, endpoints || "No detected endpoint"].filter(Boolean).join(" · ") }
+  })
+}
+
 function skippedPortGroups(diagnostics) {
   var groups = { manual: [], automatic: [] }
   for (var i = 0; i < diagnostics.length; i++) {
     var entry = diagnostics[i]
-    groups[entry.reason === REASONS.ignored ? "manual" : "automatic"].push(entry)
+    groups[entry.reason === REASONS.ignored || entry.reason === REASONS.skippedService ? "manual" : "automatic"].push(entry)
   }
   return groups
 }
@@ -34,14 +45,15 @@ function skippedPortEntries(groups, collapsed) {
   var occurrences = Object.create(null)
   for (var id of ["manual", "automatic"]) {
     entries.push({ entryId: "group:" + id, kind: "header", groupId: id, name: id === "manual" ? "Manual" : "Automatic",
-      count: groups[id].length, collapsed: collapsed[id] === true, port: 0, process: "", reason: "" })
+      count: groups[id].length, collapsed: collapsed[id] === true, port: 0, process: "", reason: "", serviceKey: "", detail: "" })
     if (!collapsed[id]) for (var diagnostic of groups[id]) {
       var key = JSON.stringify([id, diagnostic.port, diagnostic.process])
       var occurrence = occurrences[key] || 0
       occurrences[key] = occurrence + 1
-      entries.push({ entryId: "port:" + key + ":" + occurrence, kind: "port", groupId: id,
+      entries.push({ entryId: diagnostic.serviceKey || ("port:" + key + ":" + occurrence), kind: "port", groupId: id,
         name: "", count: 0, collapsed: false, port: diagnostic.port,
-        process: diagnostic.process || "Unknown process", reason: diagnostic.reason || "" })
+        process: diagnostic.process || "Unknown process", reason: diagnostic.reason || "",
+        serviceKey: diagnostic.serviceKey || "", detail: diagnostic.detail || "" })
     }
   }
   return entries
@@ -51,6 +63,7 @@ function skippedEntriesEqual(left, right) {
   return left.entryId === right.entryId && left.kind === right.kind && left.groupId === right.groupId
     && left.name === right.name && left.count === right.count && left.collapsed === right.collapsed
     && left.port === right.port && left.process === right.process && left.reason === right.reason
+    && left.serviceKey === right.serviceKey && left.detail === right.detail
 }
 
 function skippedPortPresentation(reason) {

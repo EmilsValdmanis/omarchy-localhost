@@ -15,6 +15,7 @@ CursorSurface {
   property bool includable: false
   property bool included: false
   property bool manuallySkipped: false
+  property bool serviceRule: false
   property bool includeAvailable: true
   property string includeHint: ""
   property bool actionBusy: false
@@ -113,7 +114,7 @@ CursorSurface {
         id: includeButton
         objectName: "includePort"
         anchors.fill: parent
-        text: root.included ? "Included" : (root.manuallySkipped ? "Unskip" : "Include")
+        text: root.serviceRule ? "Restore" : root.included ? "Included" : (root.manuallySkipped ? "Unskip" : "Include")
         iconText: root.included ? "\uf00c" : (root.manuallySkipped ? "\uf0e2" : "\uf067")
         leftAlign: true
         foreground: root.foreground
@@ -123,7 +124,7 @@ CursorSurface {
         enabled: root.includeAvailable && !root.included
         opacity: enabled ? 1 : 0.5
         focusable: true
-        Accessible.name: text + " port " + root.title
+        Accessible.name: text + (root.serviceRule ? " service " : " port ") + root.title
         onClicked: root.includeRequested()
       }
       HoverHandler { id: includeHover }

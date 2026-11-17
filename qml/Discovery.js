@@ -112,6 +112,8 @@ function parseProcessPayload(raw, currentUid) {
         startTime: startTime,
         restartAvailable: row.restartAvailable === true,
         restartReason: String(row.restartReason || ""),
+        serviceKey: String(row.serviceKey || ""),
+        serviceEntry: String(row.serviceEntry || ""),
         argv: Array.isArray(row.argv) ? row.argv.map(String) : Frameworks.commandTokens(command),
         project: row.project && typeof row.project === "object" ? row.project : {}
       }
@@ -357,6 +359,7 @@ function classifyDockerPorts(raw, ignoredPorts, alwaysIncludePorts) {
         id: "docker:" + entry.containerId + ":" + hostPort,
         source: "docker",
         containerId: entry.containerId,
+        serviceKey: entry.project && entry.service ? "compose:" + JSON.stringify([entry.cwd, entry.project, entry.service]) : "",
         projectRoot: entry.cwd || (entry.project ? "compose:" + entry.project : "docker:" + entry.containerId),
         displayName: name,
         listener: {
@@ -431,6 +434,9 @@ function serverFromContext(context, scheme, lanRoute, lanInterfaces) {
     startTime: Number(process.startTime || 0),
     source: String(context.source || "process"),
     containerId: String(context.containerId || ""),
+    serviceKey: context.serviceKey || process.serviceKey || "",
+    serviceName: context.displayName || (process.serviceEntry
+      ? Paths.basename(process.cwd) + " / " + process.serviceEntry : ""),
     port: listener.port,
     cwd: process.cwd,
     projectRoot: (process.project && process.project.root) || process.cwd || context.projectRoot || contextId(context),

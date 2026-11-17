@@ -65,6 +65,8 @@ test("parses verified process metadata from the helper", () => {
         startTime: 991,
         restartAvailable: false,
         restartReason: "",
+        serviceKey: "",
+        serviceEntry: "",
       },
     },
   })
@@ -234,6 +236,7 @@ test("discovers published Docker Compose HTTP ports", () => {
     containerId: "ed3fec6359f3",
     displayName: "api / app",
     projectRoot: "/work/betterat/apps/api",
+    serviceKey: 'compose:["/work/betterat/apps/api","api","app"]',
     listener: {
       pid: 0,
       port: 8000,
@@ -262,6 +265,7 @@ test("does not HTTP-probe remapped database ports", () => {
     containerId: "b49bb7bdabef",
     displayName: "api / queue",
     projectRoot: "/work/api",
+    serviceKey: 'compose:["/work/api","api","queue"]',
     listener: {
       pid: 0,
       port: 15672,
@@ -276,6 +280,20 @@ test("does not HTTP-probe remapped database ports", () => {
     },
     framework: { name: "Docker", id: "docker" },
   }])
+})
+
+test("Compose service skips follow container replacement and ports within the same project", () => {
+  function key(id, port, cwd, service, project) {
+    const row = [id, "instance", "node", "0.0.0.0:" + port + "->8080/tcp", cwd, service, project]
+    const context = Discovery.classifyDockerPorts(JSON.stringify(row)).contexts[0]
+    return Discovery.serverFromContext(context, "http", {}).serviceKey
+  }
+  const original = key("first", 6006, "/work/atlas", "ui", "atlas")
+  assert.ok(original)
+  assert.equal(key("replacement", 6007, "/work/atlas", "ui", "atlas"), original)
+  assert.notEqual(key("other", 6006, "/work/atlas", "api", "atlas"), original)
+  assert.notEqual(key("other", 6006, "/trees/atlas", "ui", "atlas"), original)
+  assert.equal(key("standalone", 6006, "", "", ""), "")
 })
 
 test("Docker port settings can ignore or explicitly include mappings", () => {

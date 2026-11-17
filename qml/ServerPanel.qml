@@ -78,6 +78,8 @@ Item {
   signal refreshRequested()
   signal includePortRequested(int port)
   signal skipPortRequested(int port)
+  signal skipServiceRequested(var server)
+  signal restoreServiceRequested(string key, string name)
   signal openRequested(var server)
   signal copyRequested(var server)
   signal copyLanRequested(var server)
@@ -403,7 +405,10 @@ Item {
     else if (actionIndex === Actions.ACTIONS.terminal) terminalRequested(selected)
     else if (actionIndex === Actions.ACTIONS.project) projectRequested(selected)
     else if (actionIndex === Actions.ACTIONS.restart) restartRequested(selected)
-    else if (actionIndex === Actions.ACTIONS.skip) skipPortRequested(selected.port)
+    else if (actionIndex === Actions.ACTIONS.skip) {
+      if (selected.serviceKey) skipServiceRequested(selected)
+      else skipPortRequested(selected.port)
+    }
     else if (actionIndex === Actions.ACTIONS.stop)
       requestStop(selected, selected.serverId === forceStopServerId && selected.source !== "docker")
   }
@@ -1032,7 +1037,7 @@ Item {
           anchors.right: parent.right
           anchors.leftMargin: Style.space(8)
           anchors.rightMargin: Style.space(6)
-          text: root.diagnostics.length + " listening port" + (root.diagnostics.length === 1 ? "" : "s") + " left out of Servers"
+          text: root.diagnostics.length + " skipped " + (root.diagnostics.length === 1 ? "entry" : "entries")
           textFormat: Text.PlainText
           wrapMode: Text.WordWrap
           color: root.dim
@@ -1054,7 +1059,7 @@ Item {
             projectRoot: ""
             name: skippedEntry.model.name
             count: skippedEntry.model.count
-            countNoun: "port"
+            countNoun: "item"
             collapsed: skippedEntry.model.collapsed
             showStopAction: false
             selected: root.selectedSkippedGroup === skippedEntry.model.groupId
@@ -1078,25 +1083,32 @@ Item {
             readonly property var diagnostic: ({
               port: skippedEntry.model ? skippedEntry.model.port : 0,
               process: skippedEntry.model ? skippedEntry.model.process : "",
-              reason: skippedEntry.model ? skippedEntry.model.reason : ""
+              reason: skippedEntry.model ? skippedEntry.model.reason : "",
+              serviceKey: skippedEntry.model ? skippedEntry.model.serviceKey : "",
+              detail: skippedEntry.model ? skippedEntry.model.detail : ""
             })
             readonly property var explanation: Diagnostics.skippedPortPresentation(diagnostic.reason)
             objectName: "discoveryRow"
-            title: ":" + diagnostic.port
-            detail: explanation.text
+            serviceRule: !!diagnostic.serviceKey
+            title: serviceRule ? diagnostic.process : ":" + diagnostic.port
+            detail: serviceRule ? diagnostic.detail : explanation.text
             wrapDetail: true
-            trailingText: diagnostic.process || "Unknown process"
+            trailingText: serviceRule ? "" : diagnostic.process || "Unknown process"
             icon: explanation.icon
             foreground: root.foreground
             includable: true
-            manuallySkipped: diagnostic.reason === Diagnostics.REASONS.ignored
+            manuallySkipped: serviceRule || diagnostic.reason === Diagnostics.REASONS.ignored
             included: root.includedPorts[diagnostic.port] === true && !manuallySkipped
             includeAvailable: diagnostic.reason !== Diagnostics.REASONS.metadataUnavailable
-            includeHint: !includeAvailable ? "Process details are unavailable; refresh after the process can be inspected."
+            includeHint: serviceRule ? "Restore this service on any port."
+              : !includeAvailable ? "Process details are unavailable; refresh after the process can be inspected."
               : (included ? "Already included in detection. It must respond to HTTP or HTTPS to appear in Servers."
                 : (manuallySkipped ? "Remove this port from your skipped ports and check it again."
                   : "Check this port even if normally excluded. It must respond to HTTP or HTTPS."))
-            onIncludeRequested: root.includePortRequested(diagnostic.port)
+            onIncludeRequested: {
+              if (serviceRule) root.restoreServiceRequested(diagnostic.serviceKey, diagnostic.process)
+              else root.includePortRequested(diagnostic.port)
+            }
           }
         }
       }

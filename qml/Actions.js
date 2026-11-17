@@ -12,7 +12,7 @@ var secondary = [
   { action: ACTIONS.terminal, icon: "\uf120", tip: "Open terminal here" },
   { action: ACTIONS.project, icon: "\uf121", tip: "Open in editor" },
   { action: ACTIONS.restart, icon: "\uf2f9", tip: "Restart server (Alt+R)" },
-  { action: ACTIONS.skip, icon: "\uf05e", tip: "Skip this port without stopping it. Restore it from Skipped." },
+  { action: ACTIONS.skip, icon: "\uf05e", tip: "Skip this port for all listeners. Restore it from Skipped." },
   { action: ACTIONS.stop, icon: "\uf04d", tip: "Stop server (Delete)" }
 ]
 var visibleOrder = primary.concat(secondary).map(function(entry) { return entry.action })

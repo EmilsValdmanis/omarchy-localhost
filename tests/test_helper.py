@@ -19,6 +19,23 @@ import localhost_helper as helper
 
 
 class ProcessInspectionTests(unittest.TestCase):
+    def test_native_service_follows_storybook_across_ports_but_keeps_distinct_launches(self):
+        with tempfile.TemporaryDirectory() as directory:
+            entry = Path(directory) / "node_modules/.pnpm/storybook@9/node_modules/storybook/bin/index.cjs"
+            entry.parent.mkdir(parents=True)
+            entry.touch()
+            process = {"cwd": directory, "project": {"root": directory}, "executable": "/usr/bin/node",
+                       "restartAvailable": True, "argv": ["node", str(entry), "dev", "-p", "6006"]}
+            key, label = helper.native_service(process)
+            self.assertTrue(key.startswith("native:"))
+            self.assertEqual(label, "storybook")
+            process["argv"] = ["node", str(entry), "dev", "--port=6007"]
+            self.assertEqual(helper.native_service(process)[0], key)
+            process["argv"].extend(["--config-dir", "other"])
+            self.assertNotEqual(helper.native_service(process)[0], key)
+            process["restartAvailable"] = False
+            self.assertEqual(helper.native_service(process), ("", ""))
+
     def test_command_recovery_preserves_verified_interpreter_symlinks(self):
         with tempfile.TemporaryDirectory() as directory:
             interpreter = Path(directory) / "python"

@@ -27,7 +27,9 @@ BarWidget {
   readonly property bool showWhenEmpty: setting("showWhenEmpty", false)
   readonly property bool hasManagedSkippedPorts: {
     var included = Ports.parsePortSet(setting("alwaysIncludePorts", ""))
-    return radar.diagnostics.some(function(entry) { return entry.reason === Diagnostics.REASONS.ignored || included[entry.port] === true })
+    return radar.diagnostics.some(function(entry) {
+      return entry.reason === Diagnostics.REASONS.ignored || entry.serviceKey || included[entry.port] === true
+    })
   }
   readonly property bool opened: card.open
 
@@ -44,19 +46,30 @@ BarWidget {
   }
 
   // The host injects a capability-scoped facade; BarWidget types it as QObject.
-  function portSettingsApi(host) { return host ? host.shell : null }
+  function settingsApiFor(host) { return host ? host.shell : null }
+
+  function savePreferences(next, preference) {
+    var api = settingsApiFor(bar)
+    if (api && typeof api.updateEntryInline === "function" && api.updateEntryInline(moduleName, next)) return true
+    showNotice("Could not save the " + preference + " preference.", true)
+    return false
+  }
+
+  function setServiceSkipped(key, name, cwd, skip) {
+    if (!key || (!!radar.skippedServices[key] === skip)) return
+    var rules = Object.assign({}, radar.skippedServices)
+    if (skip) rules[key] = { name: name, cwd: cwd }
+    else delete rules[key]
+    if (savePreferences(Object.assign({}, root.settings, { skippedServices: rules }), "service"))
+      showNotice((skip ? "Skipped " : "Restored ") + name, false)
+  }
 
   function setPortIncluded(port, include) {
-    var settingsApi = portSettingsApi(bar)
     var next = Ports.portPreferenceSettings(root.settings, port, include)
     if (!next) return
     var changed = next.ignoredPorts !== String(setting("ignoredPorts", ""))
       || next.alwaysIncludePorts !== String(setting("alwaysIncludePorts", ""))
-    if (changed && (!settingsApi || typeof settingsApi.updateEntryInline !== "function"
-        || !settingsApi.updateEntryInline(moduleName, next))) {
-      showNotice("Could not save the port preference.", true)
-      return
-    }
+    if (changed && !savePreferences(next, "port")) return
     radar.refresh()
     showNotice(include ? "Checking :" + port + " · must respond to HTTP or HTTPS"
       : "Skipped :" + port + " · server is still running", false)
@@ -119,6 +132,7 @@ BarWidget {
     refreshIntervalSec: Math.min(30, Math.max(1, Number(root.setting("refreshIntervalSec", 2)) || 2))
     includeDocker: root.setting("includeDocker", true)
     ignoredPorts: String(root.setting("ignoredPorts", "") || "")
+    skippedServices: Sources.savedServices(root.setting("skippedServices", {}))
     alwaysIncludePorts: String(root.setting("alwaysIncludePorts", "") || "")
     selectedLanInterface: String(root.setting("lanInterface", "") || "")
     panelActive: card.open
@@ -266,6 +280,8 @@ BarWidget {
       onCloseRequested: root.closePanel()
       onIncludePortRequested: function(port) { root.setPortIncluded(port, true) }
       onSkipPortRequested: function(port) { root.setPortIncluded(port, false) }
+      onSkipServiceRequested: function(server) { root.setServiceSkipped(server.serviceKey, server.serviceName, server.cwd, true) }
+      onRestoreServiceRequested: function(key, name) { root.setServiceSkipped(key, name, "", false) }
       onRefreshRequested: {
         radar.refresh()
         firewall.refresh()
