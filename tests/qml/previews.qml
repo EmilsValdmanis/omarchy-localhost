@@ -236,7 +236,6 @@ ShellRoot {
         compare(panel.resultCount, 6)
         compare(panel.projectCount, 2)
         compare(panel.groups["/work/atlas"].branch, "main")
-        compare(panel.groups["/work/atlas"].dependencyStates, "atlas / api → api running · postgres healthy · redis exited")
         compare(panel.groups["/work/worktrees/atlas"].branch, "checkout-redesign")
         var hues = []
         for (var index = 0; index < servers.count; index++) {

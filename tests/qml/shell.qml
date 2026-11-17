@@ -173,7 +173,7 @@ ShellRoot {
         panel.revision++
         tryCompare(list, "count", 1)
         tryCompare(scrollbar, "visible", false, 2000, "no scrollbar is shown when the rows fit")
-        fuzzyCompare(list.width, panel.width, 0.5, "no scrollbar padding is reserved when rows fit")
+        fuzzyCompare(list.width, panel.width - scrollbar.width - panel.scrollBarGap, 0.5)
       }
 
       function test_toolbar_actions_use_consistent_buttons() {
@@ -576,9 +576,16 @@ ShellRoot {
         tryCompare(area, "count", 6)
         settled()
         tryCompare(bar, "visible", false)
-        fuzzyCompare(area.viewportWidth, panel.width, 0.5)
+        var viewportWidth = area.viewportWidth
+        fuzzyCompare(viewportWidth, panel.width - bar.width - panel.scrollBarGap, 0.5)
         panel.height = 230
         tryCompare(bar, "visible", true)
+        panel.toggleSkippedGroup("automatic", false)
+        tryCompare(bar, "visible", false)
+        equal(area.viewportWidth, viewportWidth)
+        panel.toggleSkippedGroup("automatic", false)
+        tryCompare(bar, "visible", true)
+        equal(area.viewportWidth, viewportWidth)
         panel.height = Qt.binding(function() { return panel.implicitHeight })
         tryCompare(bar, "visible", false)
       }
@@ -1144,8 +1151,7 @@ ShellRoot {
         }
         scan()
         var header = findChild(list.itemAtIndex(0), "projectHeader")
-        var warning = findChild(header, "projectComposeIcon")
-        check(!warning.visible)
+        check(!findChild(header, "composeDependencyTooltip"))
         var webWarning = findChild(list.itemAtIndex(1), "serverFrameworkIcon")
         check(webWarning.showDependencies)
         check(webWarning.visible)
@@ -1177,33 +1183,16 @@ ShellRoot {
         tryCompare(list, "count", 3)
         settled()
         header = findChild(list.itemAtIndex(0), "projectHeader")
-        warning = findChild(header, "projectComposeIcon")
         panel.query = "Project 0"
         tryCompare(list, "count", 2)
-        equal(header.dependencyStates, "atlas / web → web running · redis exited")
+        check(!findChild(header, "composeDependencyTooltip"))
         panel.query = ""
         panel.setProjectCollapsed("/work/atlas", true)
         tryCompare(list, "count", 1)
-        check(warning.visible)
-        settled()
-        check(findChild(warning, "composeProblemDot").visible)
-        mouseMove(warning, warning.width / 2, warning.height / 2)
-        var groupTip = findChild(warning, "composeDependencyTooltip")
-        tryCompare(groupTip, "opened", true)
-        check(groupTip.width > shortWidth && groupTip.width <= Style.space(232))
-        equal(findChild(groupTip.contentItem, "dependencyName").text, "atlas / web")
-        equal(findChild(groupTip.contentItem, "dependencyStatus").text, "running")
-        var warningHeight = header.height
+        check(!findChild(header, "composeDependencyTooltip"))
         redis[7] = "running"
         redis[8] = "Up a minute (healthy)"
         scan()
-        check(warning.visible)
-        tryCompare(groupTip, "text", "Docker Compose\natlas / web → web running · redis healthy")
-        var groupDep = findChild(groupTip.contentItem, "composeServiceRows").itemAt(1)
-        equal(findChild(groupDep, "dependencyName").text, "atlas / web → redis")
-        equal(findChild(groupDep, "dependencyStatus").text, "healthy")
-        check(!findChild(warning, "composeProblemDot").visible)
-        equal(header.height, warningHeight)
         panel.x = 0
         panel.setProjectCollapsed("/work/atlas", false)
         tryCompare(list, "count", 3)
@@ -1273,16 +1262,14 @@ ShellRoot {
         var header = findChild(list.itemAtIndex(0), "projectHeader")
         header.name = "long-project-name-".repeat(6)
         header.branch = "long-branch-name-".repeat(6)
-        header.dependencyStates = "api → db healthy"
         settled()
         var name = findChild(header, "projectName")
         var branch = findChild(header, "projectBranch")
-        var compose = findChild(header, "projectComposeIcon")
         var stop = findChild(header, "projectStopAll")
         var count = findChild(header, "projectCount")
         check(name.truncated && branch.truncated)
         check(name.width > 0 && branch.width > 0)
-        check(branch.x + branch.width <= compose.x && compose.x + compose.width <= stop.x)
+        check(branch.x + branch.width <= stop.x)
         check(stop.x + stop.width <= count.x && count.x + count.width <= header.width)
       }
 
@@ -1687,12 +1674,13 @@ ShellRoot {
         var header = list.itemAtIndex(0)
         fuzzyCompare(header.x, 0, 0.5)
         fuzzyCompare(header.width, list.width, 0.5)
+        var foldedWidth = header.width
         panel.query = ""
         panel.height = 320
         settled()
         check(list.interactive)
         var row = list.itemAtIndex(0)
-        fuzzyCompare(row.width, list.width, 0.5, "rows fill the viewport beside the scrollbar")
+        equal(row.width, foldedWidth, "folding keeps the row width stable across scrollbar changes")
       }
 
       function test_project_mouse_toggle_and_live_row_updates() {
