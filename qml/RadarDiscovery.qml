@@ -50,12 +50,7 @@ Item {
     manualScanQueued = false
     scanning = true
     pendingWarnings = []
-    sourceProcess.start(source === "docker" ? [
-      "bash", "-c", "command -v docker >/dev/null 2>&1 || exit 127; exec timeout 3s docker \"$@\"",
-      "localhost-docker", "ps", "--all", "--format",
-      "[{{json .ID}},{{json .Names}},{{json .Image}},{{json .Ports}},{{json (.Label \"com.docker.compose.project.working_dir\")}},{{json (.Label \"com.docker.compose.service\")}},{{json (.Label \"com.docker.compose.project\")}},"
-        + "{{json .State}},{{json .Status}},{{json (.Label \"com.docker.compose.depends_on\")}},{{json (.Label \"com.docker.compose.oneoff\")}},{{json (.Label \"com.docker.compose.container-number\")}}]"
-    ] : ["ss", "-H", "-ltnp"])
+    sourceProcess.start(source === "docker" ? ["python3", helperPath, "discover-docker"] : ["ss", "-H", "-ltnp"])
   }
 
   function resolveMetadata(raw) {
@@ -214,7 +209,11 @@ Item {
           if (exitCode !== 127) root.addWarning(errorOutput || "Docker discovery is unavailable")
         } else root.scanError = errorOutput || "Could not scan local ports"
         root.finishScan()
-      } else { root.scanError = ""; root.resolveMetadata(output) }
+      } else {
+        root.scanError = ""
+        if (root.source === "docker" && errorOutput) root.addWarning(errorOutput)
+        root.resolveMetadata(output)
+      }
     }
   }
   CommandProcess {

@@ -1,7 +1,7 @@
 """Exercise missing executables against Quickshell's real Process object."""
 
 import json
-import shutil
+import sys
 import unittest
 
 from qml_runtime import QUICKSHELL, QmlRuntime, check_test_result
@@ -19,12 +19,12 @@ class ProcessStartTests(unittest.TestCase):
                 qml.env["LOCALHOST_START_STAGE"] = stage
                 if stage in ("metadata", "probe"):
                     qml.command("ss", "printf '%s\\n' '" + listener + "'\n")
-                if stage in ("probe", "docker-limit"):
+                if stage == "probe":
                     qml.command("python3", "printf '%s\\n' '" + payload + "'\n")
                 if stage == "docker-limit":
-                    for command in ("bash", "timeout"):
-                        (qml.bin / command).symlink_to(shutil.which(command))
-                    qml.command("docker", "printf '%s\\n' '[\"abc123\",\"test\",\"node\",\"0.0.0.0:3000-4000->3000-4000/tcp\",\"\",\"\",\"\"]'\n")
+                    (qml.bin / "python3").symlink_to(sys.executable)
+                    qml.command("docker", "printf '%s\\n' '[\"abc123\",\"test\",\"node\",\"0.0.0.0:3000-4000->3000-4000/tcp\",\"\",\"\",\"\"]'\n"
+                                "exec python3 -c \"print('x' * 300000)\"\n")
                     qml.command("curl", "exit 0\n")
                 result = qml.run('''
 import QtQuick
@@ -34,6 +34,7 @@ import "Plugin/qml" as Plugin
 ShellRoot {
   Plugin.RadarDiscovery {
     id: discovery; currentUid: 1000; intervalSec: 60
+    helperPath: String(Qt.resolvedUrl("Plugin/localhost_helper.py")).replace("file://", "")
     source: Quickshell.env("LOCALHOST_START_STAGE") === "docker-limit" ? "docker" : "process"
   }
   Plugin.QrService { id: qr }
@@ -50,8 +51,10 @@ ShellRoot {
       if (stage === "source") verify(discovery.scanError !== "")
       else verify(discovery.warnings.length > 0)
       if (stage === "probe") verify(discovery.warnings.indexOf("Could not start HTTP probes") !== -1)
-      if (stage === "docker-limit") verify(discovery.warnings.indexOf(
-        "Docker discovery is incomplete: published ports exceed the discovery limit") !== -1)
+      if (stage === "docker-limit") {
+        verify(discovery.warnings.indexOf("Docker discovery is incomplete: container inventory exceeds 256 KiB") !== -1)
+        verify(discovery.warnings.indexOf("Docker discovery is incomplete: published ports exceed the discovery limit") !== -1)
+      }
     }
     onCompletedChanged: if (completed) console.log("START_TEST_RESULT " + JSON.stringify({
       tests: 1, failed: qtest_results.failCount, skipped: qtest_results.skipCount
