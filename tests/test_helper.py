@@ -555,6 +555,49 @@ class RestartLogTests(unittest.TestCase):
             self.assertFalse(missing.exists())
 
 
+class DockerDiscoveryTests(unittest.TestCase):
+    def discover(self, script=None):
+        with tempfile.TemporaryDirectory() as directory:
+            if script is not None:
+                docker = Path(directory) / "docker"
+                docker.write_text(f"#!{sys.executable}\nimport os, sys, time\n" + script)
+                docker.chmod(0o755)
+            return subprocess.run(
+                [sys.executable, helper.__file__, "discover-docker"],
+                env={**os.environ, "PATH": directory}, capture_output=True, timeout=6,
+            )
+
+    def test_exact_limit_is_complete(self):
+        limit = helper.MAX_DOCKER_INVENTORY_BYTES
+        result = self.discover(
+            "assert sys.argv[1:4] == ['ps', '--all', '--format']\n"
+            f"print('x' * {limit - 1})"
+        )
+        self.assertEqual(result.returncode, 0)
+        self.assertEqual(result.stdout, b'x' * (limit - 1) + b'\n')
+        self.assertEqual(result.stderr, b'')
+
+    def test_overflow_keeps_complete_rows_and_stops_the_producer(self):
+        row = b'["abc","web","image","8080->80/tcp","","",""]\n'
+        result = self.discover(f"os.write(1, {row!r})\nwhile True: os.write(1, b'x' * 16384)")
+        self.assertEqual(result.returncode, 0)
+        self.assertEqual(result.stdout, row)
+        self.assertIn(b"incomplete", result.stderr)
+
+    def test_daemon_error_is_bounded_and_discards_partial_inventory(self):
+        result = self.discover("os.write(1, b'partial'); os.write(2, b'x' * 100000); sys.exit(1)")
+        self.assertEqual(result.returncode, 1)
+        self.assertEqual(result.stdout, b'')
+        self.assertEqual(result.stderr, b'x' * 4096)
+
+    def test_missing_and_stalled_docker(self):
+        self.assertEqual(self.discover().returncode, 127)
+        result = self.discover("os.write(1, b'partial'); time.sleep(30)")
+        self.assertEqual(result.returncode, 1)
+        self.assertEqual(result.stdout, b'')
+        self.assertIn(b"timed out", result.stderr)
+
+
 class DockerActionTests(unittest.TestCase):
     def test_rejects_invalid_container_id_before_running_docker(self):
         with mock.patch.object(helper, "run_command") as run:

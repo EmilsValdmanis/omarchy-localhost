@@ -31,6 +31,8 @@ project, or port. Use the arrow keys or `h/j/k/l` to move and `Enter` to act.
 
 - **Docker Compose** — Hover over the Docker icon to see the service and its
   dependencies, including databases with private ports. A dot flags a problem.
+  If the container listing exceeds 256 KiB, Localhost uses the complete rows
+  within that limit and shows a warning that discovery is incomplete.
 - **Stop all** — Stops the whole project in one click, including servers hidden
   by a search or fold. Hover over the button to see how many it will stop.
 - **Skipped** — Look here if a server is missing or you want to restore one

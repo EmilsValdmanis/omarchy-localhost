@@ -3,7 +3,7 @@
 
 The QML layer owns presentation and discovery orchestration. This helper keeps
 the security-sensitive `/proc` checks and lifecycle actions in one testable
-place and always returns a small JSON response.
+place. Docker discovery streams bounded inventory data back to QML.
 """
 
 from __future__ import annotations
@@ -34,6 +34,14 @@ from project_metadata import ProjectInspector
 
 
 CONTAINER_ID_RE = re.compile(r"^[0-9a-f]{12,64}$")
+MAX_DOCKER_INVENTORY_BYTES = 256 * 1024
+DOCKER_INVENTORY_FORMAT = (
+    '[{{json .ID}},{{json .Names}},{{json .Image}},{{json .Ports}},'
+    '{{json (.Label "com.docker.compose.project.working_dir")}},'
+    '{{json (.Label "com.docker.compose.service")}},{{json (.Label "com.docker.compose.project")}},'
+    '{{json .State}},{{json .Status}},{{json (.Label "com.docker.compose.depends_on")}},'
+    '{{json (.Label "com.docker.compose.oneoff")}},{{json (.Label "com.docker.compose.container-number")}}]'
+)
 MAX_RESTART_LOGS = 10
 MAX_RESTART_LOG_BYTES = 1024 * 1024
 RESTART_READY_TIMEOUT = 10.0
@@ -710,6 +718,59 @@ def run_command(
         raise LocalhostError(str(error)) from error
 
 
+def discover_docker() -> int:
+    """Forward complete inventory rows and keep both Docker streams bounded."""
+    try:
+        process = subprocess.Popen(
+            ["docker", "ps", "--all", "--format", DOCKER_INVENTORY_FORMAT],
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE, start_new_session=True,
+        )
+    except FileNotFoundError:
+        return 127  # Docker is optional.
+    except OSError as error:
+        print(error, file=sys.stderr)
+        return 1
+
+    inventory = bytearray()
+    diagnostic = bytearray()
+    deadline = time.monotonic() + 3
+    with process:
+        streams = [process.stdout, process.stderr]
+        try:
+            while streams:
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    raise TimeoutError
+                readable, _, _ = select.select(streams, [], [], remaining)
+                for stream in readable:
+                    chunk = os.read(stream.fileno(), 16384)
+                    if not chunk:
+                        streams.remove(stream)
+                    elif stream is process.stderr:
+                        diagnostic.extend(chunk[:4096 - len(diagnostic)])
+                    else:
+                        available = MAX_DOCKER_INVENTORY_BYTES - len(inventory)
+                        inventory.extend(chunk[:available])
+                        if len(chunk) > available:
+                            del inventory[inventory.rfind(b"\n") + 1:]
+                            sys.stdout.buffer.write(inventory)
+                            print("Docker discovery is incomplete: container inventory exceeds 256 KiB", file=sys.stderr)
+                            return 0
+            status = process.wait(timeout=max(0, deadline - time.monotonic()))
+        except (TimeoutError, subprocess.TimeoutExpired):
+            print("Docker discovery timed out", file=sys.stderr)
+            return 1
+        finally:
+            if process.returncode is None:
+                os.killpg(process.pid, signal.SIGKILL)
+
+    if status:
+        sys.stderr.buffer.write(diagnostic)
+        return 1
+    sys.stdout.buffer.write(inventory)
+    return 0
+
+
 def docker_action(container_id: str, action: str) -> None:
     if not CONTAINER_ID_RE.fullmatch(container_id):
         raise LocalhostError("Invalid Docker container ID")
@@ -743,6 +804,7 @@ def comma_separated_pids(value: str) -> list[int]:
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Secure Localhost plugin actions")
     subparsers = parser.add_subparsers(dest="command", required=True)
+    subparsers.add_parser("discover-docker", help="List containers with bounded output")
 
     inspect_parser = subparsers.add_parser("inspect", help="Read owned process metadata")
     inspect_parser.add_argument("--pids", required=True)
@@ -775,6 +837,8 @@ def build_parser() -> argparse.ArgumentParser:
 def main(argv: Sequence[str] | None = None) -> int:
     arguments = build_parser().parse_args(argv)
     try:
+        if arguments.command == "discover-docker":
+            return discover_docker()
         if arguments.command == "inspect":
             inspector = ProjectInspector()
             try:
