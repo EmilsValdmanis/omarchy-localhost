@@ -84,7 +84,6 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ github.sha }}
-          fetch-depth: 0
           persist-credentials: false
 
       - name: Publish with GitHub-generated release notes
@@ -100,16 +99,4 @@ jobs:
             echo "Skipping release because main has advanced"
             exit 0
           fi
-          previous=$(git describe --tags --abbrev=0 --match 'v[0-9]*' --exclude "$tag" "$GITHUB_SHA" || true)
-          range=$GITHUB_SHA
-          notes_args=(--generate-notes)
-          if [[ -n $previous ]]; then
-            range="$previous..$GITHUB_SHA"
-            notes_args+=(--notes-start-tag "$previous")
-          fi
-          changes=$(git log --reverse --no-merges \
-            --format="* %s ([%h]($GITHUB_SERVER_URL/$GITHUB_REPOSITORY/commit/%H))" "$range")
-          if [[ -n $changes ]]; then
-            notes_args+=(--notes "$(printf '## Changes by commit\n\n%s' "$changes")")
-          fi
-          gh release create "$tag" --target "$GITHUB_SHA" --title "$tag" "${notes_args[@]}" --latest
+          gh release create "$tag" --target "$GITHUB_SHA" --title "$tag" --generate-notes --latest

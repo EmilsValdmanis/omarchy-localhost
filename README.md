@@ -28,6 +28,16 @@ between projects, enable **Show when no servers are running** in the plugin sett
 Servers are grouped by project. When you run two worktrees of the same
 repository, their headers show the branch names. Press `/` to search by branch,
 project, or port. Use the arrow keys or `h/j/k/l` to move and `Enter` to act.
+Hover over a project in the RAM bar to see its total. Each server row shows its
+own RAM history.
+
+Discovery tries `HEAD /` first. If the server rejects that request, Localhost
+tries `GET /health`, then `OPTIONS *`. It reuses the selected request for
+periodic checks and native restarts. Rate limits and temporary server errors
+also confirm HTTP without triggering more requests in the same scan. If all three
+return errors, the server still appears. Automatic checks then use just the
+first responding target. A manual refresh can try the alternatives again.
+Probes use the `omarchy-localhost` user agent.
 
 - **Docker Compose** — Hover over the Docker icon to see the service and its
   dependencies, including databases with private ports. A dot flags a problem.

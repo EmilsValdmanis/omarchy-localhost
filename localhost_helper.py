@@ -45,6 +45,7 @@ DOCKER_INVENTORY_FORMAT = (
 MAX_RESTART_LOGS = 10
 MAX_RESTART_LOG_BYTES = 1024 * 1024
 RESTART_READY_TIMEOUT = 10.0
+PROBE_METHODS = {"/": "HEAD", "/health": "GET", "*": "OPTIONS"}
 
 
 class LocalhostError(RuntimeError):
@@ -510,12 +511,13 @@ def restart_endpoint(url: str) -> tuple[str, str, int]:
 
 def wait_for_restart_ready(
     server: RestartedServer, endpoint: tuple[str, str, int],
-    timeout: float = RESTART_READY_TIMEOUT,
+    timeout: float = RESTART_READY_TIMEOUT, *, probe_target: str = "/",
 ) -> None:
     restarted = server.process
     scheme, host, port = endpoint
     deadline = time.monotonic() + timeout
     ready_since = None
+    target = probe_target
     while time.monotonic() < deadline:
         if restarted.poll() is not None:
             if server.collector is not None:
@@ -531,10 +533,10 @@ def wait_for_restart_ready(
                 if scheme == "https" else http.client.HTTPConnection(host, port, timeout=0.3)
             )
             try:
-                connection.request("HEAD", "/")
+                connection.request(PROBE_METHODS[target], target, headers={"User-Agent": "omarchy-localhost"})
                 ready = 100 <= connection.getresponse().status <= 599
             except (OSError, http.client.HTTPException):
-                pass
+                target = "/" if target != "/" else probe_target
             finally:
                 connection.close()
         if ready and restarted.poll() is None:
@@ -641,9 +643,11 @@ def start_log_relay(log_fd: int) -> tuple[subprocess.Popen[bytes], int]:
 
 
 def restart_process(
-    pid: int, expected_start_time: int, url: str
+    pid: int, expected_start_time: int, url: str, probe_target: str = "/"
 ) -> RestartedServer:
     endpoint = restart_endpoint(url)
+    if probe_target not in PROBE_METHODS:
+        raise LocalhostError("Unknown restart probe target")
     with verified_process_handle(pid, expected_start_time) as (handle, directory):
         context = read_restart_context(directory)
         argv, environment, cwd, _executable = context
@@ -699,7 +703,7 @@ def restart_process(
                         relay.wait(timeout=3)
     prune_restart_logs(state_root)
     server = RestartedServer(restarted, log_path, relay)
-    wait_for_restart_ready(server, endpoint)
+    wait_for_restart_ready(server, endpoint, probe_target=probe_target)
     return server
 
 
@@ -822,6 +826,7 @@ def build_parser() -> argparse.ArgumentParser:
     action_parser.add_argument("--pid", required=True, type=int)
     action_parser.add_argument("--start-time", required=True, type=int)
     action_parser.add_argument("--url", default="", help="Original server URL for restart readiness")
+    action_parser.add_argument("--probe-target", choices=PROBE_METHODS, default="/")
 
     docker_parser = subparsers.add_parser("docker-action", help="Stop or restart a container")
     docker_parser.add_argument("--action", choices=["stop", "restart"], required=True)
@@ -859,7 +864,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                         "systemMemory": {} if arguments.no_system else read_system_memory()})
         elif arguments.command == "process-action":
             if arguments.action == "restart":
-                server = restart_process(arguments.pid, arguments.start_time, arguments.url)
+                server = restart_process(arguments.pid, arguments.start_time, arguments.url, arguments.probe_target)
                 json_print({
                     "ok": True,
                     "message": "Server restarted",

@@ -72,7 +72,7 @@ BarWidget {
     var changed = next.ignoredPorts !== String(setting("ignoredPorts", ""))
       || next.alwaysIncludePorts !== String(setting("alwaysIncludePorts", ""))
     if (changed && !savePreferences(next, "port")) return
-    radar.refresh()
+    radar.refresh("action")
     showNotice(include ? "Checking :" + port + " · must respond to HTTP or HTTPS"
       : "Skipped :" + port + " · server is still running", false)
   }

@@ -116,10 +116,10 @@ Item {
     sampleResources(false)
   }
 
-  function refresh() { scan(true); sampleResources(true) }
-  function scan(manual) {
-    nativeDiscovery.scan(manual)
-    dockerDiscovery.scan(manual)
+  function refresh(reason = "manual") { scan(reason); sampleResources(true) }
+  function scan(reason) {
+    nativeDiscovery.scan(reason)
+    dockerDiscovery.scan(reason)
   }
 
   function sampleResources(force, source) {
@@ -226,7 +226,7 @@ Item {
     actionProcess.start([
       "python3", helperPath, "process-action", "--action", action,
       "--pid", String(server.pid), "--start-time", String(server.startTime),
-      "--url", String(server.localUrl)
+      "--url", String(server.localUrl), "--probe-target", server.probeTarget || "/"
     ])
   }
 
@@ -263,7 +263,7 @@ Item {
     if (failed) detail += " " + failed + " failed: " + projectStopErrors[0]
     stoppingProjectRoot = ""
     actionFinished("stop-project", failed === 0, detail, "")
-    refresh()
+    refresh("action")
   }
 
   function finishAction(exitCode, raw, detail, failedToStart) {
@@ -299,7 +299,7 @@ Item {
       Qt.callLater(root.runNextProjectStop)
     } else {
       actionFinished(action, successful, parsed.message, serverId)
-      refresh()
+      refresh("action")
     }
   }
 

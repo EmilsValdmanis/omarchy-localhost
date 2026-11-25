@@ -16,8 +16,8 @@ Item {
   property string alwaysIncludePorts: ""
   property bool scanning: false
   property bool scanQueued: false
-  property bool manualScanQueued: false
-  property bool bypassProbeCache: false
+  property string queuedScanReason: ""
+  property string scanReason: ""
   property string scanError: ""
   property var warnings: []
   property var diagnostics: []
@@ -31,7 +31,6 @@ Item {
   property var pendingContexts: []
   property var pendingSchemes: ({})
   property var probeTransferMap: []
-  property var probedIds: []
 
   signal resultsChanged()
 
@@ -41,13 +40,13 @@ Item {
       pendingWarnings = pendingWarnings.concat([detail.slice(0, 220)])
   }
 
-  function scan(manual) {
+  function scan(reason) {
     if (!discoveryEnabled) return
-    if (manual === true) manualScanQueued = true
+    if (reason === "manual" || (reason === "action" && !queuedScanReason)) queuedScanReason = reason
     if (scanning || currentUid < 0) { scanQueued = true; return }
     scanQueued = false
-    bypassProbeCache = manualScanQueued
-    manualScanQueued = false
+    scanReason = queuedScanReason
+    queuedScanReason = ""
     scanning = true
     pendingWarnings = []
     sourceProcess.start(source === "docker" ? ["python3", helperPath, "discover-docker"] : ["ss", "-H", "-ltnp"])
@@ -102,55 +101,56 @@ Item {
       if (probeCache[key]) nextCache[key] = probeCache[key]
     }
     probeCache = nextCache
-    var plan = Discovery.probePlan(pendingContexts, probeCache, Date.now(), bypassProbeCache)
+    var plan = Discovery.probePlan(pendingContexts, probeCache, Date.now(), scanReason !== "")
     pendingSchemes = plan.schemes
     if (!plan.pending.length) { applyCandidates(); return }
     probeCandidates(plan.pending)
   }
 
   function probeCandidates(contexts) {
-    var args = [
-      "curl", "--noproxy", "*", "--head", "--silent", "--show-error",
-      "--parallel", "--parallel-immediate", "--insecure",
-      "--connect-timeout", "0.3", "--max-time", "0.7",
-      "--header", "Accept: text/html,application/xhtml+xml",
-      "--write-out", "%{urlnum}\\t%{http_code}\\n", "--"
-    ]
-    var transfers = []
-    var ids = []
-    for (let i = 0; i < contexts.length; i++) {
-      let context = contexts[i]
-      let id = Discovery.contextId(context)
-      let preferred = Discovery.schemeFor(context.process.command)
-      let alternate = preferred === "https" ? "http" : "https"
-      ids.push({ id: id, key: Discovery.probeCacheKey(context) })
-      transfers.push({ id: id, scheme: preferred, preference: 0 })
-      args.push(Discovery.probeUrl(context, preferred))
-      transfers.push({ id: id, scheme: alternate, preference: 1 })
-      args.push(Discovery.probeUrl(context, alternate))
+    runProbes(contexts.map(function(context) {
+      return Discovery.firstProbe(context, probeCache[Discovery.probeCacheKey(context)], scanReason === "manual")
+    }))
+  }
+
+  function runProbes(transfers) {
+    var args = ["curl", "--disable", "--parallel", "--parallel-immediate"]
+    for (let i = 0; i < transfers.length; i++) {
+      let probe = transfers[i]
+      if (i > 0) args.push("--next")
+      args.push("--noproxy", "*", "--silent", "--show-error", "--insecure",
+        "--connect-timeout", "0.3", "--max-time", "0.7", "--user-agent", "omarchy-localhost",
+        "--output", "/dev/null", "--write-out", "%{urlnum}\\t%{http_code}\\n")
+      if (probe.target === "*") args.push("--request", "OPTIONS", "--request-target", "*")
+      else if (probe.target === "/") args.push("--head")
+      // Only the HTTP status matters, even if a health endpoint serves a large body.
+      args.push("--max-filesize", "8192", "--url", Discovery.probeUrl(probe))
     }
     probeTransferMap = transfers
-    probedIds = ids
     probeProcess.start(args)
   }
 
   function finishProbes(raw) {
-    var accepted = Discovery.parseProbeOutput(raw, probeTransferMap)
+    var statuses = Discovery.probeStatuses(raw)
     var nextCache = Object.assign({}, probeCache)
     var now = Date.now()
-    for (let i = 0; i < probedIds.length; i++) {
-      let id = probedIds[i].id
-      let key = probedIds[i].key
-      if (accepted[id]) {
-        pendingSchemes[id] = accepted[id].scheme
-        nextCache[key] = { scheme: accepted[id].scheme, expiresAt: now + 60000 }
-      } else {
+    var retry = []
+    for (let i = 0; i < probeTransferMap.length; i++) {
+      let probe = probeTransferMap[i]
+      let result = Discovery.probeResult(probe, statuses[i])
+      let key = Discovery.probeCacheKey(probe.context)
+      // Keep the confirmed protocol even if a later fallback command fails to start.
+      if (Discovery.browserResponse(statuses[i])) pendingSchemes[Discovery.contextId(probe.context)] = probe.scheme
+      if (result.retry) retry.push(result.retry)
+      else if (result.scheme) nextCache[key] = Object.assign(result, { expiresAt: now + 60000 })
+      else {
         let attempts = Number((nextCache[key] && nextCache[key].attempts) || 0) + 1
         nextCache[key] = { scheme: "", attempts: attempts, expiresAt: now + (attempts === 1 ? 3000 : 15000) }
       }
     }
     probeCache = nextCache
-    applyCandidates()
+    if (retry.length && discoveryEnabled) runProbes(retry)
+    else applyCandidates()
   }
 
   function applyCandidates() {
@@ -161,6 +161,7 @@ Item {
       let context = pendingContexts[i]
       let id = Discovery.contextId(context)
       let scheme = pendingSchemes[id] || ""
+      context.probeTarget = probeCache[Discovery.probeCacheKey(context)]?.target || "/"
       if (scheme || (context.process.cwdDeleted && previousIds.has(id))) ready.push({ context: context, scheme: scheme })
       else details.push({ port: context.listener.port,
         process: String(context.listener.process || context.displayName || "unknown"),

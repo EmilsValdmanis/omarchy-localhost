@@ -31,6 +31,7 @@ function normalizeServer(server) {
     cwd: String(source.cwd || ""),
     cwdDeleted: source.cwdDeleted === true,
     localUrl: String(source.localUrl || ""),
+    probeTarget: String(source.probeTarget || "/"),
     lanUrl: String(source.lanUrl || ""),
     lanHost: String(source.lanHost || ""),
     lanInterface: String(source.lanInterface || ""),
@@ -88,7 +89,8 @@ function projectGroups(servers, activeServers) {
     var server = servers[i]
     var key = server.projectRoot
     if (!groups[key]) {
-      var name = Paths.basename(key).replace(/^compose:/, "")
+      var name = server.source === "docker" && key === "docker:" + server.containerId
+        ? server.name : (Paths.basename(key).replace(/^compose:/, "") || key)
       groups[key] = { name: server.cwdDeleted ? name + " (deleted working directory)" : name, branch: "", count: 0,
         stopCount: targetsByRoot.get(key).size }
     }
