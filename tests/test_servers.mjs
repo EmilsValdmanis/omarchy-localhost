@@ -30,6 +30,7 @@ test("normalizes servers from discovery and model rows", () => {
     port: 5173,
     cwd: "/work/app",
     localUrl: "http://localhost:5173",
+    probeTarget: "/health",
     lanUrl: "http://192.168.0.119:5173",
     lanAvailable: true,
   })
@@ -49,6 +50,7 @@ test("normalizes servers from discovery and model rows", () => {
     cwd: "/work/app",
     cwdDeleted: false,
     localUrl: "http://localhost:5173",
+    probeTarget: "/health",
     lanUrl: "http://192.168.0.119:5173",
     lanAvailable: true,
     lanHost: "",
@@ -86,6 +88,7 @@ test("normalizes servers from discovery and model rows", () => {
     cwd: "",
     cwdDeleted: false,
     localUrl: "",
+    probeTarget: "/",
     lanUrl: "",
     lanAvailable: false,
     lanHost: "",
@@ -138,6 +141,12 @@ test("project grouping is stable, searchable and distinguishes repositories with
   assert.equal(Servers.matchesSearch(rows[2], "apps/api", "all"), true)
   const changed = { ...rows[0], projectRoot: "/work/another" }
   assert.equal(Servers.serversEqual(rows[0], changed), false)
+})
+
+test("standalone Docker project uses its container name and stable ID", () => {
+  const row = Servers.normalizeServer({ source: "docker", containerId: "123abc",
+    projectRoot: "docker:123abc", name: "storybook" })
+  assert.equal(Servers.projectGroups([row])[row.projectRoot].name, "storybook")
 })
 
 test("branch labels use active worktrees of the same repository even while filtering", () => {

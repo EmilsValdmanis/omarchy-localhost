@@ -39,6 +39,7 @@ ShellRoot {
       } }
       Component { id: qrComponent; PluginUi.QrCode {} }
       Component { id: qrContentComponent; PluginUi.QrContent { width: implicitWidth; height: implicitHeight } }
+      Component { id: discoveryComponent; PluginUi.RadarDiscovery {} }
       Component { id: serviceComponent; PluginUi.RadarService { includeDocker: false } }
       Component { id: overlayComponent; PluginUi.QrService {} }
       Component { id: metricsComponent; TextMetrics {} }
@@ -432,6 +433,36 @@ ShellRoot {
         equal(openSpy.count, 1)
         equal(openSpy.signalArguments[0][0].serverId, "server-1")
         equal(panel.selectedServer().serverId, "server-1")
+      }
+
+      function test_discovery_learns_protocol_and_probe_target() {
+        var discovery = createTemporaryObject(discoveryComponent, tests)
+        function endpoint(portVariable, command) {
+          return { listener: { pid: 1, port: Number(Quickshell.env(portVariable)), addresses: ["127.0.0.1"] },
+            process: { cwd: "/work/app", command: command } }
+        }
+        var first = endpoint("LOCALHOST_TEST_PORT", "node app")
+        var second = endpoint("LOCALHOST_TEST_SECOND_PORT", "node app --https")
+        var contexts = [first, second]
+        discovery.pendingContexts = contexts
+        var attempts = []
+        discovery.probeTransferMapChanged.connect(function() {
+          attempts.push(discovery.probeTransferMap.map(function(transfer) {
+            return transfer.scheme + ":" + transfer.context.listener.port + transfer.target
+          }).join(","))
+        })
+        discovery.probeCandidates(contexts)
+        tryVerify(function() { return discovery.readyContexts.length === 2 }, 5000)
+        equal(attempts.join(" "), "http:" + first.listener.port + "/,https:" + second.listener.port + "/ http:"
+          + second.listener.port + "/ http:" + second.listener.port + "/health")
+        equal(discovery.readyContexts[1].scheme, "http")
+        equal(discovery.readyContexts[1].context.probeTarget, "/health")
+
+        attempts = []
+        discovery.scanning = true
+        discovery.probeCandidates(contexts)
+        tryCompare(discovery, "scanning", false)
+        equal(attempts.join(" "), "http:" + first.listener.port + "/,http:" + second.listener.port + "/health")
       }
 
       function test_deleted_directory_server_uses_footer_and_keyboard_stop() {
@@ -1006,7 +1037,9 @@ ShellRoot {
       }
 
       function test_memory_hover_highlights_segment_without_changing_selection() {
-        Servers.syncServerModel(servers, fixtures(2))
+        var rows = fixtures(2)
+        rows[1].projectRoot = "/tmp/second"
+        Servers.syncServerModel(servers, rows)
         panel.systemMemory = { totalBytes: 100 * 1048576, availableBytes: 40 * 1048576 }
         panel.revision++
         tryCompare(list, "count", 2)
@@ -1033,7 +1066,7 @@ ShellRoot {
         waitForRendering(bar)
         wait(50)
         var highlighted = grabImage(panel)
-        equal(pixel(highlighted, firstX), pixel(normal, firstX), "hovered server keeps its color")
+        equal(pixel(highlighted, firstX), pixel(normal, firstX), "hovered project keeps its color")
         check(pixel(highlighted, secondX) !== pixel(normal, secondX), "other segments dim")
         equal(panel.selectedServer().serverId, selected, "chart hover does not move server selection")
 
@@ -1807,18 +1840,19 @@ ShellRoot {
         var service = createTemporaryObject(serviceComponent, tests)
         var discovery = findChild(service, "nativeDiscovery")
         discovery.scanning = true
-        discovery.scan(true)
-        equal(discovery.manualScanQueued, true)
+        discovery.scan("manual")
+        equal(discovery.queuedScanReason, "manual")
         equal(discovery.scanQueued, true)
+        service.refresh("action")
         discovery.scan()
-        equal(discovery.manualScanQueued, true, "background requests cannot clear queued manual refresh")
+        equal(discovery.queuedScanReason, "manual", "background requests cannot clear queued manual refresh")
         discovery.currentUid = 0
         discovery.scanning = false
         discovery.scan()
-        equal(discovery.bypassProbeCache, true)
-        equal(discovery.manualScanQueued, false)
-        discovery.scan(true)
-        equal(discovery.manualScanQueued, true, "manual refresh during a forced scan schedules another forced scan")
+        equal(discovery.scanReason, "manual")
+        equal(discovery.queuedScanReason, "")
+        discovery.scan("manual")
+        equal(discovery.queuedScanReason, "manual", "manual refresh during a forced scan schedules another forced scan")
       }
 
       function test_saved_service_skip_survives_replacement_and_port_reuse() {
@@ -1878,6 +1912,8 @@ ShellRoot {
 
       function test_project_stop_missing_helper_finishes_and_unlocks() {
         var service = createTemporaryObject(serviceComponent, tests)
+        var discovery = findChild(service, "nativeDiscovery")
+        discovery.scanning = true
         var rows = fixtures(2)
         rows[0].pid = 2147483647
         rows[1].pid = 2147483646
@@ -1899,6 +1935,7 @@ ShellRoot {
         check(actionSpy.signalArguments[2][2].indexOf("Could not start") !== -1)
         equal(service.projectStopQueue.length, 0)
         equal(service.actionName, "")
+        equal(discovery.queuedScanReason, "action", "a completed action requests an immediate automatic recheck")
         process.commandChanged.disconnect(missingHelper)
       }
 
@@ -2002,7 +2039,7 @@ ShellRoot {
           if (candidate.pid === server.pid) shared.push(candidate)
         }
         check(shared.length >= 2, "fixture process exposes two ports")
-        equal(Memory.memorySummary(shared).totalBytes, server.memoryBytes,
+        equal(Memory.memoryBreakdown(shared).serverBytes, server.memoryBytes,
           "shared process RAM is counted once")
         check(server.serviceKey.indexOf("native:") === 0)
         var skips = {}
@@ -2219,6 +2256,20 @@ ShellRoot {
         overlay.close()
       }
 
+      function test_memory_bar_labels_only_concurrent_worktrees() {
+        var rows = fixtures(2)
+        rows[0].gitCommonDir = rows[1].gitCommonDir = "/work/shop/.git"
+        rows[0].gitBranch = "main"
+        rows[1].gitBranch = "feature"
+        rows[1].projectRoot = "/work/second/shop"
+        Servers.syncServerModel(servers, rows)
+        panel.revision++
+        equal(panel.memoryStats.projects.map(project => project.label).join(","), "fixtures · main,shop · feature")
+        servers.remove(1)
+        panel.revision++
+        equal(panel.memoryStats.projects[0].label, "fixtures")
+      }
+
       function test_memory_summary_and_row_label() {
         Servers.syncServerModel(servers, fixtures(2))
         panel.revision++
@@ -2232,7 +2283,10 @@ ShellRoot {
         var otherSegment = findChild(panel, "otherMemorySegment")
         var freeSegment = findChild(panel, "freeMemorySegment")
         check(otherSegment.width > 0 && freeSegment.width > 0)
-        check(Math.abs(firstSegment.width + (20 / 10) * firstSegment.width
+        equal(panel.memoryStats.projects.length, 1)
+        equal(firstSegment.modelData.label, "fixtures")
+        equal(firstSegment.modelData.bytes, 30 * 1048576)
+        check(Math.abs(firstSegment.width
           + otherSegment.width + freeSegment.width - memoryBar.width) < 2,
           "memory buckets fill the system RAM bar")
         waitForRendering(memoryBar)

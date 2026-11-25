@@ -426,14 +426,14 @@ function schemeFor(command) {
   return "http"
 }
 
-function probeUrl(context, scheme) {
-  return scheme + "://" + Network.urlHost(Network.probeHost(context.listener.addresses)) + ":" + context.listener.port + "/"
+function probeUrl(probe) {
+  var listener = probe.context.listener
+  var path = probe.target === "*" ? "/" : probe.target
+  return probe.scheme + "://" + Network.urlHost(Network.probeHost(listener.addresses)) + ":" + listener.port + path
 }
 
 function browserResponse(status) {
-  // Any HTTP status proves there is an HTTP service on the port. APIs commonly
-  // return a JSON 404 or 405 at `/`, so requiring a successful HTML page hides
-  // healthy backend services.
+  // An HTTP error still identifies a web server, including one that rejects OPTIONS.
   return status >= 100 && status <= 599
 }
 
@@ -473,6 +473,7 @@ function serverFromContext(context, scheme, lanRoute, lanInterfaces) {
     projectPath: (process.project && process.project.relativePath) || "",
     gitBranch: (process.project && process.project.gitBranch) || "",
     gitCommonDir: (!process.cwdDeleted && process.project && process.project.gitCommonDir) || "",
+    probeTarget: context.probeTarget || "/",
     localUrl: scheme ? scheme + "://" + Network.urlHost(localHost) + ":" + listener.port : "",
     lanUrl: lanAvailable ? scheme + "://" + Network.urlHost(lanHost) + ":" + listener.port : "",
     lanHost: lanHost,
@@ -489,18 +490,49 @@ function serverFromContext(context, scheme, lanRoute, lanInterfaces) {
   }
 }
 
-function parseProbeOutput(raw, transferMap) {
-  var accepted = {}
-  var lines = String(raw || "").split(/\r?\n/)
-  for (var index = 0; index < lines.length; index++) {
-    var fields = lines[index].split("\t")
-    if (fields.length < 2) continue
-    var transfer = transferMap[Number(fields[0])]
-    var status = Number(fields[1])
-    if (!transfer || !browserResponse(status)) continue
-    var previous = accepted[transfer.id]
-    if (!previous || transfer.preference < previous.preference)
-      accepted[transfer.id] = { scheme: transfer.scheme, preference: transfer.preference }
+// Try the ordinary homepage first. Only look for another target when a server
+// rejects that request. A general server failure or rate limit needs no retry.
+var PROBE_TARGETS = ["/", "/health", "*"]
+
+function firstProbe(context, cached, manual) {
+  var target = (cached && cached.target) || "/"
+  return {
+    context: context,
+    scheme: (cached && cached.scheme) || schemeFor(context.process.command),
+    target: target,
+    remaining: cached && cached.exhausted && !manual ? [] : PROBE_TARGETS.filter(function(item) { return item !== target }),
+    alternateTarget: target,
+    firstResponse: ""
   }
-  return accepted
+}
+
+function probeResult(probe, status) {
+  var responded = browserResponse(status)
+  var rejected = [400, 401, 403, 404, 405, 501].indexOf(status) !== -1
+  if (responded && !rejected) return { scheme: probe.scheme, target: probe.target }
+  var firstResponse = probe.firstResponse || (responded ? probe.target : "")
+  if (firstResponse) {
+    if (!probe.remaining.length) return { scheme: probe.scheme, target: firstResponse, exhausted: true }
+    return { retry: Object.assign({}, probe, { target: probe.remaining[0],
+      remaining: probe.remaining.slice(1), firstResponse: firstResponse }) }
+  }
+  // A stale learned endpoint can go silent while the listener still serves HTTP.
+  if (probe.target !== "/") return { retry: Object.assign({}, probe, {
+    target: "/", remaining: probe.remaining.filter(function(item) { return item !== "/" }) }) }
+  if (probe.alternateTarget) {
+    var scheme = probe.scheme === "http" ? "https" : "http"
+    var alternate = firstProbe(probe.context, { target: probe.alternateTarget, scheme: scheme })
+    alternate.alternateTarget = ""
+    return { retry: alternate }
+  }
+  return { scheme: "" }
+}
+
+function probeStatuses(raw) {
+  var statuses = []
+  for (var line of String(raw || "").split(/\r?\n/)) {
+    var match = line.match(/^(\d+)\t(\d{3})$/)
+    if (match) statuses[Number(match[1])] = Number(match[2])
+  }
+  return statuses
 }

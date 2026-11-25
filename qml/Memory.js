@@ -55,49 +55,39 @@ function parseMemoryHistory(value) {
   return samples.slice(-HISTORY_LIMIT).map(validMemory).filter(function(bytes) { return bytes >= 0 })
 }
 
-function memorySummary(servers) {
-  var seen = Object.create(null)
+function memoryBreakdown(servers, systemMemory) {
+  var system = normalizeSystemMemory(systemMemory)
+  var seen = new Set()
+  var projects = new Map()
   var total = 0
   var measured = 0
   var unmeasured = 0
-  for (var index = 0; index < servers.length; index++) {
-    var row = servers[index]
+  for (var row of servers) {
     var key = Sources.key(row)
-    if (seen[key]) continue
-    seen[key] = true
+    if (seen.has(key)) continue
+    seen.add(key)
     var bytes = validMemory(row.memoryBytes)
-    if (bytes < 0) unmeasured++
-    else { total += bytes; measured++ }
-  }
-  return { totalBytes: total, measured: measured, unmeasured: unmeasured }
-}
-
-function memoryBreakdown(servers, systemMemory) {
-  var system = normalizeSystemMemory(systemMemory)
-  var summary = memorySummary(servers)
-  var seen = Object.create(null)
-  var sources = []
-  for (var index = 0; index < servers.length; index++) {
-    var row = servers[index]
-    var key = Sources.key(row)
-    if (seen[key]) continue
-    seen[key] = true
-    var bytes = validMemory(row.memoryBytes)
-    if (bytes >= 0) sources.push({ key: key, name: String(row.name || "Server"),
-      port: Number(row.port || 0), bytes: bytes })
+    if (bytes < 0) {
+      unmeasured++
+      continue
+    }
+    measured++
+    total += bytes
+    var root = row.projectRoot || row.cwd || row.serverId || key
+    projects.set(root, (projects.get(root) || 0) + bytes)
   }
   var used = system.totalBytes < 0 ? -1 : system.totalBytes - system.availableBytes
-  var shownServers = used < 0 ? 0 : Math.min(summary.totalBytes, used)
-  var scale = summary.totalBytes > 0 ? shownServers / summary.totalBytes : 0
-  for (var sourceIndex = 0; sourceIndex < sources.length; sourceIndex++)
-    sources[sourceIndex].barBytes = sources[sourceIndex].bytes * scale
+  var shownServers = used < 0 ? 0 : Math.min(total, used)
+  var scale = total > 0 ? shownServers / total : 0
+  var segments = []
+  for (var [root, bytes] of projects) segments.push({ key: root, bytes: bytes, barBytes: bytes * scale })
   return {
     totalBytes: system.totalBytes,
     availableBytes: system.availableBytes,
-    serverBytes: summary.totalBytes,
+    serverBytes: total,
     otherBytes: used < 0 ? -1 : used - shownServers,
-    measured: summary.measured,
-    unmeasured: summary.unmeasured,
-    sources: sources
+    measured: measured,
+    unmeasured: unmeasured,
+    projects: segments
   }
 }

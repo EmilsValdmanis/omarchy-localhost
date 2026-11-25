@@ -146,7 +146,13 @@ Item {
     var currentRevision = revision
     var rows = []
     if (servers) for (let index = 0; index < servers.count; index++) rows.push(servers.get(index))
-    return Memory.memoryBreakdown(rows, systemMemory)
+    var stats = Memory.memoryBreakdown(rows, systemMemory)
+    var activeGroups = Servers.projectGroups(rows)
+    for (let project of stats.projects) {
+      let group = activeGroups[project.key]
+      project.label = group ? [group.name, group.branch].filter(Boolean).join(" · ") : project.key
+    }
+    return stats
   }
 
   function colorForSource(key) {
@@ -849,9 +855,9 @@ Item {
             antialiasing: true
             property var segments: {
               var stats = root.memoryStats
-              var parts = stats.sources.map(function(source) {
-                return { fraction: stats.totalBytes > 0 ? source.barBytes / stats.totalBytes : 0,
-                  color: root.colorForSource(source.key) }
+              var parts = stats.projects.map(function(project) {
+                return { fraction: stats.totalBytes > 0 ? project.barBytes / stats.totalBytes : 0,
+                  color: root.colorForSource(project.key) }
               })
               parts.push({ fraction: stats.totalBytes > 0 ? stats.otherBytes / stats.totalBytes : 0,
                 color: root.otherMemoryColor })
@@ -897,11 +903,10 @@ Item {
           Row {
             anchors.fill: parent
             Repeater {
-              model: root.memoryStats.sources
+              model: root.memoryStats.projects
               Rectangle {
-                id: sourceSegment
+                id: projectSegment
                 required property var modelData
-                required property int index
                 objectName: "memorySegment"
                 width: root.memoryStats.totalBytes > 0
                   ? memoryBar.width * modelData.barBytes / root.memoryStats.totalBytes : 0
@@ -910,8 +915,7 @@ Item {
                 HoverHandler { id: segmentHover }
                 PanelToolTip {
                   visible: segmentHover.hovered
-                  text: sourceSegment.modelData.name + " · :" + sourceSegment.modelData.port
-                    + " · " + Memory.formatMemory(sourceSegment.modelData.bytes)
+                  text: projectSegment.modelData.label + " · " + Memory.formatMemory(projectSegment.modelData.bytes)
                 }
               }
             }

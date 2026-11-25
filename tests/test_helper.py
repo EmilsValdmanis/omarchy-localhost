@@ -176,6 +176,7 @@ class ProcessActionTests(unittest.TestCase):
             prelude +
             "import sys\nfrom http.server import HTTPServer, BaseHTTPRequestHandler\n"
             "class Handler(BaseHTTPRequestHandler):\n"
+            " def do_GET(self):\n  self.send_response(204 if self.path == '/health' else 404)\n  self.end_headers()\n"
             " def do_HEAD(self):\n  self.send_response(404)\n  self.end_headers()\n"
             "server = HTTPServer(('127.0.0.1', int(sys.argv[1])), Handler)\n"
             "print('ready', flush=True)\nserver.serve_forever()\n"
@@ -433,15 +434,28 @@ class ProcessActionTests(unittest.TestCase):
         self.start_http_server()
         self.script.write_text("import time\ntime.sleep(0.3)\n" + self.script.read_text())
         with mock.patch.dict(os.environ, {"XDG_STATE_HOME": self.state_directory.name}):
-            server = helper.restart_process(self.child.pid, self.start_time, self.url)
+            server = helper.restart_process(self.child.pid, self.start_time, self.url, probe_target="/health")
         self.restarted, self.collector = server.process, server.collector
         self.assertIn(("127.0.0.1", self.port), helper.listening_endpoints(Path(f"/proc/{self.restarted.pid}")))
+        log = server.log_path.read_text()
+        self.assertIn('"GET /health HTTP/1.1" 204', log)
+        self.assertNotIn('"HEAD / HTTP/1.1"', log)
         connection = http.client.HTTPConnection("127.0.0.1", self.port, timeout=2)
         try:
             connection.request("HEAD", "/")
             self.assertEqual(connection.getresponse().status, 404)
         finally:
             connection.close()
+
+    def test_restart_recovers_when_learned_target_drops_the_connection(self):
+        self.start_http_server()
+        self.script.write_text(self.script.read_text().replace(
+            "self.send_response(204 if self.path == '/health' else 404)", "return"
+        ))
+        with mock.patch.dict(os.environ, {"XDG_STATE_HOME": self.state_directory.name}):
+            server = helper.restart_process(self.child.pid, self.start_time, self.url, probe_target="/health")
+        self.restarted, self.collector = server.process, server.collector
+        self.assertIn('"HEAD / HTTP/1.1" 404', server.log_path.read_text())
 
     def test_other_process_http_response_cannot_make_replacement_ready(self):
         self.start_http_server()

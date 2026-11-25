@@ -457,17 +457,52 @@ test("process identity participates in stable server IDs", () => {
   assert.equal(Discovery.contextId(context), "410:992:5173")
 })
 
-test("prefers the command-indicated scheme while accepting HTTPS fallback", () => {
-  const transfers = [
-    { id: "server", scheme: "http", preference: 0 },
-    { id: "server", scheme: "https", preference: 1 },
-  ]
-  assert.deepEqual(plain(Discovery.parseProbeOutput("1\t200\ttext/html\n", transfers)), {
-    server: { scheme: "https", preference: 1 },
-  })
-  assert.deepEqual(plain(Discovery.parseProbeOutput("1\t200\n0\t204\n", transfers)), {
-    server: { scheme: "http", preference: 0 },
-  })
+test("maps out-of-order curl status lines to responding transfers, including HTTP errors", () => {
+  const raw = "2\t501\n1\t000\n3\t405\n0\t204\n"
+  assert.deepEqual(plain(Discovery.probeStatuses(raw)), [204, 0, 501, 405])
+})
+
+test("probes learn a quiet target without requiring any specific route", () => {
+  const context = { process: { command: "node" } }
+  function scan(statuses, cached, manual) {
+    let probe = Discovery.firstProbe(context, cached, manual)
+    const targets = []
+    for (const status of statuses) {
+      targets.push(probe.target)
+      const result = Discovery.probeResult(probe, status)
+      if (!result.retry) return { targets, cached: result }
+      probe = result.retry
+    }
+    assert.fail("probe did not finish")
+  }
+  for (const [statuses, targets] of [
+    [[200], ["/"]], [[301], ["/"]], [[404, 204], ["/", "/health"]],
+    [[405, 405, 204], ["/", "/health", "*"]], [[429], ["/"]], [[503], ["/"]],
+  ]) {
+    const first = scan(statuses)
+    assert.deepEqual(first.targets, targets)
+    assert.deepEqual(scan([200], first.cached).targets, [targets.at(-1)])
+  }
+  const rejected = scan([404, 404, 400])
+  assert.deepEqual(rejected.targets, ["/", "/health", "*"])
+  assert.equal(rejected.cached.scheme, "http")
+  assert.deepEqual(scan([404], rejected.cached).targets, ["/"])
+  assert.deepEqual(scan([404, 200], rejected.cached, true).targets, ["/", "/health"])
+  assert.deepEqual(scan([404, 0, 0]).cached.target, "/")
+  for (const target of ["/health", "*"]) {
+    const cached = { scheme: "https", target }
+    const recovered = scan([0, 200], cached)
+    assert.deepEqual(recovered.targets, [target, "/"])
+    assert.equal(recovered.cached.scheme, "https")
+    const switched = scan([0, 0, 204], cached)
+    assert.deepEqual(switched.targets, [target, "/", target])
+    assert.deepEqual(plain(switched.cached), { scheme: "http", target })
+    const rootOnly = scan([0, 0, 0, 200], cached)
+    assert.deepEqual(rootOnly.targets, [target, "/", target, "/"])
+    assert.deepEqual(plain(rootOnly.cached), { scheme: "http", target: "/" })
+    assert.equal(scan([0, 0, 0, 0], cached).cached.scheme, "")
+  }
+  assert.equal(scan([0, 0]).cached.scheme, "")
 })
 
 test("successful and failed probe caches both expire", () => {
